@@ -181,14 +181,14 @@ def send_plain(box, key, to_addr, subject, text):
     try:
         if box.smtp_port == 465:
             with smtplib.SMTP_SSL(box.smtp_host, 465, timeout=20, context=ssl.create_default_context()) as smtp:
-                smtp.login(box.username, password)
+                smtp.login(getattr(box, "smtp_username", "") or box.username, password)
                 smtp.send_message(msg)
         else:
             with smtplib.SMTP(box.smtp_host, 587, timeout=20) as smtp:
                 smtp.ehlo()
                 smtp.starttls(context=ssl.create_default_context())
                 smtp.ehlo()
-                smtp.login(box.username, password)
+                smtp.login(getattr(box, "smtp_username", "") or box.username, password)
                 smtp.send_message(msg)
     except Exception as ex:
         raise MailError("SMTP odeslání není potvrzené; ověřte schránku před opakováním") from ex

@@ -446,7 +446,7 @@ def create_app(test_config=None):
         if smtp_port not in (465, 587):
             abort(400, description="SMTP pouze 465 nebo 587")
         box = Mailbox(organization_id=org_id, owner_id=g.user.id, label=required("label", 120),
-                      address=required("address"), username=required("username"), imap_host=imap_host,
+                      address=required("address"), username=required("username"), smtp_username=field("smtp_username") or required("username"), imap_host=imap_host,
                       imap_port=993, smtp_host=smtp_host, smtp_port=smtp_port, credential=encrypted)
         g.db.add(box)
         audit("mailbox.create", box.address, org_id)

@@ -129,7 +129,9 @@ class Mailbox(Base):
     owner_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     label: Mapped[str] = mapped_column(String(120), nullable=False)
     address: Mapped[str] = mapped_column(String(190), nullable=False)
-    username: Mapped[str] = mapped_column(String(190), nullable=False)
+    username: Mapped[str] = mapped_column(String(190), nullable=False)  # IMAP login
+    smtp_username: Mapped[str] = mapped_column(String(190), default="", nullable=False)
+    signature_html: Mapped[str] = mapped_column(Text, default="", nullable=False)
     imap_host: Mapped[str] = mapped_column(String(190), nullable=False)
     imap_port: Mapped[int] = mapped_column(Integer, default=993)
     smtp_host: Mapped[str] = mapped_column(String(190), nullable=False)
