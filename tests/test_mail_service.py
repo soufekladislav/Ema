@@ -27,3 +27,28 @@ def test_header_injection_blocked(monkeypatch):
                           username="u", credential="x", address="info@example.cz")
     with pytest.raises(MailError):
         send_plain(box, "key", "to@example.cz", "A\r\nBcc:secret@example.cz", "Hi")
+def test_smtp_uses_separate_username(monkeypatch):
+    from types import SimpleNamespace
+    from cryptography.fernet import Fernet
+    from ema.mail_service import encrypt_password
+    used = {}
+    class FakeSMTP:
+        def __init__(self, *args, **kwargs):
+            pass
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+        def login(self, username, password):
+            used["username"] = username
+            used["password"] = password
+        def send_message(self, message):
+            used["subject"] = message["Subject"]
+    monkeypatch.setattr("ema.mail_service.validate_mail_host", lambda host: host)
+    monkeypatch.setattr("ema.mail_service.smtplib.SMTP_SSL", FakeSMTP)
+    key = Fernet.generate_key().decode("ascii")
+    box = SimpleNamespace(smtp_host="smtp.example.cz", smtp_port=465,
+                          username="imap@example.cz", smtp_username="smtp-other@example.cz",
+                          credential=encrypt_password("test-password", key), address="info@example.cz")
+    send_plain(box, key, "client@example.cz", "Test", "Text")
+    assert used == {"username": "smtp-other@example.cz", "password": "test-password", "subject": "Test"}
