@@ -8,7 +8,7 @@
 > **Cílová technologie:** Python + Flask + MariaDB, provoz typu Passenger/cPanel  
 > **AI:** Fresh AI Engine; **identita a tajné přístupy:** Fresh Key podle možností stávajícího rozhraní  
 > **Vizuální vzor:** Boban / Web Booster  
-> **Zamýšlená doména podle aktuálního zadání:** `hub.freshrackers.cz` — **ověřit překlep**: ve staré Emě je používaná `hub.freshcrackers.cz` (viz § 0.3). Doménu před DNS, OAuth a nasazením výslovně potvrdit.
+> **Potvrzená cílová doména (D-01, 16. 11. 2026):** `hub.freshcrackers.cz`. Před nasazením Python aplikace zachovat zálohu původní PHP Emy a připravit bezpečné přepnutí s možností návratu.
 
 **Účel:** Jeden dokument, který může být uložen přímo do GitHub repozitáře (např. `docs/EMA_PROJECT_MAP.md`), slouží jako společný základ pro produkt, obchod, UX/UI, vývoj, testování a pozdější správu projektem Karel. Obsahuje **požadavky a návrhy**, nikoli tvrzení, že byly funkce už naprogramované.
 
@@ -51,7 +51,7 @@
 3. Starý IMAP kód používá `/novalidate-cert`; v nové aplikaci **zakázat vypínání ověřování TLS certifikátů**.
 4. Historický ZIP Emy obsahuje také `config/config.php` a velký `public/error_log`, i když některé readme popisují nasazovací balík bez těchto souborů. **Nesmí se převzít ani commitnout do GitHubu.** Nezveřejňovat staré klíče či logy; před migrací provést inventuru a případnou rotaci přístupů.
 5. Boban používá Poppins a základní tokeny `--green: #9EC415`, `--pink: #E40058`, `--bg: #f5f6f3`, `--ink: #121512`, `--card: #fff`. Má levý sidebar, chat, archiv a pravé chytré karty — tyto prvky jsou pro Emu referenční.
-6. Dosavadní historická URL původního Fresh HUB je `hub.freshcrackers.cz`; aktuální zadání uvádí `hub.freshrackers.cz`. **Otevřené rozhodnutí D-01:** potvrdit správnou cílovou doménu, ideálně zachovat jednotnou značku `freshcrackers.cz`.
+6. **D-01 potvrzeno:** nová EMA HUB poběží na původní doméně `hub.freshcrackers.cz`. Původní PHP aplikace se nesmí bez zálohy přepsat; migrace vyžaduje kontrolu směrování domény a rollback plán.
 
 ### 0.4 Pevně stanovené produktové principy
 
@@ -1240,7 +1240,7 @@ Níže uvedené zaškrtávací úkoly lze z master dokumentu rozdělit do GitHub
 
 | ID | Rozhodnutí | Doporučený výchozí směr |
 |---|---|---|
-| **D-01** | `hub.freshrackers.cz` vs `hub.freshcrackers.cz` | Ověřit a sjednotit na správné značkové doméně; nepřepínat bez rozhodnutí |
+| **D-01 — potvrzeno 16. 11. 2026** | `hub.freshcrackers.cz` | Zachovat původní doménu; před migrací zálohovat PHP aplikaci, zajistit nové izolované Python prostředí a návratový postup |
 | **D-02** | Režim přihlášení | Fresh Key SSO, je-li funkční a bezpečně dostupný; do té doby lokální autentizace s jasnou migrační cestou |
 | **D-03** | Zdroj tajných přístupů | Fresh Key vault, pokud nabízí správné scopes a lifecycle; jinak bezpečné lokální šifrované úložiště bez logování |
 | **D-04** | Výchozí retenční doby | Krátká TTL cache, zachování pouze potřebných evidencí; konkrétní doby schválit podle právního účelu |
