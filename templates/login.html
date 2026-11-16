@@ -1,0 +1,17 @@
+{% extends 'base.html' %}
+{% block title %}Přihlášení • Ema{% endblock %}
+{% block login %}
+<div class="auth-page"><div class="auth-card">
+  <div class="auth-mark">E</div>
+  <h1>Vítejte v Emě</h1><p>Klienti, projekty, komunikace a obchod na jednom místě.</p>
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for category, msg in messages %}<div class="flash {{ category }}">{{ msg }}</div>{% endfor %}
+  {% endwith %}
+  <form method="post" action="{{ url_for('login') }}" class="formstack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>E-mail<input name="email" type="email" required autofocus autocomplete="username" maxlength="190"></label>
+    <label>Heslo<input name="password" type="password" required autocomplete="current-password"></label>
+    <button class="btn primary" type="submit">Přihlásit</button>
+  </form><p class="small muted">Účet vytváří správce platformy. Data klientů nejsou veřejná.</p>
+</div></div>
+{% endblock %}
