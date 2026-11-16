@@ -4,8 +4,8 @@
 
 ## 1. Na hostingu
 
-1. Ověřit a potvrdit cílovou doménu: zadání obsahuje `hub.freshrackers.cz`, starší Ema používá `hub.freshcrackers.cz`. **D-01 vyžaduje rozhodnutí, žádnou doménu automaticky nepřepínáme.**
-2. V cPanel **Setup Python App** založit samostatnou Python aplikaci (doporučení Python 3.11+), doménu nastavit na potvrzenou hodnotu, entrypoint `passenger_wsgi.py` a callable `application`. Nepřepisovat původní PHP adresář ani DB.
+1. **Doména D-01 potvrzena: `hub.freshcrackers.cz`.** Novou Python aplikaci připravit v samostatném adresáři a DB. Protože na této doméně byla původní PHP Ema, před změnou směrování zachovat její úplnou zálohu a připravit rollback; nic nepřepisovat automaticky.
+2. V cPanel **Setup Python App** založit samostatnou Python aplikaci (doporučení Python 3.11+), doménu nastavit na `hub.freshcrackers.cz`, entrypoint `passenger_wsgi.py` a callable `application`. Nepřepisovat původní PHP adresář ani DB.
 3. Vytvořit samostatnou MariaDB s uživatelem pouze pro danou databázi, vynutit `utf8mb4`. Před importem živých dat zálohovat DB.
 4. Přenést soubory repozitáře, v izolovaném virtuálním prostředí spustit `pip install -r requirements.txt`.
 5. Zkopírovat `.env.example` na `.env` **mimo Git** (práva 600). Vyplnit `SECRET_KEY`, `DATABASE_URL`, `MAIL_ENCRYPTION_KEY` a `EMA_HTTPS=1`. Nesdílet hesla v chatu ani issue. Heslo v `DATABASE_URL` URL-enkódovat.
@@ -15,7 +15,7 @@
    flask --app 'ema.web:create_app' bootstrap-admin
    ```
    Následně bootstrap heslo z env odstranit. **Nikdy nepoužívat výchozí produkční účet.**
-7. Restartovat Python aplikaci přes cPanel; otevřít `https://<potvrzená-doména>/health` a pak `/login`. Přihlásit se superadminem, založit firmu, klienta, projekt a firemní poznámku.
+7. Restartovat Python aplikaci přes cPanel; otevřít `https://hub.freshcrackers.cz/health` a pak `/login`. Přihlásit se superadminem, založit firmu, klienta, projekt a firemní poznámku.
 8. Nastavit cron ve frekvenci odpovídající zátěži, např. 5–15 minut (v cPanel ověřit přesnou cestu do venv):
    ```bash
    cd /home/ACCOUNT/ema && /home/ACCOUNT/virtualenv/ema/3.11/bin/flask --app 'ema.web:create_app' sync-mailboxes --limit 20
