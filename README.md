@@ -2,7 +2,15 @@
 
 AI obchodní a projektová asistentka Fresh Crackers: **chat-first pracovní prostor pro firmy, klienty, e-maily, obchodní příležitosti, nabídky a projekty.**
 
-**Stav:** zpracované zadání a backlog; nová Python aplikace zatím není tímto repozitářem potvrzena jako implementovaná či nasazená.
+**Stav:** první implementace **EMA HUB V0.1** je uložena v `main` (sloučený PR #62); GitHub Actions V0.1 testy prošly. **Na serveru zatím nebyla nasazena ani provozně otestována.**
+
+## Zdrojový kód a instalace
+
+- [Aplikace V0.1](ema/)
+- [Funkce a lokální spuštění](README_V0.1.md)
+- [Nasazení na cPanel/Passenger](docs/DEPLOY_V0.1.md)
+- [PR #62 – sloučená V0.1](../../pull/62)
+- **Potvrzená doména:** `hub.freshcrackers.cz`
 
 ## Dokumentace a řízení
 
@@ -22,6 +30,6 @@ AI obchodní a projektová asistentka Fresh Crackers: **chat-first pracovní pro
 
 ## Bezpečnostní upozornění
 
-Nikdy neukládat do GitHubu historické produkční konfigurace, hesla, soubory .env, error logy ani klientskou poštu. Cílová doména je otevřeným rozhodnutím D-01 v projektové mapě.
+Nikdy neukládat do GitHubu historické produkční konfigurace, hesla, soubory .env, error logy ani klientskou poštu. Doména D-01 je potvrzena: `hub.freshcrackers.cz`. Před nasazením zajistit zálohu původní PHP Emy na stejné doméně.
 
 **GitHub Project #10:** Issues jsou založené a propojené v epikách. Přidání existujících Issues do samotného project boardu vyžaduje hromadné přidání položek v GitHubu (postup v realizačním backlogu).
