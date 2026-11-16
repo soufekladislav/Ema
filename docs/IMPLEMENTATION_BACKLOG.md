@@ -21,81 +21,81 @@ Priority: **P0** = funkční bezpečné jádro, **P1** = důležité rozšířen
 
 ### [E-01 — Foundation, role, tenant ACL a Boban UX](https://github.com/soufekladislav/Ema/issues/2) — 9 úkolů
 
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — Potvrdit doménu, hosting Python/Passenger a provozní limity (F0, P0)
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — Zabezpečit repozitář a auditovat historické balíky (F0, P0)
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — Založit modulární Flask app factory, migrace a Passenger vstup (F0, P0)
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — Model users/organizations a firemní členství (F0, P0)
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — Model členství pouze v projektu a pozvánky (F0, P0)
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — Centrální autorizační vrstva org/project/mailbox ACL (F0, P0)
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — Oddělit firemní a projektové chaty a AI kontext (F0–F2, P0)
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — Základní UX/UI podle Bobana — sidebar, chat, pravé karty (F0, P0)
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — Testovací fixtures, verze release a základní CI pravidla (F0, P0)
+- [ ] [#11](https://github.com/soufekladislav/Ema/issues/11) — Potvrdit doménu, hosting Python/Passenger a provozní limity (F0, P0)
+- [ ] [#12](https://github.com/soufekladislav/Ema/issues/12) — Zabezpečit repozitář a auditovat historické balíky (F0, P0)
+- [ ] [#13](https://github.com/soufekladislav/Ema/issues/13) — Založit modulární Flask app factory, migrace a Passenger vstup (F0, P0)
+- [ ] [#14](https://github.com/soufekladislav/Ema/issues/14) — Model users/organizations a firemní členství (F0, P0)
+- [ ] [#15](https://github.com/soufekladislav/Ema/issues/15) — Model členství pouze v projektu a pozvánky (F0, P0)
+- [ ] [#16](https://github.com/soufekladislav/Ema/issues/16) — Centrální autorizační vrstva org/project/mailbox ACL (F0, P0)
+- [ ] [#17](https://github.com/soufekladislav/Ema/issues/17) — Oddělit firemní a projektové chaty a AI kontext (F0–F2, P0)
+- [ ] [#18](https://github.com/soufekladislav/Ema/issues/18) — Základní UX/UI podle Bobana — sidebar, chat, pravé karty (F0, P0)
+- [ ] [#19](https://github.com/soufekladislav/Ema/issues/19) — Testovací fixtures, verze release a základní CI pravidla (F0, P0)
 
 ### [E-09 — Superadmin, metriky a správa účtů](https://github.com/soufekladislav/Ema/issues/3) — 8 úkolů
 
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — Platform_superadmin: oddělená role a přístup bez obsahu (F0, P0)
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — Konzole: správa firem a uživatelských účtů (F0, P0)
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — Konzole: role, firemní a projektové členství (F0–F1, P0)
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — Konzole: health, verze, worker a stav poštovních konektorů (F0, P0)
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — Metriky velikosti MariaDB a úložiště včetně trendů (F5, P1)
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — Kvóty, alerty, retence a bezpečné pozastavení firmy (F5, P1)
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — AI náklady a kredity po firmách z Fresh AI Engine (F5, P1)
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — Auditovaný a dočasný support access; export a řízená likvidace (F5, P1)
+- [ ] [#20](https://github.com/soufekladislav/Ema/issues/20) — Platform_superadmin: oddělená role a přístup bez obsahu (F0, P0)
+- [ ] [#21](https://github.com/soufekladislav/Ema/issues/21) — Konzole: správa firem a uživatelských účtů (F0, P0)
+- [ ] [#22](https://github.com/soufekladislav/Ema/issues/22) — Konzole: role, firemní a projektové členství (F0–F1, P0)
+- [ ] [#23](https://github.com/soufekladislav/Ema/issues/23) — Konzole: health, verze, worker a stav poštovních konektorů (F0, P0)
+- [ ] [#24](https://github.com/soufekladislav/Ema/issues/24) — Metriky velikosti MariaDB a úložiště včetně trendů (F5, P1)
+- [ ] [#25](https://github.com/soufekladislav/Ema/issues/25) — Kvóty, alerty, retence a bezpečné pozastavení firmy (F5, P1)
+- [ ] [#26](https://github.com/soufekladislav/Ema/issues/26) — AI náklady a kredity po firmách z Fresh AI Engine (F5, P1)
+- [ ] [#27](https://github.com/soufekladislav/Ema/issues/27) — Auditovaný a dočasný support access; export a řízená likvidace (F5, P1)
 
 ### [E-02 — CRM a import firem](https://github.com/soufekladislav/Ema/issues/4) — 4 úkolů
 
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — CRM: firmy, osoby, vztahy a kontaktní historie (F1, P0)
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — Import firem z CSV/XLSX s dry-run a reportem (F1, P0)
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — Deduplikace firem a kontaktů se schváleným sloučením (F1, P0)
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — Klientská časová osa, právní titul a blokace oslovení (F1, P0)
+- [ ] [#28](https://github.com/soufekladislav/Ema/issues/28) — CRM: firmy, osoby, vztahy a kontaktní historie (F1, P0)
+- [ ] [#29](https://github.com/soufekladislav/Ema/issues/29) — Import firem z CSV/XLSX s dry-run a reportem (F1, P0)
+- [ ] [#30](https://github.com/soufekladislav/Ema/issues/30) — Deduplikace firem a kontaktů se schváleným sloučením (F1, P0)
+- [ ] [#31](https://github.com/soufekladislav/Ema/issues/31) — Klientská časová osa, právní titul a blokace oslovení (F1, P0)
 
 ### [E-03 — Mail IMAP/SMTP](https://github.com/soufekladislav/Ema/issues/5) — 6 úkolů
 
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — Více IMAP/SMTP schránek, bezpečné přihlašování a ACL (F1, P0)
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — Metadata-first IMAP sync s kurzory a UIDVALIDITY (F1, P0)
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — Poštovní UI: inbox, složky, vlákna a detail on-demand (F1, P0)
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — SMTP koncepty, schválené odesílání a serverové přesuny (F1, P0)
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — Přílohy on-demand a řízené projektové připnutí (F1, P0)
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — Přiřazení vlákna klientovi a projektu; diagnostika konektoru (F1, P0)
+- [ ] [#32](https://github.com/soufekladislav/Ema/issues/32) — Více IMAP/SMTP schránek, bezpečné přihlašování a ACL (F1, P0)
+- [ ] [#33](https://github.com/soufekladislav/Ema/issues/33) — Metadata-first IMAP sync s kurzory a UIDVALIDITY (F1, P0)
+- [ ] [#34](https://github.com/soufekladislav/Ema/issues/34) — Poštovní UI: inbox, složky, vlákna a detail on-demand (F1, P0)
+- [ ] [#35](https://github.com/soufekladislav/Ema/issues/35) — SMTP koncepty, schválené odesílání a serverové přesuny (F1, P0)
+- [ ] [#36](https://github.com/soufekladislav/Ema/issues/36) — Přílohy on-demand a řízené projektové připnutí (F1, P0)
+- [ ] [#37](https://github.com/soufekladislav/Ema/issues/37) — Přiřazení vlákna klientovi a projektu; diagnostika konektoru (F1, P0)
 
 ### [E-04 — AI Chat / Copilot](https://github.com/soufekladislav/Ema/issues/6) — 6 úkolů
 
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — Integrace Fresh AI Engine: schéma, ceny, limity a chyby (F2, P0)
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — Chat-first s historií a chytrými kontextovými kartami (F2, P0)
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — AI třídění e-mailů a vytěžení závazků se zdrojem (F2, P0)
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — Návrhy a editace odpovědí s auditovatelným kontextem (F2, P0)
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — Typované AI akce: návrh → schválení → výkon → ověření (F2, P0)
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — Bezpečnost proti prompt injection a exfiltraci přes AI (F2, P0)
+- [ ] [#38](https://github.com/soufekladislav/Ema/issues/38) — Integrace Fresh AI Engine: schéma, ceny, limity a chyby (F2, P0)
+- [ ] [#39](https://github.com/soufekladislav/Ema/issues/39) — Chat-first s historií a chytrými kontextovými kartami (F2, P0)
+- [ ] [#40](https://github.com/soufekladislav/Ema/issues/40) — AI třídění e-mailů a vytěžení závazků se zdrojem (F2, P0)
+- [ ] [#41](https://github.com/soufekladislav/Ema/issues/41) — Návrhy a editace odpovědí s auditovatelným kontextem (F2, P0)
+- [ ] [#42](https://github.com/soufekladislav/Ema/issues/42) — Typované AI akce: návrh → schválení → výkon → ověření (F2, P0)
+- [ ] [#43](https://github.com/soufekladislav/Ema/issues/43) — Bezpečnost proti prompt injection a exfiltraci přes AI (F2, P0)
 
 ### [E-05 — Pipeline / Nabídky](https://github.com/soufekladislav/Ema/issues/7) — 4 úkolů
 
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — Obchodní pipeline a životní cyklus příležitosti (F3, P0)
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — Cenové nabídky: položky, kalkulace a neměnné verze (F3, P0)
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — Follow-up, připomínky a důvody prohry (F3, P0)
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — Obchodní KPI: nabídky, konverze, aktivita a marže (F3–F5, P1)
+- [ ] [#44](https://github.com/soufekladislav/Ema/issues/44) — Obchodní pipeline a životní cyklus příležitosti (F3, P0)
+- [ ] [#45](https://github.com/soufekladislav/Ema/issues/45) — Cenové nabídky: položky, kalkulace a neměnné verze (F3, P0)
+- [ ] [#46](https://github.com/soufekladislav/Ema/issues/46) — Follow-up, připomínky a důvody prohry (F3, P0)
+- [ ] [#47](https://github.com/soufekladislav/Ema/issues/47) — Obchodní KPI: nabídky, konverze, aktivita a marže (F3–F5, P1)
 
 ### [E-06 — Obchodní projekty / Plánovač](https://github.com/soufekladislav/Ema/issues/8) — 3 úkolů
 
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — Obchodní projekty, milníky, dohody a změny rozsahu (F3, P0)
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — Úkoly, závazky, kalendář a firemní plánovač (F3, P0)
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — Projektové dokumenty pouze při vědomém připnutí (F3, P0)
+- [ ] [#48](https://github.com/soufekladislav/Ema/issues/48) — Obchodní projekty, milníky, dohody a změny rozsahu (F3, P0)
+- [ ] [#49](https://github.com/soufekladislav/Ema/issues/49) — Úkoly, závazky, kalendář a firemní plánovač (F3, P0)
+- [ ] [#50](https://github.com/soufekladislav/Ema/issues/50) — Projektové dokumenty pouze při vědomém připnutí (F3, P0)
 
 ### [E-07 — Integrace Fresh ekosystému](https://github.com/soufekladislav/Ema/issues/9) — 5 úkolů
 
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — Fresh Key: ověřit identity, vault a scopes; integrační kontrakt (F0–F4, P0)
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — Karel: předání zakázky a read-only stav realizace (F4, P0)
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — Eda: fakturační podklady a ověřený platební stav (F4, P0)
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — Boban: příjem leadů s původem a deduplikací (F4, P0)
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — Další platformy Linda, Viki a WooCommerce dle ověřených API (F5, P2)
+- [ ] [#51](https://github.com/soufekladislav/Ema/issues/51) — Fresh Key: ověřit identity, vault a scopes; integrační kontrakt (F0–F4, P0)
+- [ ] [#52](https://github.com/soufekladislav/Ema/issues/52) — Karel: předání zakázky a read-only stav realizace (F4, P0)
+- [ ] [#53](https://github.com/soufekladislav/Ema/issues/53) — Eda: fakturační podklady a ověřený platební stav (F4, P0)
+- [ ] [#54](https://github.com/soufekladislav/Ema/issues/54) — Boban: příjem leadů s původem a deduplikací (F4, P0)
+- [ ] [#55](https://github.com/soufekladislav/Ema/issues/55) — Další platformy Linda, Viki a WooCommerce dle ověřených API (F5, P2)
 
 ### [E-08 — Provoz / Security / QA](https://github.com/soufekladislav/Ema/issues/10) — 6 úkolů
 
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — DB job queue a krátký cron worker pro Passenger (F0–F1, P0)
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — Audit událostí, korelace jobů a obnova po chybě (F0–F5, P0)
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — Bezpečnostní testy tenantů, rolí, HTML/MIME a API (F0–F5, P0)
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — Zálohování a test obnovy DB a připnutých dokumentů (F1–F5, P0)
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — Výkonový pilot a release gate pro interní provoz/SaaS (F5, P1)
-- [ ] [#undefined](https://github.com/soufekladislav/Ema/issues/undefined) — Automatizační politiky a kalendářové konektory (F5, P1)
+- [ ] [#56](https://github.com/soufekladislav/Ema/issues/56) — DB job queue a krátký cron worker pro Passenger (F0–F1, P0)
+- [ ] [#57](https://github.com/soufekladislav/Ema/issues/57) — Audit událostí, korelace jobů a obnova po chybě (F0–F5, P0)
+- [ ] [#58](https://github.com/soufekladislav/Ema/issues/58) — Bezpečnostní testy tenantů, rolí, HTML/MIME a API (F0–F5, P0)
+- [ ] [#59](https://github.com/soufekladislav/Ema/issues/59) — Zálohování a test obnovy DB a připnutých dokumentů (F1–F5, P0)
+- [ ] [#60](https://github.com/soufekladislav/Ema/issues/60) — Výkonový pilot a release gate pro interní provoz/SaaS (F5, P1)
+- [ ] [#61](https://github.com/soufekladislav/Ema/issues/61) — Automatizační politiky a kalendářové konektory (F5, P1)
 
 ## Pravidla dokončování
 
