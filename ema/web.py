@@ -193,6 +193,7 @@ def create_app(test_config=None):
             user = g.db.scalar(select(User).where(User.email == email))
             if user and user.active and check_password_hash(user.password_hash, request.form.get("password") or ""):
                 session.clear()
+                session["csrf"] = secrets.token_urlsafe(24)
                 session["uid"] = user.id
                 session.permanent = True
                 return redirect(url_for("home"))
