@@ -9,7 +9,7 @@ AI obchodní a projektová asistentka Fresh Crackers: **chat-first pracovní pro
 - [Aplikace V0.1](ema/)
 - [Funkce a lokální spuštění](README_V0.1.md)
 - [Nasazení na cPanel/Passenger](docs/DEPLOY_V0.1.md)
-- [PR #62 – sloučená V0.1](../../pull/62)
+- [PR #62 – sloučená V0.1](https://github.com/soufekladislav/Ema/pull/62)
 - **Potvrzená doména:** `hub.freshcrackers.cz`
 
 ## Dokumentace a řízení
