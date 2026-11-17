@@ -9,6 +9,7 @@ from email.parser import BytesParser
 from urllib.parse import urlsplit
 
 import bleach
+from bleach.css_sanitizer import CSSSanitizer
 
 
 MAX_PREVIEW_BYTES = 196608
@@ -20,6 +21,16 @@ ALLOWED_TAGS = {
     "tr", "u", "ul",
 }
 IMAGE_MIME = {"image/png", "image/jpeg", "image/gif", "image/webp"}
+EMAIL_CSS = CSSSanitizer(allowed_css_properties={
+    "color", "background", "background-color", "font", "font-size", "font-weight", "font-family",
+    "font-style", "text-align", "text-decoration", "line-height", "letter-spacing",
+    "margin", "margin-top", "margin-bottom", "margin-left", "margin-right", "padding",
+    "padding-top", "padding-bottom", "padding-left", "padding-right", "border",
+    "border-color", "border-style", "border-width", "border-collapse", "border-radius",
+    "width", "max-width", "min-width", "height", "max-height", "vertical-align",
+    "display", "white-space", "word-break", "overflow-wrap",
+})
+
 
 
 @dataclass
@@ -82,9 +93,15 @@ def make_preview(data, *, show_images=False, truncated=False):
                         base64.b64encode(payload).decode("ascii")
                     )
 
+    # Remove executable/style blocks WITH their content before bleach. Otherwise
+    # email newsletter CSS is displayed as raw text at the top of the preview.
+    rich = re.sub(r"<(script|style|head|iframe|object|svg)\\b[^>]*>[\\s\\S]*?</\\1\\s*>",
+                  "", rich, flags=re.I)
     has_remote_images = bool(re.search(r"<img\b[^>]*\bsrc\s*=\s*['\"]?https?://", rich, re.I))
     if rich:
         def allowed(tag, name, value):
+            if name == "style":
+                return len(value) <= 10000
             if tag == "a" and name in ("href", "title"):
                 if name == "title":
                     return len(value) <= 300
@@ -114,6 +131,7 @@ def make_preview(data, *, show_images=False, truncated=False):
         sanitized = bleach.clean(
             rich, tags=ALLOWED_TAGS, attributes=allowed,
             protocols={"http", "https", "mailto", "data"}, strip=True,
+            css_sanitizer=EMAIL_CSS,
         )
         if not show_images:
             sanitized = re.sub(r"<img\b[^>]*>", '<span>[Obrázek skryt]</span>', sanitized, flags=re.I)
