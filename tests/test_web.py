@@ -107,6 +107,8 @@ def test_project_guest_can_navigate_own_project_not_company_or_other_projects(cl
         db.flush()
         secret = Project(organization_id=other.id, name="Secret private project")
         db.add(secret)
+        db.flush()
+        secret_id = secret.id
         db.commit()
     assert login(client, "bob@example.cz", "b-password-12345").status_code == 302
     data = client.get("/").data
@@ -119,4 +121,4 @@ def test_project_guest_can_navigate_own_project_not_company_or_other_projects(cl
         "csrf_token": csrf(client), "organization_id": str(org_id), "name": "Not authorized"
     })
     assert response.status_code == 403
-    assert client.get(f"/project/{secret.id}").status_code == 403
+    assert client.get(f"/project/{secret_id}").status_code == 403
