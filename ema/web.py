@@ -946,11 +946,11 @@ def create_app(test_config=None):
         try:
             sent_bytes = send_composed(box, app.config["MAIL_ENCRYPTION_KEY"], to, cc, bcc,
                                        subject, body, reply_message_id=message_id, attachments=attached)
-        except MailError:
+        except MailError as ex:
             record.state = "uncertain"
             audit("mail.compose.uncertain", nonce, box.organization_id)
             g.db.commit()
-            flash("SMTP výsledek není potvrzený. Ověř doručení u adresáta; neodesílej automaticky znovu.", "error")
+            flash(str(ex) + " Ověř doručení u adresáta; neodesílej automaticky znovu.", "error")
             return redirect(url_for("mail_hub", box=box.id))
         # SMTP succeeded. Commit that fact BEFORE attempting IMAP APPEND.
         record.state, record.sent_at = "sent", now()
