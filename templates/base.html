@@ -13,14 +13,14 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="EMA HUB">
-  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='app-v11.css') }}">
   {# New path deliberately bypasses old PWA worker cache-first CSS. #}
   <link rel="stylesheet" href="{{ url_for('static', filename='mobile-shell-v2.css') }}">
-  <script src="{{ url_for('static', filename='mail-v1.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='mail-v11.js') }}" defer></script>
   <script src="{{ url_for('static', filename='mobile-shell-v2.js') }}" defer></script>
   <script src="{{ url_for('static', filename='pwa.js') }}" defer></script>
   <script src="{{ url_for('static', filename='mail-ui.js') }}" defer></script>
-  <script src="{{ url_for('static', filename='mail-pager.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='mail-pager-v11.js') }}" defer></script>
 </head>
 <body class="ema-screen-{{ section|default('other') }}">
 {% if me is defined and me %}
