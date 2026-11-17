@@ -213,6 +213,10 @@ def preview_message(box, row, key, *, show_images=False, folder_name="INBOX"):
 
 def _parse_addresses(value, *, required=False):
     """Validate recipients; refuse header injection and large fanout."""
+    if not value or not value.strip():
+        if required:
+            raise MailError("Zadejte příjemce")
+        return []
     if any(c in value for c in "\r\n") or len(value) > 1500:
         raise MailError("Neplatný seznam příjemců")
     result = []
