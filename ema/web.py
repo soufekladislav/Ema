@@ -181,7 +181,7 @@ def visible_tasks(db, orgs, projects):
     if project_ids:
         clauses.append(Task.project_id.in_(project_ids))
     return db.scalars(select(Task).where(or_(*clauses))
-        .order_by(Task.done, Task.due_at.asc().nulls_last(), Task.id.desc()).limit(200)).all()
+        .order_by(Task.done, Task.due_at.is_(None), Task.due_at.asc(), Task.id.desc()).limit(200)).all()
 
 
 def visible_mailboxes(db, uid, orgs):
@@ -457,7 +457,7 @@ def create_app(test_config=None):
         recent = g.db.scalars(select(AssistantTurn).where(
             AssistantTurn.user_id == g.user.id, scope
         ).order_by(AssistantTurn.id.desc()).limit(8)).all()
-        visible = base_context()["accessible_projects"]
+        visible = base_context()["scoped_projects"]
         tasks_for_context = g.db.scalars(select(Task).where(
             Task.project_id == pid, Task.organization_id == selected.organization_id
         ).order_by(Task.id.desc()).limit(30)).all() if selected else []
