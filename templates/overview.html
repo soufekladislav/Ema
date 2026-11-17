@@ -210,9 +210,9 @@
         <input name="to" id="ema-compose-to" type="text" maxlength="1500" required value="{{ recipient }}" placeholder="Příjemce@example.cz" list="ema-contact-datalist" spellcheck="false">
       </label>
       <datalist id="ema-contact-datalist"></datalist>
-      <details class="ema-compose-extra"><summary>Kopie / Skrytá kopie</summary>
-        <label class="ema-compose-line">Kopie<input name="cc" type="text" maxlength="1500" list="ema-contact-datalist"></label>
-        <label class="ema-compose-line">Skrytá kopie<input name="bcc" type="text" maxlength="1500" list="ema-contact-datalist"></label>
+      <details class="ema-compose-extra" {{ 'open' if cc_prefill|default('') or bcc_prefill|default('') else '' }}><summary>Kopie / Skrytá kopie</summary>
+        <label class="ema-compose-line">Kopie<input name="cc" type="text" maxlength="1500" value="{{ cc_prefill|default('') }}" list="ema-contact-datalist"></label>
+        <label class="ema-compose-line">Skrytá kopie<input name="bcc" type="text" maxlength="1500" value="{{ bcc_prefill|default('') }}" list="ema-contact-datalist"></label>
       </details>
       <label class="ema-compose-line">Předmět<input type="text" name="subject" maxlength="500" required value="{{ subject }}"></label>
       <label class="ema-compose-body-label">Text zprávy
