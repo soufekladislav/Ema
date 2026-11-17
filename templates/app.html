@@ -153,6 +153,29 @@
 <div class="page-head"><div><span class="eyebrow">Komunikátor</span><h1>E-mailové schránky</h1><p>Metadata-first IMAP. Těla zpráv se načítají pouze na kliknutí; přílohy se neukládají.</p></div><a class="btn" href="{{ url_for('settings', org_id=active_org.id) }}">Správa účtů</a></div>
 <div class="mail-layout"><div class="card panel mailbox-list"><h3>Schránky</h3>{% for b in boxes %}<a class="mailbox-option {{ 'selected' if selected_box and b.id==selected_box.id else '' }}" href="{{ url_for('mail', org_id=active_org.id, box=b.id) }}"><strong>{{ b.label }}</strong><small>{{ b.address }}</small><span class="status">{{ b.status }}</span></a>{% else %}<p class="muted">Připojte schránku v nastavení.</p>{% endfor %}</div><div class="card panel mail-main">{% if selected_box %}<div class="inline-form spread"><div><h3>{{ selected_box.label }}</h3><p class="small muted">Poslední sync: {{ selected_box.last_sync or 'Nikdy' }}</p></div><form method="post" action="{{ url_for('sync_mail', org_id=active_org.id, box_id=selected_box.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn small-btn" type="submit">Načíst 10 hlaviček</button></form></div><div class="message-list">{% for m in mail_rows %}<a class="message-row" href="{{ url_for('mail_detail', org_id=active_org.id, message_id=m.id) }}"><strong>{{ m.subject or '(bez předmětu)' }}</strong><span>{{ m.sender }}</span><small>{{ m.sent_at or '—' }} · {{ m.size_bytes }} B</small></a>{% else %}<p class="muted">Schránka zatím nemá synchronizované hlavičky.</p>{% endfor %}</div>{% endif %}</div></div>
 {% if selected_box %}<div class="card panel"><h3>Nový e-mail</h3><p class="small muted">Odeslání proběhne výhradně po potvrzení tlačítkem. Pokud není potvrzené, nesmí se automaticky opakovat.</p><form class="formstack" method="post" action="{{ url_for('mail_send', org_id=active_org.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="box_id" value="{{ selected_box.id }}"><input type="hidden" name="nonce" value="{{ new_nonce() }}"><label>Komu<input name="to" type="email" required></label><label>Předmět<input name="subject" maxlength="500" required></label><label>Text zprávy<textarea name="body" rows="5" maxlength="100000" required></textarea></label><button class="btn primary">Odeslat přes SMTP</button></form></div>{% endif %}
+{% elif section == 'mail-move-confirm' %}
+<div class="page-head"><div><span class="eyebrow">POŠTOVNÍ SERVER</span>
+<h1>{{ 'Přesunout do Koše' if mail_action == 'trash' else 'Archivovat e-mail' }}</h1>
+<p>Akce mění přímo zdrojovou IMAP schránku {{ selected_box.address }}. Nejde pouze o skrytí zprávy v Emě.</p>
+</div><a class="btn" href="{{ url_for('mail_hub', box=selected_box.id) }}">Zrušit</a></div>
+<div class="card panel ema-mail-move-confirm-card">
+<h3>{{ message.subject or '(bez předmětu)' }}</h3>
+<p class="muted">Od: {{ message.sender }}</p>
+{% if target %}
+  <p>Cílová složka: <strong>{{ target_label }}</strong></p>
+  <p class="small muted">Zpráva se přesune pomocí IMAP MOVE. Nevyprazdňujeme Koš a neprovádíme trvalé mazání.</p>
+  <form method="post" action="{{ url_for('execute_mail_move', mail_id=message.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="action" value="{{ mail_action }}">
+    <input type="hidden" name="confirm" value="yes">
+    <button class="btn primary" type="submit">{{ 'Potvrdit přesun do Koše' if mail_action == 'trash' else 'Potvrdit archivaci' }}</button>
+    <a class="btn" href="{{ url_for('mail_hub', box=selected_box.id) }}">Ponechat zprávu</a>
+  </form>
+{% else %}
+  <div class="notice">Ema zatím nezná cílovou složku na tomto serveru. Vrať se do schránky a použij „Obnovit složky“. Zpráva nebyla změněna.</div>
+  <a class="btn" href="{{ url_for('mail_hub', box=selected_box.id) }}">Zpět do pošty</a>
+{% endif %}
+</div>
 {% elif section == 'mail-detail' %}
 <div class="page-head"><div><span class="eyebrow">E-mail #{{ message.id }}</span><h1>{{ message.subject or '(bez předmětu)' }}</h1>
 <p>Od: {{ message.sender }}<br>Komu: {{ message.recipients }}<br>Datum: {{ message.sent_at.strftime('%d.%m.%Y %H:%M') if message.sent_at else '—' }}</p></div>
