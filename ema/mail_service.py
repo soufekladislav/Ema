@@ -15,6 +15,7 @@ from email.utils import parsedate_to_datetime
 from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy import select
 from .models import MailFolder, MailMessage, now
+from .mail_render import make_preview, MAX_PREVIEW_BYTES
 
 
 class MailError(Exception):
@@ -111,9 +112,14 @@ def sync_inbox(db, box, key, limit=30):
     count = 0
     try:
         client = _connect(box, key)
-        typ, _ = client.select("INBOX", readonly=True)
+        typ, selected = client.select("INBOX", readonly=True)
         if typ != "OK":
             raise MailError("Nelze otevřít INBOX")
+        if selected and selected[0] is not None:
+            try:
+                box.server_message_count = int(selected[0])
+            except (ValueError, TypeError):
+                box.server_message_count = None
         validity_raw = client.response("UIDVALIDITY")[1]
         uidvalidity = int(validity_raw[0]) if validity_raw and validity_raw[0] else 0
         if uidvalidity <= 0:
@@ -162,8 +168,8 @@ def sync_inbox(db, box, key, limit=30):
                 pass
 
 
-def preview_message(box, row, key):
-    """Explicit preview on click only; capped partial IMAP fetch, never persisted."""
+def preview_message(box, row, key, *, show_images=False):
+    """Fetch bounded MIME directly from IMAP; body and images stay out of MariaDB."""
     client = _connect(box, key)
     try:
         typ, _ = client.select("INBOX", readonly=True)
@@ -172,11 +178,16 @@ def preview_message(box, row, key):
         current = client.response("UIDVALIDITY")[1]
         if not current or int(current[0]) != row.uidvalidity:
             raise MailError("UID zprávy již neodpovídá serveru. Proveďte synchronizaci.")
-        typ, data = client.uid("FETCH", str(row.uid), "(BODY.PEEK[TEXT]<0.32768>)")
+        # A partial RFC822 fetch supplies MIME headers too, unlike BODY.PEEK[TEXT].
+        # This caps decoded mail exposure and prevents large attachments being cached.
+        typ, data = client.uid("FETCH", str(row.uid), f"(BODY.PEEK[]<0.{MAX_PREVIEW_BYTES}>)")
         if typ != "OK":
-            raise MailError("Obsah není dostupný")
-        buf = b"".join(item[1] for item in data if isinstance(item, tuple))
-        return buf[:32768].decode("utf-8", errors="replace")
+            raise MailError("Obsah zprávy není dostupný na IMAP serveru")
+        buf = b"".join(item[1] for item in data if isinstance(item, tuple) and isinstance(item[1], bytes))
+        if not buf:
+            raise MailError("IMAP nevrátil obsah zprávy")
+        return make_preview(buf[:MAX_PREVIEW_BYTES], show_images=show_images,
+                            truncated=(row.size_bytes or 0) > MAX_PREVIEW_BYTES)
     finally:
         try:
             client.logout()
