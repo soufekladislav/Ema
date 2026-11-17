@@ -34,7 +34,7 @@
 | #48–#49 | V UI existují projekty a úkoly, model a CRUD | Obchodní milníky, dohody, záznam závazků z komunikace, skutečný kalendář/follow-up |
 | #64 | V dřívější specifikaci 6 legacy schránek; screenshot nyní ukazuje 5 | Ověřit počet a mapování všech schránek; neprohlašovat migraci za plně dokončenou |
 
-## Odloženo do backlogu – nepracovat současně s Mail P0
+## Odloženo do backlogu (dílčí issue archivované, epiky ponechány otevřené)
 
 - **CRM hloubka:** #30–#31 (deduplikace a právní titul/časová osa).
 - **AI Ema:** #38, #40–#43 (Engine kontrakt, analýzy, návrhy, schvalování, injection/exfiltrace).
@@ -49,6 +49,8 @@
 - #1 = dlouhodobá roadmapa; #2–#10 jsou produktové epiky/obsahové kontejnery, **ne všechno aktuální práce**. Nemají být považované za jednotlivé současné P0 úkoly.
 - **#11** – uzavřeno jako splněná volba domény/hostingu (ostatní provozní podmínky mají samostatné Issues).
 - **#63** – uzavřeno jako historický milestone V0.1 **nahrazený #75/#78**, nikoliv jako plně odzkoušená produkční verze.
+- **#24–#27, #30–#31, #44–#47, #50–#55, #60–#61** – **18 dílčích future backlog Issues archivováno** jako `closed/not_planned` pro aktuální etapu. Rozsah a historické akceptační požadavky zůstávají v jednotlivých issue a epikách #3/#4/#7/#8/#9/#10. **Nejde o hotové funkce ani o jejich trvalé zrušení; při návratu k dané fázi issue znovu otevřít.**
+- Výsledek revize: z **67 původně otevřených Issues je 20 uzavřených** (1 potvrzeně hotové, 1 nahrazený milestone, 18 odložený backlog) a **47 otevřených** (epiky + rozpracovaná/nejbližší práce). Otevřená čísla obsahují i 10 dlouhodobých epiků, takže nejde o 47 současných implementačních P0 úkolů.
 
 ## Pořadí realizace
 
