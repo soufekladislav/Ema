@@ -299,7 +299,18 @@ def create_app(test_config=None):
         resp.headers["X-Content-Type-Options"] = "nosniff"
         resp.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         resp.headers["X-Frame-Options"] = "DENY"
-        resp.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://www.freshcrackers.cz; object-src 'none'; frame-ancestors 'none'; form-action 'self'; base-uri 'self'"
+        # Remote email images are only possible in the isolated HTML preview
+        # after explicit click, never in the default mail display.
+        images = ("'self' data: https:" if request.endpoint == "mail_detail"
+                  and request.args.get("images") == "1" else
+                  "'self' data: https://www.freshcrackers.cz")
+        resp.headers["Content-Security-Policy"] = (
+            "default-src 'self'; script-src 'self'; "
+            "style-src 'self' https://fonts.googleapis.com; "
+            "font-src 'self' https://fonts.gstatic.com; "
+            "img-src " + images + "; frame-src 'self' about:; "
+            "object-src 'none'; frame-ancestors 'none'; form-action 'self'; base-uri 'self'"
+        )
         resp.headers["Cache-Control"] = "no-store" if request.path != "/static" else "public, max-age=3600"
         return resp
 
