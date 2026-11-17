@@ -207,7 +207,7 @@ def test_schema_upgrade_restores_mailbox_columns_without_data_loss(tmp_path):
         conn.execute(text("ALTER TABLE mailboxes DROP COLUMN signature_html"))
         conn.execute(text("INSERT INTO users (id,email,name,password_hash,active,superadmin,created_at) "
                           "VALUES (1,'legacy@example.cz','Legacy','hash',1,0,'2026-01-01')"))
-        conn.execute(text("INSERT INTO organizations (id,name,active) VALUES (1,'Legacy org',1)"))
+        conn.execute(text("INSERT INTO organizations (id,name,active,created_at) VALUES (1,'Legacy org',1,'2026-01-01')"))
         conn.execute(text("INSERT INTO mailboxes (id,organization_id,owner_id,label,address,username,"
                           "imap_host,imap_port,smtp_host,smtp_port,credential,status,sync_error) "
                           "VALUES (1,1,1,'Mailbox','legacy@example.cz','legacy@example.cz',"
