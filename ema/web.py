@@ -1,6 +1,7 @@
 """EMA V0.1 — Flask application. Server-side authorization for every data path."""
 import os
 import re
+import json
 import secrets
 from datetime import datetime, timedelta
 from functools import wraps
@@ -17,6 +18,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from .mail_service import MailError, encrypt_password, preview_message, send_plain, sync_inbox, validate_mail_host
 from .assistant_service import AssistantError, run_assistant
+from .contact_import import ImportErrorCSV, extract_contacts
 from .schema_upgrade import upgrade_schema
 from .models import (
     Audit, AssistantTurn, Base, ChatMessage, Company, Contact, MailFolder, Mailbox, MailboxGrant, MailMessage,
@@ -379,6 +381,64 @@ def create_app(test_config=None):
             .order_by(Contact.name).limit(250)).all() if ids else []
         return render_hub("database", companies=companies, contacts=contacts,
                           eligible_orgs=orgs)
+
+    @app.post("/database/import")
+    @login_required
+    def import_contacts_csv():
+        org_id = positive_id("organization_id")
+        if not org_id:
+            abort(400, description="Vyber firmu pro import")
+        try:
+            organization_access(g.db, g.user.id, org_id, write=True)
+        except Forbidden:
+            abort(403)
+        uploaded = request.files.get("file")
+        if not uploaded or not uploaded.filename.lower().endswith(".csv"):
+            flash("Vyber soubor CSV.", "error")
+            return redirect(url_for("database_hub"))
+        try:
+            entries = extract_contacts(uploaded.stream.read(950001))
+        except ImportErrorCSV as ex:
+            flash(str(ex), "error")
+            return redirect(url_for("database_hub"))
+        emails = {row["email"] for row in entries if row["email"]}
+        seen = set(g.db.scalars(select(Contact.email).where(
+            Contact.organization_id == org_id, Contact.email.in_(emails)
+        )).all()) if emails else set()
+        duplicates = sum(1 for item in entries if item["email"] and item["email"] in seen)
+        if field("mode", 16) == "preview":
+            flash(f"Kontrola CSV: {len(entries)} řádků, {duplicates} již existujících e-mailů. Nic nebylo zapsáno. Import potvrď dalším nahráním souboru.", "success")
+            return redirect(url_for("database_hub"))
+        if field("mode", 16) != "import":
+            abort(400, description="Neplatný režim importu")
+        company_names = {row["company_name"].casefold() for row in entries if row["company_name"]}
+        existing_companies = g.db.scalars(select(Company).where(
+            Company.organization_id == org_id
+        )).all() if company_names else []
+        mapped = {company.name.casefold(): company.id for company in existing_companies
+                  if company.name.casefold() in company_names}
+        added = 0
+        skipped = 0
+        for item in entries:
+            if item["email"] and item["email"] in seen:
+                skipped += 1
+                continue
+            metadata = {
+                "import_source": "csv", "imported_at": now().isoformat(),
+                "fields": item["attributes"],
+            }
+            if item["company_name"] and item["company_name"].casefold() not in mapped:
+                metadata["company_name_from_csv"] = item["company_name"]
+            g.db.add(Contact(organization_id=org_id, company_id=mapped.get(item["company_name"].casefold()),
+                             name=item["name"], email=item["email"], phone=item["phone"],
+                             metadata_json=json.dumps(metadata, ensure_ascii=False)))
+            if item["email"]:
+                seen.add(item["email"])
+            added += 1
+        audit("contacts.csv_import", f"added={added}, skipped={skipped}", org_id)
+        g.db.commit()
+        flash(f"Import dokončen: {added} kontaktů, {skipped} duplicit přeskočeno. Marketingové souhlasy se automaticky nepřidělují.", "success")
+        return redirect(url_for("database_hub"))
 
     @app.get("/tasks")
     @login_required
