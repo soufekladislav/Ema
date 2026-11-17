@@ -228,3 +228,23 @@ def test_empty_trash_requires_confirmation_and_mailbox_manage(seeded, monkeypatc
     assert guest.post(path, data={"csrf_token": csrf(guest),
                                    "folder_id": str(trash_id),
                                    "confirmation": "permanently-delete"}).status_code == 403
+
+
+
+def test_invalid_recipient_never_starts_smtp_and_preserves_compose_draft(seeded, monkeypatch):
+    client = seeded
+    login(client, "owner")
+    called = []
+    monkeypatch.setattr("ema.web.send_composed", lambda *args, **kwargs: called.append("smtp"))
+    form = {"csrf_token": csrf(client), "nonce": "invalid-address-preflight",
+            "box_id": str(client.ids_v1["box"]),
+            "to": "neplatna adresa", "cc": "coworker@example.cz",
+            "subject": "Test před odesláním", "body": "Napsaný text zůstane v editoru"}
+    result = client.post("/mail/compose/send", data=form)
+    assert result.status_code == 422
+    assert "Komu:".encode() in result.data
+    assert "Napsaný text zůstane v editoru".encode() in result.data
+    assert b'coworker@example.cz' in result.data
+    assert called == []
+    with Session(client.application.extensions["ema_engine"]) as db:
+        assert db.scalar(select(Outbound).where(Outbound.nonce == form["nonce"])) is None
