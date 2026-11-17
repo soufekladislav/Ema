@@ -99,3 +99,11 @@ def test_failed_imap_connection_persists_safe_mailbox_diagnostic(tmp_path, monke
         stored = db.get(Mailbox, box_id)
         assert stored.status == "error"
         assert stored.sync_error == "IMAP server odmítl přihlášení."
+
+
+
+def test_optional_empty_cc_bcc_do_not_reject_valid_recipient():
+    from ema.mail_service import validate_recipients
+    assert validate_recipients("test@example.cz", "", "") == (["test@example.cz"], [], [])
+    assert validate_recipients("test@example.cz", "second@example.cz", "") == (
+        ["test@example.cz"], ["second@example.cz"], [])
