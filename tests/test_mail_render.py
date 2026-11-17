@@ -60,3 +60,21 @@ def test_remote_image_hosts_restricted():
     assert not safe_image_url("https://localhost/a.png")
     assert not safe_image_url("https://user:pass@cdn.example.cz/x.png")
     assert not safe_image_url("javascript:alert(1)")
+
+def test_newsletter_css_not_rendered_as_raw_code_and_safe_inline_style_survives():
+    msg = EmailMessage()
+    msg.set_content("Plain")
+    msg.add_alternative(
+        '<html><head><style>body { color:red; } table { border: 0; }</style></head>'
+        '<body><table><tr><td style="color:green;font-weight:bold">'
+        'Zpráva pro zákazníka</td></tr></table>'
+        '<script>alert("bad")</script></body></html>',
+        subtype="html",
+    )
+    p = make_preview(msg.as_bytes())
+    assert p.is_html
+    assert "Zpráva pro zákazníka" in p.srcdoc
+    assert "body { color:red" not in p.srcdoc
+    assert "table { border: 0" not in p.srcdoc
+    assert "alert(" not in p.srcdoc
+    assert "color:green" in p.srcdoc or "color: green" in p.srcdoc
