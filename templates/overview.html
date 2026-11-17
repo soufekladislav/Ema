@@ -53,6 +53,7 @@
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <label>Název projektu<input name="name" maxlength="190" required></label>
       <label>Firma / vlastník dat<select name="organization_id">{% for o in eligible_orgs %}<option value="{{ o.id }}">{{ o.name }}</option>{% endfor %}</select></label>
+      <label>Typ projektu<select name="kind"><option value="other">Ostatní projekt</option><option value="shop">E-shop / WooCommerce</option><option value="campaign">Kampaň / oslovení</option><option value="development">Vývoj aplikace</option></select></label>
       <label>Popis<input name="description" maxlength="1500" placeholder="Například: Oslovovací kampaň CajnaCars"></label>
       <button class="btn primary">Založit projekt</button>
     </form>
@@ -61,7 +62,7 @@
   <div class="ema-global-cards">
     {% for p in projects %}
     <a class="card panel ema-project-hub-card" href="{{ url_for('home', project=p.id) }}">
-      <span class="status">{{ p.status }}</span><h3>{{ p.name }}</h3><p>{{ p.description[:180] if p.description else 'Projekt bez popisu.' }}</p>
+      <span class="status">{{ p.status }}</span><h3>{{ p.name }}</h3><small>{{ {'shop':'E-shop','campaign':'Kampaň','development':'Vývoj','other':'Projekt'}.get(p.kind, 'Projekt') }}</small><p>{{ p.description[:180] if p.description else 'Projekt bez popisu.' }}</p>
       <small>{{ project_org_names.get(p.organization_id, '') }}</small><span class="link">Chat s Emou nad projektem →</span>
     </a>
     {% else %}<div class="card panel"><h3>Zatím žádné projekty</h3><p>Jakmile založíš první projekt nebo dostaneš pozvánku, zobrazí se tady.</p></div>{% endfor %}
