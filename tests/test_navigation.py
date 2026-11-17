@@ -154,3 +154,83 @@ def test_csv_import_dry_run_metadata_dedupe_and_tenant_guard(web_client):
         assert meta["fields"]["zdroj"] == "linkedin"
         assert meta["fields"]["kampan"] == "pilot"
     assert upload("import", client.application.ids["secret_org"]).status_code == 403
+
+
+def test_project_pipeline_is_scoped_to_firm_and_project(web_client):
+    client = web_client
+    login(client, "owner")
+    org_id = client.application.ids["org"]
+    project_id = client.application.ids["project"]
+    bad_project = client.application.ids["secret_project"]
+    assert client.get(f"/org/{org_id}/pipeline?project={bad_project}").status_code == 403
+    assert client.post(f"/org/{org_id}/pipeline", data={
+        "csrf_token": csrf(client), "project_id": str(bad_project),
+        "title": "Never cross companies"
+    }).status_code == 400
+    created = client.post(f"/org/{org_id}/pipeline", data={
+        "csrf_token": csrf(client), "project_id": str(project_id),
+        "title": "Offer for Ema"
+    })
+    assert created.status_code == 302
+    assert f"project={project_id}" in created.headers["Location"]
+    listing = client.get(f"/org/{org_id}/pipeline?project={project_id}")
+    assert b"Offer for Ema" in listing.data
+    project = client.get(f"/project/{project_id}")
+    assert b"Offer for Ema" in project.data
+
+
+def test_project_type_saved_and_invalid_category_rejected(web_client):
+    client = web_client
+    login(client, "owner")
+    org_id = client.application.ids["org"]
+    assert client.post("/projects", data={"csrf_token": csrf(client),
+                      "organization_id": str(org_id), "name": "My shop",
+                      "kind": "shop"}).status_code == 302
+    assert client.post("/projects", data={"csrf_token": csrf(client),
+                      "organization_id": str(org_id), "name": "invalid",
+                      "kind": "unauthorized-type"}).status_code == 400
+    with Session(client.application.extensions["ema_engine"]) as db:
+        row = db.scalar(select(Project).where(Project.name == "My shop"))
+        assert row.kind == "shop"
+    assert "E-shop".encode() in client.get("/projects").data
+
+
+def test_schema_upgrade_is_idempotent_for_project_kind_and_contact_metadata(tmp_path):
+    from sqlalchemy import inspect, text
+    from ema.schema_upgrade import upgrade_schema
+    from ema.models import make_session
+    url = "sqlite:///" + str(tmp_path / "old-schema.sqlite")
+    engine, factory = make_session(url)
+    Base.metadata.create_all(engine)
+    with engine.begin() as c:
+        c.execute(text("ALTER TABLE projects DROP COLUMN kind"))
+        c.execute(text("ALTER TABLE contacts DROP COLUMN metadata_json"))
+    changes = set(upgrade_schema(engine))
+    assert changes == {"projects.kind", "contacts.metadata_json"}
+    assert upgrade_schema(engine) == []
+    inspector = inspect(engine)
+    assert "kind" in {c["name"] for c in inspector.get_columns("projects")}
+    assert "metadata_json" in {c["name"] for c in inspector.get_columns("contacts")}
+
+
+def test_mail_hub_only_lists_authorized_company_mailboxes(web_client):
+    client = web_client
+    with Session(client.application.extensions["ema_engine"]) as db:
+        o1 = client.application.ids["org"]
+        o2 = client.application.ids["secret_org"]
+        uid = client.application.ids["owner"]
+        db.add_all([
+            Mailbox(organization_id=o1, owner_id=uid, label="Owned mail",
+                    address="owned@example.cz", username="owned@example.cz",
+                    imap_host="mail.example.cz", smtp_host="smtp.example.cz",
+                    credential="not-real"),
+            Mailbox(organization_id=o2, owner_id=uid, label="Secret mailbox",
+                    address="secret@example.cz", username="secret@example.cz",
+                    imap_host="mail.example.cz", smtp_host="smtp.example.cz",
+                    credential="not-real")
+        ])
+        db.commit()
+    login(client, "owner")
+    html = client.get("/mail").data
+    assert b"owned@example.cz" in html
+    assert b"secret@example.cz" not in html
