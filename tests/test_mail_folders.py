@@ -25,6 +25,9 @@ class FakeImap:
         self.full_expunge = 0
         self.appended = []
         self.copied = []
+        self.deleted_existing = set()
+        self.deleted_marked = set()
+        self.seen_uids = set()
 
     def list(self):
         return "OK", [
@@ -44,7 +47,16 @@ class FakeImap:
 
     def uid(self, action, *args):
         if action == "SEARCH":
-            return "OK", [b" ".join(str(n).encode() for n in range(1, self.count + 1))]
+            criteria = {str(x).upper() for x in args if x is not None}
+            uids = set(range(1, self.count + 1))
+            marked = self.deleted_existing | self.deleted_marked
+            if "DELETED" in criteria:
+                uids &= marked
+            if "UNDELETED" in criteria:
+                uids -= marked
+            if "UNSEEN" in criteria:
+                uids -= self.seen_uids
+            return "OK", [b" ".join(str(n).encode() for n in sorted(uids))]
         if action == "FETCH":
             numbers = [int(x) for x in args[0].split(",")]
             result = []
@@ -62,6 +74,12 @@ class FakeImap:
             return "OK", [b""]
         if action == "STORE":
             self.deleted.append((args[0], args[1], args[2]))
+            for piece in args[0].split(","):
+                if ":" in piece:
+                    lo, hi = [int(x) for x in piece.split(":", 1)]
+                    self.deleted_marked.update(range(lo, hi + 1))
+                else:
+                    self.deleted_marked.add(int(piece))
             return "OK", [b""]
         if action == "EXPUNGE":
             self.uid_expunge.append(args[0])
@@ -169,6 +187,7 @@ def test_no_move_extension_must_not_delete_or_expunge(state, monkeypatch):
         assert fake.copied == [("2", '"[Gmail]/Trash"')]
         assert fake.deleted == [("2", "+FLAGS.SILENT", r"(\Deleted)")]
         assert not fake.uid_expunge
+        assert fake.full_expunge == 1
         assert mail.moved
 
 
@@ -245,6 +264,7 @@ def test_legacy_imap_bulk_copy_flags_only_selected_without_expunge(state, monkey
         assert fake.copied == [("2,4", '"[Gmail]/Trash"')]
         assert fake.deleted == [("2,4", "+FLAGS.SILENT", r"(\Deleted)")]
         assert not fake.uid_expunge
+        assert fake.full_expunge == 1
         assert all(m.moved for m in messages)
 
 
@@ -299,7 +319,8 @@ def test_full_3301_legacy_imap_trash_uses_one_uid_range_and_one_expunge(state, m
         discover_folders(db, box, "key")
         trash = special_folder(db, box, "trash")
         snapshot = preview_trash_all(db, box, "key", trash)
-        assert snapshot == {"count": 3301, "uidvalidity": 333, "max_uid": 3301}
+        assert snapshot == {"count": 3301, "uidvalidity": 333, "max_uid": 3301,
+                            "visible_count": 3301, "unread_count": 3301, "already_deleted": 0}
         assert not fake.deleted and not fake.full_expunge
         deleted = empty_trash_all(db, box, "key", trash, snapshot)
         assert deleted == 3301
@@ -344,3 +365,74 @@ def test_full_trash_requires_same_server_uid_boundary(state, monkeypatch):
         with pytest.raises(MailError, match="ověřeným IMAP Košem"):
             empty_trash_all(db, box, "key", inbox, snapshot)
         assert fake.full_expunge == 0
+
+
+
+def test_legacy_move_does_not_expunge_unrelated_deleted_messages(state, monkeypatch):
+    engine, box_id, inbox_id = state
+    fake = FakeImap(count=4)
+    fake.capabilities = (b"IMAP4rev1",)
+    fake.deleted_existing = {1}  # Another client marked UID 1, not EMA.
+    monkeypatch.setattr("ema.mail_folders._connect", lambda box, key: fake)
+    with Session(engine) as db:
+        box, inbox = db.get(Mailbox, box_id), db.get(MailFolder, inbox_id)
+        discover_folders(db, box, "key")
+        fetch_folder_page(db, box, "key", inbox)
+        msg = db.scalar(select(MailMessage).where(MailMessage.uid == 4))
+        move_message(db, box, "key", msg, "trash")
+        assert fake.copied == [("4", '"[Gmail]/Trash"')]
+        assert fake.full_expunge == 0
+        assert db.info["ema_move_mode"] == "copy-pending-cleanup"
+
+
+def test_legacy_move_can_clean_prior_ema_deleted_uid(state, monkeypatch):
+    engine, box_id, inbox_id = state
+    fake = FakeImap(count=4)
+    fake.capabilities = (b"IMAP4rev1",)
+    fake.deleted_existing = {1}
+    monkeypatch.setattr("ema.mail_folders._connect", lambda box, key: fake)
+    with Session(engine) as db:
+        box, inbox = db.get(Mailbox, box_id), db.get(MailFolder, inbox_id)
+        discover_folders(db, box, "key")
+        fetch_folder_page(db, box, "key", inbox)
+        past = db.scalar(select(MailMessage).where(MailMessage.uid == 1))
+        past.moved = True
+        db.commit()
+        msg = db.scalar(select(MailMessage).where(MailMessage.uid == 4))
+        move_message(db, box, "key", msg, "trash")
+        assert fake.full_expunge == 1
+        assert db.info["ema_move_mode"] == "copy-expunged"
+
+
+def test_uidplus_without_move_expunge_is_exact_uid(state, monkeypatch):
+    engine, box_id, inbox_id = state
+    fake = FakeImap(count=4)
+    fake.capabilities = (b"IMAP4rev1", b"UIDPLUS")
+    fake.deleted_existing = {1}
+    monkeypatch.setattr("ema.mail_folders._connect", lambda box, key: fake)
+    with Session(engine) as db:
+        box, inbox = db.get(Mailbox, box_id), db.get(MailFolder, inbox_id)
+        discover_folders(db, box, "key")
+        fetch_folder_page(db, box, "key", inbox)
+        msg = db.scalar(select(MailMessage).where(MailMessage.uid == 4))
+        move_message(db, box, "key", msg, "trash")
+        assert fake.uid_expunge == ["4"]
+        assert fake.full_expunge == 0
+
+
+def test_trash_counts_distinguish_deleted_unread_and_visible(state, monkeypatch):
+    engine, box_id, inbox_id = state
+    fake = FakeImap(count=6)
+    fake.capabilities = (b"IMAP4rev1",)
+    fake.deleted_existing = {1, 2}
+    fake.seen_uids = {3, 4}
+    monkeypatch.setattr("ema.mail_folders._connect", lambda box, key: fake)
+    with Session(engine) as db:
+        box = db.get(Mailbox, box_id)
+        discover_folders(db, box, "key")
+        trash = special_folder(db, box, "trash")
+        state = preview_trash_all(db, box, "key", trash)
+        assert state["count"] == 6
+        assert state["visible_count"] == 4
+        assert state["already_deleted"] == 2
+        assert state["unread_count"] == 2
