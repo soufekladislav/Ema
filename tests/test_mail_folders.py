@@ -21,7 +21,8 @@ class FakeImap:
         self.selected = "INBOX"
         self.moved = []
         self.deleted = []
-        self.expunge = []
+        self.uid_expunge = []
+        self.full_expunge = 0
         self.appended = []
         self.copied = []
 
@@ -63,9 +64,13 @@ class FakeImap:
             self.deleted.append((args[0], args[1], args[2]))
             return "OK", [b""]
         if action == "EXPUNGE":
-            self.expunge.append(args[0])
+            self.uid_expunge.append(args[0])
             return "OK", [b""]
         raise AssertionError(action)
+
+    def expunge(self):
+        self.full_expunge += 1
+        return "OK", [b"1"]
 
     def append(self, name, flags, when, content):
         self.appended.append((name, flags, content))
@@ -163,7 +168,7 @@ def test_no_move_extension_must_not_delete_or_expunge(state, monkeypatch):
         assert not fake.moved
         assert fake.copied == [("2", '"[Gmail]/Trash"')]
         assert fake.deleted == [("2", "+FLAGS.SILENT", r"(\Deleted)")]
-        assert not fake.expunge
+        assert not fake.uid_expunge
         assert mail.moved
 
 
@@ -201,11 +206,12 @@ def test_empty_trash_requires_uidplus_and_targeted_expunge(state, monkeypatch):
         deleted, more = empty_trash_batch(db, box, "key", trash)
         assert (deleted, more) == (4, False)
         assert fake.deleted == [("1,2,3,4", "+FLAGS.SILENT", r"(\Deleted)")]
-        assert fake.expunge == ["1,2,3,4"]
+        assert fake.uid_expunge == ["1,2,3,4"]
         fake.capabilities = (b"IMAP4rev1", b"MOVE")
-        with pytest.raises(MailError, match="UID EXPUNGE"):
-            empty_trash_batch(db, box, "key", trash)
-        assert len(fake.expunge) == 1
+        deleted_legacy, remaining = empty_trash_batch(db, box, "key", trash)
+        assert (deleted_legacy, remaining) == (4, False)
+        assert fake.full_expunge == 1
+        assert len(fake.uid_expunge) == 1
 
 
 def test_sent_append_uses_discovered_real_folder(state, monkeypatch):
@@ -238,7 +244,7 @@ def test_legacy_imap_bulk_copy_flags_only_selected_without_expunge(state, monkey
         assert target.name == "[Gmail]/Trash"
         assert fake.copied == [("2,4", '"[Gmail]/Trash"')]
         assert fake.deleted == [("2,4", "+FLAGS.SILENT", r"(\Deleted)")]
-        assert not fake.expunge
+        assert not fake.uid_expunge
         assert all(m.moved for m in messages)
 
 
@@ -261,5 +267,22 @@ def test_legacy_copy_store_failure_marks_remote_result_uncertain(state, monkeypa
         with pytest.raises(MailError, match="Kopie může být"):
             move_message(db, box, "key", message, "trash")
         assert len(fake.copied) == 1
-        assert not fake.expunge
+        assert not fake.uid_expunge
         assert message.moved is False
+
+
+
+def test_legacy_trash_larger_than_limit_fails_without_expunge(state, monkeypatch):
+    engine, box_id, inbox_id = state
+    fake = FakeImap(count=101)
+    fake.capabilities = (b"IMAP4rev1",)
+    monkeypatch.setattr("ema.mail_folders._connect", lambda box, key: fake)
+    with Session(engine) as db:
+        box = db.get(Mailbox, box_id)
+        discover_folders(db, box, "key")
+        trash = special_folder(db, box, "trash")
+        with pytest.raises(MailError, match="101 zpráv"):
+            empty_trash_batch(db, box, "key", trash, limit=100)
+        assert not fake.deleted
+        assert fake.full_expunge == 0
+        assert not fake.uid_expunge
