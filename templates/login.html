@@ -1,36 +1,43 @@
 {% extends 'base.html' %}
-{% block title %}Přihlášení • EMA / Fresh HUB{% endblock %}
+{% block title %}Ema – obchodní a projektová asistentka Fresh Crackers{% endblock %}
 {% block login %}
-<main class="auth-page auth-page-legacy">
-  <div class="login-shell">
-    <section class="login-hero" aria-labelledby="login-intro-title">
-      <img class="login-logo" src="https://www.freshcrackers.cz/wp-content/uploads/2023/10/Fresh-Crackers-Logo.png" alt="Fresh Crackers" referrerpolicy="no-referrer">
-      <img class="login-hero-img" src="https://www.freshcrackers.cz/wp-content/uploads/2026/10/fresh-hub.png" alt="Ilustrace Fresh HUB z původní Emy" referrerpolicy="no-referrer">
-      <span class="intro-label">EMA · Fresh HUB</span>
-      <h1 id="login-intro-title">Projekty, klienti a komunikace. Na jednom místě.</h1>
-      <p>Ema propojuje obchodní projekty, e-maily, klientské informace a úkoly. Hlavní pracovní prostor tvoří projekt, firma poskytuje zázemí pro data a fakturaci.</p>
-      <ul>
-        <li>Každý projekt má vlastní kontext a historii</li>
-        <li>E-maily, klienti a obchodní agenda na jednom místě</li>
-        <li>AI asistentka bude postupně pomáhat s běžnou prací</li>
-      </ul>
-      <p class="pilot-note">V0.1 je testovací základ aplikace. Inteligentní AI funkce teprve připravujeme.</p>
-    </section>
-    <section class="login-card login-card-ema" aria-labelledby="login-form-title">
-      <div class="login-brand"><span class="auth-mark">E</span><span><strong>EMA HUB</strong><small>Fresh Crackers · projektová asistentka</small></span></div>
-      <h2 id="login-form-title">Přihlášení</h2>
-      <p class="muted">Bezpečný vstup do tvých projektů a pracovní komunikace.</p>
-      {% with messages = get_flashed_messages(with_categories=true) %}
-        {% for category, msg in messages %}<div class="flash {{ category }}" role="alert">{{ msg }}</div>{% endfor %}
-      {% endwith %}
-      <form method="post" action="{{ url_for('login') }}" class="formstack">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <label>E-mail<input name="email" type="email" required autofocus autocomplete="username" maxlength="190"></label>
-        <label>Heslo<input name="password" type="password" required autocomplete="current-password"></label>
-        <button class="btn primary login-submit" type="submit">Přihlásit se</button>
-      </form>
-      <p class="small muted">Přístupové účty v této testovací verzi spravuje administrátor.</p>
-    </section>
+<main class="auth-page-boban">
+  <div class="ema-public">
+    <header class="ema-public-top">
+      <a class="ema-public-brand" href="https://www.freshcrackers.cz/" target="_blank" rel="noopener noreferrer">
+        <img src="https://www.freshcrackers.cz/wp-content/uploads/2023/10/Fresh-Crackers-Logo.png" alt="Fresh Crackers" referrerpolicy="no-referrer">
+        <span>EMA <small>Fresh HUB</small></span>
+      </a>
+      <span class="ema-public-tag">FRESH AI ECOSYSTEM</span>
+    </header>
+    <div class="ema-public-grid">
+      <section class="ema-public-copy" aria-labelledby="ema-login-title">
+        <span class="ema-eyebrow"><i></i> OBCHODNÍ A PROJEKTOVÁ ASISTENTKA</span>
+        <h1 id="ema-login-title">Emě stačí říct,<br><em>co potřebuješ.</em></h1>
+        <h2>Projekty, klienti, komunikace a práce, která nemusí zůstat na tobě.</h2>
+        <p>Jeden chat pro tvoji práci. Ema pomáhá zorientovat se v projektech, souvislostech a dalších krocích. Firemní data zůstávají oddělená, projekt je hlavním pracovním kontextem.</p>
+        <div class="ema-public-login">
+          <h3>Přihlášení</h3>
+          {% with messages = get_flashed_messages(with_categories=true) %}
+            {% for category, msg in messages %}<div class="flash {{ category }}" role="alert">{{ msg }}</div>{% endfor %}
+          {% endwith %}
+          <form method="post" action="{{ url_for('login') }}" class="ema-login-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <label>E-mail<input name="email" type="email" required autofocus autocomplete="username" maxlength="190"></label>
+            <label>Heslo<input name="password" type="password" required autocomplete="current-password"></label>
+            <button class="ema-login-btn" type="submit">Přihlásit se</button>
+          </form>
+          <p class="ema-login-note">Přístup do testovací aplikace přiděluje administrátor.</p>
+        </div>
+      </section>
+      <section class="ema-public-visual" aria-label="Ilustrace asistentky Emy">
+        <div class="ema-visual-frame">
+          <img src="https://www.freshcrackers.cz/wp-content/uploads/2026/10/fresh-hub.png" alt="Ema – tvoje AI HUB asistentka" referrerpolicy="no-referrer">
+        </div>
+        <div class="ema-visual-tag"><i></i><div><strong>Ema</strong><small>Obchodní a projektová asistentka</small></div></div>
+      </section>
+    </div>
+    <footer class="ema-public-footer">Created by <strong>Fresh Crackers</strong><span>Testovací V0.1 · AI připojení závisí na konfiguraci</span></footer>
   </div>
 </main>
 {% endblock %}
