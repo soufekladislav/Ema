@@ -17,7 +17,7 @@ from sqlalchemy import func, select, text, or_, and_, case
 from sqlalchemy.exc import IntegrityError
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from .mail_service import MailError, encrypt_password, preview_message, send_plain, send_composed, sync_inbox, validate_mail_host
+from .mail_service import MailError, encrypt_password, preview_message, send_plain, send_composed, validate_outgoing, sync_inbox, validate_mail_host
 from .mail_folders import (
     PAGE_SIZE, discover_folders, available_folders, folder_tree, decode_modified_utf7,
     fetch_folder_page, special_folder, move_message, move_batch,
@@ -852,6 +852,7 @@ def create_app(test_config=None):
         subject, body = required("subject", 500), required("body", 100000)
         reply_id = positive_id("reply_id")
         message_id = None
+        src = None
         if reply_id:
             src = g.db.get(MailMessage, reply_id)
             if not src or src.mailbox_id != box.id:
@@ -870,6 +871,22 @@ def create_app(test_config=None):
             if len(chunk) > 6_000_000 or len(attached) >= 4:
                 abort(400, description="Nejvýše 4 přílohy a 6 MB na soubor")
             attached.append((upload.filename, chunk))
+        try:
+            validate_outgoing(box, to, cc, bcc, subject, body,
+                              reply_message_id=message_id, attachments=attached)
+        except MailError as ex:
+            flash(str(ex), "error")
+            send_boxes = []
+            for available in visible_mailboxes(g.db, g.user.id, current_scope()[1]):
+                try:
+                    mailbox_access(g.db, g.user.id, available.id, send=True)
+                    send_boxes.append(available)
+                except Forbidden:
+                    continue
+            return render_hub("compose", send_boxes=send_boxes, active_box=box,
+                              recipient=to, cc_value=cc, bcc_value=bcc, subject=subject,
+                              draft_content=body, source_message=src, reply_id=reply_id,
+                              csrf_nonce=nonce), 400
         # Do not store body/attachments in MariaDB; record idempotency BEFORE SMTP.
         record = Outbound(nonce=nonce, mailbox_id=box.id, author_id=g.user.id,
                           recipient=to[:500], subject=subject, state="sending")
