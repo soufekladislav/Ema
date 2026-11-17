@@ -368,8 +368,35 @@ def create_app(test_config=None):
             ).all()
         else:
             messages = []
+        syncable_ids = set()
+        for box in boxes:
+            try:
+                mailbox_access(g.db, g.user.id, box.id, manage=True)
+                syncable_ids.add(box.id)
+            except Forbidden:
+                continue
         return render_hub("mail", boxes=boxes, mail_rows=messages, selected_box=selected,
-                          box_lookup={box.id: box for box in boxes})
+                          box_lookup={box.id: box for box in boxes}, syncable_ids=syncable_ids)
+
+    @app.post("/mail/<int:box_id>/sync")
+    @login_required
+    def sync_mail_hub(box_id):
+        """One explicit bounded IMAP read; accessible from the main global inbox."""
+        try:
+            box = mailbox_access(g.db, g.user.id, box_id, manage=True)
+        except Forbidden:
+            abort(403)
+        try:
+            count = sync_inbox(g.db, box, app.config["MAIL_ENCRYPTION_KEY"], limit=10)
+            flash(
+                f"Schránka {box.address}: načteno {count} nových zpráv (pouze hlavičky)."
+                if count else
+                f"Schránka {box.address}: připojení proběhlo, ale nebyly nalezeny nové zprávy.",
+                "success"
+            )
+        except MailError as ex:
+            flash(f"Schránka {box.address}: {str(ex)}", "error")
+        return redirect(url_for("mail_hub", box=box.id))
 
     @app.get("/database")
     @login_required
