@@ -19,6 +19,7 @@
   let busy = false;
   let failed = false;
   let refreshRequired = remote;
+  let autoFillPages = 0;
   const say = (message) => { loader.textContent = message; };
   const addRows = (html, replace) => {
     if (replace) container.innerHTML = html;
@@ -89,6 +90,13 @@
       say(error.message || "Synchronizace selhala. Obnov stránku a zkus to znovu.");
     } finally {
       busy = false;
+      // When 50 short rows do not fill the viewport, scrolling cannot happen.
+      // Fill up to three extra pages automatically; then wait for user scroll.
+      if (!failed && hasMore && autoFillPages < 3 &&
+          panel.scrollHeight <= panel.clientHeight + 60) {
+        autoFillPages += 1;
+        window.setTimeout(() => { void load(); }, 0);
+      }
     }
   };
   panel.addEventListener("scroll", () => {
