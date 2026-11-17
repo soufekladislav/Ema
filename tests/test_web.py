@@ -76,7 +76,7 @@ def test_login_uses_legacy_php_hero_without_open_registration(client):
     assert b"https://www.freshcrackers.cz/wp-content/uploads/2026/10/fresh-hub.png" in response.data
     assert b"https://www.freshcrackers.cz/wp-content/uploads/2023/10/Fresh-Crackers-Logo.png" in response.data
     assert b'rel="icon" type="image/png"' in response.data
-    assert "Projekty, klienti a komunikace.".encode() in response.data
+    assert "Emě stačí říct,".encode() in response.data
     assert b'name="csrf_token"' in response.data
     assert b'href="/register"' not in response.data
     assert "https://www.freshcrackers.cz" in response.headers["Content-Security-Policy"]
@@ -97,7 +97,7 @@ def test_project_index_is_primary_and_project_can_be_created(client):
     assert "/project/" in created.headers["Location"]
     assert b"Pilotni zakazka" in client.get("/").data
     project_html = client.get(created.headers["Location"]).data
-    assert b"Chat projektu" in project_html
+    assert "Chat s Emou nad projektem".encode() in project_html
     assert b"Projekt" in project_html
 
 
@@ -137,3 +137,85 @@ def test_hero_art_in_sidebar_and_project_chat(client):
     assert b'class="chat-hero-image"' in chat_html
     assert b'class="empty-state chat-empty-state"' in chat_html
     assert b"2026/10/fresh-hub.png" in chat_html
+
+
+def test_assistant_home_is_primary_and_ai_is_explicitly_disabled(client):
+    assert login(client, "alice@example.cz", "a-password-12345").status_code == 302
+    html = client.get("/").data
+    assert "Co dnes".encode() in html
+    assert "Chat s Emou".encode() in html
+    assert "AI zatím není připojena.".encode() in html
+    assert b'/assistant' in html
+    assert b'name="project_id"' in html
+
+
+def test_assistant_conversation_uses_selected_project_and_persists_personally(client, monkeypatch):
+    from ema.models import AssistantTurn
+    assert login(client, "alice@example.cz", "a-password-12345").status_code == 302
+    client.application.config.update(EMA_AI_ENGINE_API_KEY="test-engine-key", EMA_AI_ALLOWED_EMAILS="alice@example.cz")
+    project_id = client.application.test_ids["project"]
+    captured = {}
+    def fake_engine(**kwargs):
+        captured.update(kwargs)
+        return "Prověřila jsem stav projektu. Nic jsem nezměnila."
+    monkeypatch.setattr("ema.web.run_assistant", fake_engine)
+    response = client.post("/assistant", data={
+        "csrf_token": csrf(client), "project_id": str(project_id),
+        "body": "Na čem pracujeme?"
+    })
+    assert response.status_code == 302
+    assert "project=" in response.headers["Location"]
+    assert captured["project_id"] == project_id
+    assert [p.name for p in captured["projects"]] == ["Obchodní projekt"]
+    result = client.get(response.headers["Location"])
+    assert result.status_code == 200
+    assert "Na čem pracujeme?".encode() in result.data
+    assert "Nic jsem nezměnila.".encode() in result.data
+    assert "Na čem pracujeme?".encode() not in client.get("/").data
+    with __import__("sqlalchemy").orm.Session(client.application.extensions["ema_engine"]) as db:
+        turns = db.scalars(select(AssistantTurn).order_by(AssistantTurn.id)).all()
+        assert [(t.role, t.user_id, t.project_id) for t in turns] == [
+            ("user", 1, project_id), ("assistant", 1, project_id)]
+
+
+def test_project_only_guest_cannot_prompt_ai_with_other_project_data(client, monkeypatch):
+    assert login(client, "bob@example.cz", "b-password-12345").status_code == 302
+    client.application.config.update(EMA_AI_ENGINE_API_KEY="test-engine-key", EMA_AI_ALLOWED_EMAILS="bob@example.cz")
+    called = []
+    monkeypatch.setattr("ema.web.run_assistant", lambda **kw: (called.append(kw) or "OK"))
+    own = client.application.test_ids["project"]
+    assert client.post("/assistant", data={
+        "csrf_token": csrf(client), "project_id": "999999",
+        "body": "Přečti mi cizí projekt"
+    }).status_code == 403
+    assert not called
+    assert client.get("/?project=999999").status_code == 403
+    assert client.get(f"/?project={own}").status_code == 200
+    assert b"Klienti / CRM" not in client.get(f"/?project={own}").data
+
+
+def test_schema_upgrade_restores_mailbox_columns_without_data_loss(tmp_path):
+    from sqlalchemy import text, inspect
+    from ema.schema_upgrade import upgrade_schema
+    db_url = "sqlite:///" + str(tmp_path / "old-ema.sqlite")
+    engine, _ = make_session(db_url)
+    Base.metadata.create_all(engine)
+    with engine.begin() as conn:
+        # Simulate the pre-PR65 mailbox table on an existing SQLite pilot DB.
+        conn.execute(text("ALTER TABLE mailboxes DROP COLUMN smtp_username"))
+        conn.execute(text("ALTER TABLE mailboxes DROP COLUMN signature_html"))
+        conn.execute(text("INSERT INTO users (id,email,name,password_hash,active,superadmin) "
+                          "VALUES (1,'legacy@example.cz','Legacy','hash',1,0)"))
+        conn.execute(text("INSERT INTO organizations (id,name,active) VALUES (1,'Legacy org',1)"))
+        conn.execute(text("INSERT INTO mailboxes (id,organization_id,owner_id,label,address,username,"
+                          "imap_host,imap_port,smtp_host,smtp_port,credential,status,sync_error) "
+                          "VALUES (1,1,1,'Mailbox','legacy@example.cz','legacy@example.cz',"
+                          "'mail.example.cz',993,'mail.example.cz',465,'encrypted','not_synced','')"))
+    assert set(upgrade_schema(engine)) == {"mailboxes.smtp_username", "mailboxes.signature_html"}
+    assert upgrade_schema(engine) == []
+    with engine.begin() as conn:
+        row = conn.execute(text("SELECT address,smtp_username,signature_html FROM mailboxes WHERE id=1")).one()
+        assert row[0] == "legacy@example.cz"
+        assert row[1] == ""
+        assert row[2] == ""
+    assert inspect(engine).has_table("assistant_turns")
