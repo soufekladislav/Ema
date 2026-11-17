@@ -646,7 +646,7 @@ def create_app(test_config=None):
             flash(f"Zpráva přesunuta do složky {decode_modified_utf7(target.name)}. Nebyla trvale smazána.", "success")
         except MailError as ex:
             flash(str(ex), "error")
-        return redirect(url_for("mail_hub", box=box.id))
+        return redirect(url_for("mail_hub", box=box.id, folder=msg.folder_id))
 
     @app.post("/mail/order")
     @login_required
@@ -710,7 +710,14 @@ def create_app(test_config=None):
         g.db.commit()
         if field("return_to", 20) == "detail" and action != "unread":
             return redirect(url_for("mail_detail", org_id=box.organization_id, message_id=mail_id))
-        return redirect(url_for("mail_hub", box=box.id) if field("box", 20) else url_for("mail_hub"))
+        folder_id = positive_id("folder")
+        folder = g.db.get(MailFolder, folder_id) if folder_id else None
+        if folder and folder.mailbox_id != box.id:
+            folder_id = None
+        return redirect(
+            url_for("mail_hub", box=box.id, folder=folder_id)
+            if field("box", 20) else url_for("mail_hub")
+        )
 
     @app.post("/mail/<int:box_id>/sync")
     @login_required
@@ -1265,7 +1272,7 @@ def create_app(test_config=None):
         projs = g.db.scalars(select(Project).where(Project.organization_id == org_id)).all()
         return render("mail-detail", message=msg, selected_box=box, preview=preview,
                       warning=warning, show_images=show_images, starred=state.starred,
-                      companies=companies, projects=projs)
+                      mail_folder_id=folder.id, companies=companies, projects=projs)
 
     @app.post("/org/<int:org_id>/mail/message/<int:message_id>/link")
     @org_required
