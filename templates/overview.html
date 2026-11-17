@@ -106,7 +106,20 @@
     {% for c in contacts %}<tr><td>{{ c.name }}</td><td>{{ c.email or '—' }}</td><td>{{ c.phone or '—' }}</td><td>{{ orgs|selectattr('id','equalto',c.organization_id)|map(attribute='name')|first|default('—') }}</td></tr>
     {% else %}<tr><td colspan="4" class="muted">Bez kontaktů v dostupných firmách.</td></tr>{% endfor %}
     </tbody></table></div></div>
-  <div class="card panel"><h3>Importy a integrace</h3><p>CSV import kontaktů s metadaty a synchronizaci WooCommerce přes Fresh Core připravujeme jako samostatné bezpečně kontrolované kroky. Import nebude slučovat databáze různých firem.</p></div>
+  <div class="card panel"><h3>Import kontaktů z CSV</h3>
+    <p>Hromadné nahrání až 1 000 kontaktů. Podporované sloupce: jméno, příjmení, e-mail, telefon, firma; další sloupce se uloží jako metadata kontaktu.</p>
+    <p class="small muted">Každá dávka se ukládá pouze do vybrané firmy, duplicitní e-maily této firmy se přeskočí. Import sám o sobě nevytváří souhlas s marketingovým oslovováním.</p>
+    {% if eligible_orgs %}
+    <form method="post" action="{{ url_for('import_contacts_csv') }}" enctype="multipart/form-data" class="formstack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label>Vlastník klientské databáze<select name="organization_id" required>{% for o in eligible_orgs %}<option value="{{ o.id }}">{{ o.name }}</option>{% endfor %}</select></label>
+      <label>Soubor CSV (UTF-8 nebo Windows-1250, max. 950 kB)<input type="file" name="file" accept=".csv,text/csv" required></label>
+      <div class="ema-card-actions"><button class="btn" type="submit" name="mode" value="preview">Zkontrolovat bez importu</button>
+      <button class="btn primary" type="submit" name="mode" value="import">Importovat kontakty</button></div>
+    </form>
+    {% else %}<p>Pro import potřebuješ přiřazenou firmu.</p>{% endif %}
+    <p class="small muted">Propojení s WooCommerce přes Fresh Core: připravujeme řízenou synchronizaci, nikoliv přímé přepisování databáze.</p>
+  </div>
 {% elif section == 'tasks' %}
   {% if eligible_orgs %}
   <details class="card panel ema-new-inline"><summary>+ Nový úkol</summary>
