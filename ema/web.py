@@ -22,7 +22,7 @@ from .mail_service import MailError, encrypt_password, preview_message, send_pla
 from .mail_folders import (
     PAGE_SIZE, discover_folders, available_folders, decode_modified_utf7,
     fetch_folder_page, special_folder, move_message, move_many_messages,
-    append_sent_copy, empty_trash_batch, preview_trash_all, empty_trash_all,
+    append_sent_copy, empty_trash_batch, preview_trash_all, empty_trash_all, is_trash_folder,
 )
 from .assistant_service import AssistantError, run_assistant
 from .contact_import import ImportErrorCSV, extract_contacts
@@ -507,8 +507,7 @@ def create_app(test_config=None):
             initial_cursor=min((m.uid for m in messages), default=None),
             can_move_ids=syncable_ids,
             is_trash_folder=bool(selected and selected_folder and
-                                 (trash := special_folder(g.db, selected, "trash")) and
-                                 trash.id == selected_folder.id),
+                                 is_trash_folder(selected_folder)),
         )
 
     @app.post("/mail/<int:box_id>/page")
