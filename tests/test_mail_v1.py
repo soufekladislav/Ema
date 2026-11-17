@@ -85,7 +85,10 @@ def test_compose_reply_uses_exact_sender_and_company_contacts(seeded,monkeypatch
     called=[]
     def fake_send(box,key,to,cc,bcc,subject,body,*,reply_message_id=None,attachments=None):
         called.append((box.id,to,cc,bcc,subject,body,reply_message_id,attachments))
+        return b"From: test@example.cz\r\nTo: buyer@example.cz\r\n\r\nHello"
     monkeypatch.setattr("ema.web.send_composed",fake_send)
+    monkeypatch.setattr("ema.web.append_sent_copy", lambda db,box,key,data:
+                        MailFolder(name="Sent", mailbox_id=box.id))
     form={"csrf_token":csrf(client),"nonce":"unique-v1-send",
           "box_id":str(b),"reply_id":str(mid),"to":"buyer@example.cz",
           "cc":"coworker@example.cz","bcc":"","subject":"Re: Please send offer",
@@ -149,3 +152,79 @@ def test_pwa_shell_and_private_http_cache_policy(seeded):
     mailbox=client.get("/mail")
     assert mailbox.headers["Cache-Control"]=="no-store"
     assert b"manifest.webmanifest" in mailbox.data
+
+
+def test_compose_smtp_success_but_sent_append_failure_never_resends(seeded, monkeypatch):
+    from ema.mail_service import MailError
+    client = seeded
+    login(client, "owner")
+    called = []
+    def fake_send(*args, **kwargs):
+        called.append("smtp")
+        return b"From: test@example.cz\\r\\nTo: a@example.cz\\r\\n\\r\\nHello"
+    def fail_append(*args, **kwargs):
+        raise MailError("Složka Odeslané chybí")
+    monkeypatch.setattr("ema.web.send_composed", fake_send)
+    monkeypatch.setattr("ema.web.append_sent_copy", fail_append)
+    form = {"csrf_token": csrf(client), "nonce": "sent-no-copy-test",
+            "box_id": str(client.ids_v1["box"]), "to": "a@example.cz",
+            "subject": "Pilot", "body": "Pozdrav"}
+    one = client.post("/mail/compose/send", data=form)
+    assert one.status_code == 302 and called == ["smtp"]
+    with Session(client.application.extensions["ema_engine"]) as db:
+        outbound = db.scalar(select(Outbound).where(Outbound.nonce == "sent-no-copy-test"))
+        assert outbound.state == "sent_no_copy"
+    two = client.post("/mail/compose/send", data=form)
+    assert two.status_code == 302 and called == ["smtp"]
+
+
+def test_aggregate_sync_one_is_scoped_and_only_fetches_latest_50(seeded, monkeypatch):
+    client = seeded
+    login(client, "owner")
+    calls = []
+    def fake_page(db, box, key, folder, **kwargs):
+        calls.append((box.id, folder.name, kwargs["limit"]))
+        folder.uidvalidity = 9
+        db.commit()
+        return {"server_total": 12, "uids": [7], "uidvalidity": 9}
+    monkeypatch.setattr("ema.web.fetch_folder_page", fake_page)
+    response = client.post("/mail/aggregate/sync-one",
+                           json={"box_id": client.ids_v1["box"]},
+                           headers={"X-CSRF-Token": csrf(client)})
+    assert response.status_code == 200
+    assert response.json["server_total"] == 12
+    assert calls == [(client.ids_v1["box"], "INBOX", 50)]
+    denied = client.post("/mail/aggregate/sync-one",
+                         json={"box_id": client.ids_v1["other"]},
+                         headers={"X-CSRF-Token": csrf(client)})
+    assert denied.status_code == 403 and len(calls) == 1
+
+
+def test_empty_trash_requires_confirmation_and_mailbox_manage(seeded, monkeypatch):
+    client = seeded
+    login(client, "owner")
+    with Session(client.application.extensions["ema_engine"]) as db:
+        folder = MailFolder(mailbox_id=client.ids_v1["box"], name="INBOX.Trash",
+                            delimiter=".", special_use=r"\\Trash", uidvalidity=9)
+        db.add(folder)
+        db.commit()
+        trash_id = folder.id
+    called = []
+    def fake_empty(db, box, key, folder, *, limit):
+        called.append((box.id, folder.id, limit))
+        return 2, False
+    monkeypatch.setattr("ema.web.empty_trash_batch", fake_empty)
+    path = "/mail/{}/trash/empty".format(client.ids_v1["box"])
+    missing = client.post(path, data={"csrf_token": csrf(client),
+                                      "folder_id": str(trash_id)})
+    assert missing.status_code == 400
+    ok = client.post(path, data={"csrf_token": csrf(client),
+                                  "folder_id": str(trash_id),
+                                  "confirmation": "permanently-delete"})
+    assert ok.status_code == 302
+    assert called == [(client.ids_v1["box"], trash_id, 100)]
+    guest = client.application.test_client()
+    login(guest, "guest")
+    assert guest.post(path, data={"csrf_token": csrf(guest),
+                                   "folder_id": str(trash_id),
+                                   "confirmation": "permanently-delete"}).status_code == 403
