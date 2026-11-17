@@ -49,7 +49,7 @@ def extract_contacts(data):
         first = pick("jmeno", "first name", "firstname")
         last = pick("prijmeni", "last name", "lastname")
         name = pick("name", "full name", "cele jmeno", "kontakt", "contact") or (first + " " + last).strip()
-        email = pick("email", "e mail", "mail", "e-mailova adresa").lower()
+        email = pick("email", "e mail", "e-mail", "mail", "e-mailova adresa").lower()
         phone = pick("telefon", "phone", "mobile", "mobil", "tel")
         company = pick("firma", "company", "organization", "spolecnost")
         if not name:
@@ -60,7 +60,7 @@ def extract_contacts(data):
             raise ImportErrorCSV(f"Řádek {index}: neplatný formát e-mailu.")
         used = {"name", "full name", "cele jmeno", "kontakt", "contact",
                 "jmeno", "first name", "firstname", "prijmeni", "last name", "lastname",
-                "email", "e mail", "mail", "e-mailova adresa", "telefon", "phone",
+                "email", "e mail", "e-mail", "mail", "e-mailova adresa", "telefon", "phone",
                 "mobile", "mobil", "tel", "firma", "company", "organization", "spolecnost"}
         custom = {key: value[:300] for key, value in fields.items() if key not in used and value}
         if len(json.dumps(custom, ensure_ascii=False)) > 4000:
