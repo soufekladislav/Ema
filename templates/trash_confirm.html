@@ -5,10 +5,13 @@
   <h1>Opravdu vysypat celý Koš?</h1>
   <p>Vybraná schránka: <strong>{{ box.label }} ({{ box.address }})</strong></p>
   <p>Serverová složka: <strong>{{ folder.name }}</strong></p>
-  <p class="ema-trash-confirm-count">
-    Počet zpráv ověřený přímo na IMAP serveru:
-    <strong>{{ '{:,}'.format(snapshot.count).replace(',', ' ') }}</strong>
-  </p>
+  <p class="ema-trash-confirm-count">Celkem zpráv na IMAP serveru (včetně již označených ke smazání):
+    <strong>{{ '{:,}'.format(snapshot.count).replace(',', ' ') }}</strong></p>
+  <p>Viditelné zprávy v Koši: <strong>{{ '{:,}'.format(snapshot.visible_count).replace(',', ' ') }}</strong>
+     · Nepřečtené: <strong>{{ '{:,}'.format(snapshot.unread_count).replace(',', ' ') }}</strong>
+     · Již označené ke smazání: <strong>{{ '{:,}'.format(snapshot.already_deleted).replace(',', ' ') }}</strong></p>
+  <p class="small muted">Roundcube může u ikony složky zobrazovat počet nepřečtených, nikoli všechny zprávy.
+     Značka \\Deleted neznačí fyzické smazání – proto se mohou čísla lišit.</p>
   {% if snapshot.count %}
   <p><strong>Všechny zprávy z tohoto Koše budou trvale odstraněny.</strong>
      Nepřesunou se do jiné složky a operaci nelze vrátit.
