@@ -318,3 +318,30 @@
 .ema-mail-html-frame{min-height:420px;height:65vh}
 .ema-mail-image-warning .btn{width:100%;text-align:center}
 }
+
+/* EMA Mail V0.3: only the message pane scrolls, header and folders stay in place. */
+.ema-mail-hub{align-items:stretch}
+.ema-mail-hub-sidebar{max-height:calc(100dvh - 210px);overflow-y:auto;overscroll-behavior:contain}
+.ema-mail-hub-messages{display:flex;flex-direction:column;min-height:0;max-height:calc(100dvh - 210px);overflow:hidden}
+.ema-mail-hub-messages > .ema-card-head,.ema-mail-folder-toolbar,.ema-mail-sync-controls{flex-shrink:0}
+.ema-mail-scrollpanel{flex:1;min-height:220px;max-height:100%;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;scrollbar-gutter:stable}
+.ema-mail-loader{padding:16px;text-align:center;color:#66805c;font-size:11px;min-height:46px}
+.ema-mail-folder-toolbar{display:flex;gap:12px;flex-wrap:wrap;align-items:end;padding:9px 0 5px}
+.ema-mail-folder-form{display:flex;gap:7px;align-items:end;flex:1;min-width:250px}
+.ema-mail-folder-form label{font-weight:700;font-size:12px}
+.ema-mail-folder-form select{height:38px;flex:1;min-width:140px}
+.ema-mail-folder-toolbar .btn{font-size:11px;min-height:38px}
+.ema-mail-hub .ema-message-list{flex:none}
+.ema-message-actions{display:flex;gap:4px;align-items:center;justify-content:flex-end;flex-wrap:wrap;min-width:115px}
+.ema-mail-icon{height:28px;min-width:26px;display:inline-flex;align-items:center;justify-content:center;border:1px solid #e1ebda;border-radius:6px;color:#607e41;background:#fff;font-size:16px;cursor:pointer}
+.ema-mail-icon:hover{background:#eef7e5}
+.ema-mail-trash{color:#b94a3e}
+.ema-mail-trash:hover{background:#fff1ef}
+.ema-message-actions .ema-mail-read-toggle{margin-top:0}
+.ema-mail-move-confirm-card{max-width:760px}
+@media(max-width:800px){
+.ema-mail-hub-sidebar{max-height:250px}
+.ema-mail-hub-messages{max-height:calc(100dvh - 160px)}
+.ema-mail-scrollpanel{height:65dvh;min-height:310px}
+.ema-message-actions{min-width:0}
+}
