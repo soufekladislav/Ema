@@ -15,7 +15,7 @@
 
 | Oblast / issue | Co existuje | Co zbývá / rozhodnutí |
 | --- | --- | --- |
-| **Mobil celá aplikace** #18, #76 / **PR #80** | Sdílené mobilní vysouvací menu, Ema obrázek uvnitř, kompaktní lišta, ovládání ×/mimo/Esc; testy HTML pro /, /mail, /projects, /database, /tasks, /account, /superadmin; CI **55 passed** | **Ostrý mobil 320/375/390/430/760 + tablet**, kontrola PWA a vizuálních přetečení; PR není sloučen ani nasazen |
+| **Mobil celá aplikace** #18, #76 / **PR #80** | Sdílené mobilní vysouvací menu, Ema obrázek uvnitř, kompaktní lišta, ovládání ×/mimo/Esc; testy HTML pro /, /mail, /projects, /database, /tasks, /account, /superadmin; CI **56 passed** (včetně dalších firemních/projektových podstránek) | **Ostrý mobil 320/375/390/430/760 + tablet**, kontrola PWA a vizuálních přetečení; PR není sloučen ani nasazen |
 | **EMA Mail V1** #75 + #32–#36 | Základ více schránek, souhrn, lazy stránkování hlaviček, serverové složky, MIME náhled, compose, PWA shell z PR #77; screenshoty prokazují živý seznam a počet schránek | Funkčnost některých operací není stabilní, v reálu chyby IMAP/SMTP/Koše; přejímku neuzavírat |
 | **Stabilizace pošty** #78 / **PR #79** | Fallback IMAP COPY/STORE pro servery bez MOVE, oddělení SMTP od IMAP Sent, preflight CC/BCC, souhrnný sync, bezpečné HTML, paměť stromu, dvoukrokové vysypání celého Koše; CI **66 passed** | Otestovat reálný IMAP/SMTP, zvláště Koš 3301 položek **pouze na testovacích datech** před nevratným produkčním krokem. PR není sloučen; neprovádět automatické retry SMTP |
 | **Gmail/Google OAuth** #74 | Existuje issue/zadání, ale z aktuálního průchodu není prokázána funkční OAuth cesta | Rozpracovat a samostatně ověřit Google login, účty, odpojení a nastavení hesel |
