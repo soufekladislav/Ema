@@ -2,7 +2,7 @@
 
 > **Projekt:** EMA — AI obchodní a projektová asistentka Fresh Crackers  
 > **Typ dokumentu:** Master specification / Product Requirements Document (PRD) / Project Map  
-> **Verze dokumentu:** 1.2 (doplněno: UX orientované primárně podle projektů, přihlášení podle původní PHP Emy)  
+> **Verze dokumentu:** 1.3 (doplněno: chat jako primární ovládání, Boban-style login, bezpečný pilot Fresh AI Engine)  
 > **Datum aktualizace:** 17. 11. 2026  
 > **Stav projektu:** Master zadání; Python V0.1 lokálně spuštěna, další funkcionality ve vývoji. Zde popsané plánované funkce nejsou automaticky implementované.  
 > **Cílová technologie:** Python + Flask + MariaDB, provoz typu Passenger/cPanel  
@@ -19,6 +19,7 @@
 | 1.0 | 16. 11. 2026 | První komplexní produktová a technická mapa |
 | **1.1** | **16. 11. 2026** | **Hierarchie uživatel → více firem → projekty, firemní a projektový chat, práva k poště a dokumentům, superadmin konzole, provozní a datová metrika, účty a kvóty, testy izolace** |
 | **1.2** | **17. 11. 2026** | **Projekt hlavní uživatelský kontext, firma pouze datová/účetní hranice a volitelný filtr; přihlášení převzato z PHP, s aktualizovaným obsahem** |
+| **1.3** | **17. 11. 2026** | **Upřesnění: primární obrazovkou je chat s Emou, projekt je jeho kontext, nikoli katalog karet; přihlášení vizuálně podle Bobana; pilotní AI pouze nad schváleným datovým rozsahem** |
 
 **Terminologie:** „**Firma (pracovní prostor)**“ = zákaznická/uživatelská organizace provozující Emu (`organizations`); „**klientská firma**“ = kontakt či odběratel vedený v CRM (`companies`). Tyto dvě odlišné věci nesmějí mít společná oprávnění ani jeden identifikátor.
 
@@ -28,6 +29,12 @@
 
 Přihlašovací obrazovka použije dvousloupcový layout, logo a původní úvodní obrázek z PHP Emy, s textem odpovídajícím současnému produktu. **Podrobnosti a kritéria:** [UX — Project First](UX_PROJECT_FIRST.md). Toto novější rozhodnutí má přednost před staršími návrhy, které označují firmu za hlavní pracovní prostor.
 
+
+### Nadřazené doplnění — chat-first verze 1.3
+
+**EMA JE ASISTENTKA; chat je výchozí pracovní obrazovka.** Uživatel si vybere projekt v kontextovém přepínači, ale komunikaci vede s jednou Emou. Lze také položit otázku nad přehledem všech projektů, ke kterým má uživatel přístup. Firma zůstává hranicí pro data a fakturaci; samostatný „firemní chat“ je v pilotu jen týmovou poznámkou, nikoliv AI asistentkou.
+
+Přihlašovací stránka **i vnitřní prostředí** se vizuálně přibližují Bobanovi (tmavá výrazná login stránka, hero, velký nadpis, compact login, ilustrace Emy vpravo; uvnitř chat a pravý projektový panel). Původní PHP obrázek a logo se zachovávají. Rozhodnutí upřesňuje verzi 1.2 v otázce výchozí obrazovky. Pilotní AI integrace musí zůstat explicitně opt-in, jen pro testovací uživatele, bez schopnosti sama provádět zápisy. **Podrobná realizace:** [EMA chat-first UX](EMA_CHAT_FIRST_UX.md).
 
 ---
 

@@ -16,8 +16,10 @@ from sqlalchemy.exc import IntegrityError
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from .mail_service import MailError, encrypt_password, preview_message, send_plain, sync_inbox, validate_mail_host
+from .assistant_service import AssistantError, run_assistant
+from .schema_upgrade import upgrade_schema
 from .models import (
-    Audit, Base, ChatMessage, Company, Contact, MailFolder, Mailbox, MailboxGrant, MailMessage,
+    Audit, AssistantTurn, Base, ChatMessage, Company, Contact, MailFolder, Mailbox, MailboxGrant, MailMessage,
     Membership, Opportunity, Organization, Outbound, Project, ProjectGrant,
     Task, User, make_session, now,
 )
@@ -158,6 +160,9 @@ def create_app(test_config=None):
         "SESSION_COOKIE_SAMESITE": "Lax",
         "PERMANENT_SESSION_LIFETIME": timedelta(hours=12),
         "MAX_CONTENT_LENGTH": 1024 * 1024,
+        "EMA_AI_ENGINE_BASE_URL": os.getenv("EMA_AI_ENGINE_BASE_URL", "https://aiengine.freshcrackers.cz"),
+        "EMA_AI_ENGINE_API_KEY": os.getenv("EMA_AI_ENGINE_API_KEY", ""),
+        "EMA_AI_ALLOWED_EMAILS": os.getenv("EMA_AI_ALLOWED_EMAILS", ""),
     }
     if test_config:
         config.update(test_config)
@@ -237,11 +242,69 @@ def create_app(test_config=None):
     @app.route("/")
     @login_required
     def home():
-        # Company is an optional filter, never a prerequisite to opening a project.
-        firm_id = request.args.get("firm", type=int)
-        accessible = base_context()["accessible_projects"]
-        projects = [p for p in accessible if p.organization_id == firm_id] if firm_id else accessible
-        return render("home", projects=projects, filter_org_id=firm_id)
+        # One conversational workspace with optional project context; never cross project ACLs.
+        raw_project = request.args.get("project")
+        selected = None
+        if raw_project is not None:
+            if not raw_project.isdigit() or int(raw_project) < 1:
+                abort(400, description="Neplatný projekt")
+            selected = project_or_403(int(raw_project))
+            g.project = selected
+            if g.db.scalar(select(Membership.id).where(
+                Membership.organization_id == selected.organization_id,
+                Membership.user_id == g.user.id)):
+                g.org = g.db.get(Organization, selected.organization_id)
+        project_scope = AssistantTurn.project_id == selected.id if selected else AssistantTurn.project_id.is_(None)
+        turns = g.db.scalars(select(AssistantTurn).where(
+            AssistantTurn.user_id == g.user.id, project_scope
+        ).order_by(AssistantTurn.id.desc()).limit(60)).all()
+        visible = base_context()["accessible_projects"]
+        allowed = {e.strip().lower() for e in app.config["EMA_AI_ALLOWED_EMAILS"].split(",") if e.strip()}
+        ai_ready = bool(app.config["EMA_AI_ENGINE_API_KEY"] and g.user.email.lower() in allowed)
+        selected_tasks = g.db.scalars(select(Task).where(
+            Task.project_id == selected.id, Task.organization_id == selected.organization_id
+        ).order_by(Task.id.desc()).limit(20)).all() if selected else []
+        return render("home", projects=visible, selected_project=selected,
+                      assistant_turns=list(reversed(turns)),
+                      ai_ready=ai_ready, selected_tasks=selected_tasks)
+
+    @app.post("/assistant")
+    @login_required
+    def ask_assistant():
+        allowed = {e.strip().lower() for e in app.config["EMA_AI_ALLOWED_EMAILS"].split(",") if e.strip()}
+        if not app.config["EMA_AI_ENGINE_API_KEY"] or g.user.email.lower() not in allowed:
+            flash("AI chat ještě není pro tento účet připojen. Správce musí nastavit Fresh AI Engine.", "error")
+            return redirect(url_for("home"))
+        pid = positive_id("project_id")
+        if field("project_id") and not pid:
+            abort(400, description="Neplatné ID projektu")
+        selected = project_or_403(pid) if pid else None
+        question = required("body", 4000)
+        scope = AssistantTurn.project_id == pid if pid else AssistantTurn.project_id.is_(None)
+        recent = g.db.scalars(select(AssistantTurn).where(
+            AssistantTurn.user_id == g.user.id, scope
+        ).order_by(AssistantTurn.id.desc()).limit(8)).all()
+        visible = base_context()["accessible_projects"]
+        tasks_for_context = g.db.scalars(select(Task).where(
+            Task.project_id == pid, Task.organization_id == selected.organization_id
+        ).order_by(Task.id.desc()).limit(30)).all() if selected else []
+        g.db.add(AssistantTurn(user_id=g.user.id, project_id=pid, role="user", body=question))
+        g.db.commit()
+        try:
+            answer = run_assistant(
+                key=app.config["EMA_AI_ENGINE_API_KEY"],
+                base_url=app.config["EMA_AI_ENGINE_BASE_URL"],
+                user_id=g.user.id, project_id=pid, question=question,
+                projects=[selected] if selected else visible,
+                selected_project=selected, tasks=tasks_for_context,
+                recent_turns=list(reversed(recent)),
+            )
+            g.db.add(AssistantTurn(user_id=g.user.id, project_id=pid, role="assistant", body=answer))
+            audit("assistant.reply", f"project:{pid or 'all'}", selected.organization_id if selected else None)
+            g.db.commit()
+        except AssistantError as exc:
+            flash(str(exc), "error")
+        return redirect(url_for("home", project=pid) if pid else url_for("home"))
 
     @app.post("/projects")
     @login_required
@@ -682,6 +745,15 @@ def create_app(test_config=None):
         """Create V0.1 baseline schema; use migrations for future schema changes."""
         Base.metadata.create_all(engine)
         click.echo("EMA V0.1 schema ready")
+
+    @app.cli.command("upgrade-db")
+    def upgrade_db():
+        """Add compatible columns and assistant table; preserve existing records."""
+        try:
+            applied = upgrade_schema(engine)
+        except Exception as exc:
+            raise click.ClickException(f"Upgrade failed: {exc}") from exc
+        click.echo("EMA schema upgrade complete: " + (", ".join(applied) if applied else "no mailbox changes"))
 
     @app.cli.command("bootstrap-admin")
     def bootstrap_admin():
