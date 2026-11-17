@@ -82,7 +82,7 @@ def make_preview(data, *, show_images=False, truncated=False):
                         base64.b64encode(payload).decode("ascii")
                     )
 
-    has_remote_images = bool(re.search(r"<img\\b[^>]*\\bsrc\\s*=\\s*['\"]?https?://", rich, re.I))
+    has_remote_images = bool(re.search(r"<img\b[^>]*\bsrc\s*=\s*['\"]?https?://", rich, re.I))
     if rich:
         def allowed(tag, name, value):
             if tag == "a" and name in ("href", "title"):
@@ -93,14 +93,16 @@ def make_preview(data, *, show_images=False, truncated=False):
                 if name in ("alt", "title"):
                     return len(value) <= 300
                 if name in ("width", "height"):
-                    return bool(re.fullmatch(r"\\d{1,4}", value))
+                    return bool(re.fullmatch(r"\d{1,4}", value))
                 if not show_images:
                     return False
                 if value.lower().startswith("cid:"):
                     return value[4:].strip("<> ").lower() in cid_images
+                if value.startswith("data:"):
+                    return value in cid_images.values()
                 return safe_image_url(value)
             if tag in ("td", "th") and name in ("colspan", "rowspan"):
-                return bool(re.fullmatch(r"\\d{1,2}", value))
+                return bool(re.fullmatch(r"\d{1,2}", value))
             return False
 
         # Substitute only recognized embedded images, and only after explicit consent.
@@ -108,13 +110,13 @@ def make_preview(data, *, show_images=False, truncated=False):
             def replace_cid(match):
                 cid = match.group(1).strip("<> ").lower()
                 return html.escape(cid_images.get(cid, ""), quote=True)
-            rich = re.sub(r"cid:([^'\"\\s>]+)", replace_cid, rich, flags=re.I)
+            rich = re.sub(r"cid:([^'\"\s>]+)", replace_cid, rich, flags=re.I)
         sanitized = bleach.clean(
             rich, tags=ALLOWED_TAGS, attributes=allowed,
             protocols={"http", "https", "mailto", "data"}, strip=True,
         )
         if not show_images:
-            sanitized = re.sub(r"<img\\b[^>]*>", '<span>[Obrázek skryt]</span>', sanitized, flags=re.I)
+            sanitized = re.sub(r"<img\b[^>]*>", '<span>[Obrázek skryt]</span>', sanitized, flags=re.I)
         img_policy = "https: data:" if show_images else "'none'"
         envelope = (
             "<!doctype html><html><head><meta charset='utf-8'>"
