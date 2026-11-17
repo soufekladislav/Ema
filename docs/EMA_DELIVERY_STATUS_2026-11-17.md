@@ -1,7 +1,7 @@
 # EMA – aktuální stav vývoje, ověření a třídění GitHub Issues
 **Datum:** 17. 11. 2026 · **Zdroj:** kód a PR na GitHubu, CI a uživatelské screenshoty z ostrého `hub.freshcrackers.cz`.
 
-> **Neplést stav kódu se stavem produkce.** `main` obsahuje sloučené základní PR do #77. PR #79 (poštovní stabilizace) a PR #80 (mobil napříč Emou) jsou samostatně otevřené a nelze je označit za ověřené na produkčním serveru. V screenshotu může být nasazená i pracovní větev; nelze ověřit commit běžícího Passengeru bez release údaje.
+> **Neplést stav kódu se stavem produkce.** `main` obsahuje sloučené základní PR do #77. PR #81 a PR #81 byly uzavřeny jako nahrazené a aktuálně otevřený je jednotný PR #81 a nelze je označit za ověřené na produkčním serveru. V screenshotu může být nasazená i pracovní větev; nelze ověřit commit běžícího Passengeru bez release údaje.
 
 ## Aktuální zásada řízení Issues
 
@@ -15,9 +15,9 @@
 
 | Oblast / issue | Co existuje | Co zbývá / rozhodnutí |
 | --- | --- | --- |
-| **Mobil celá aplikace** #18, #76 / **PR #80** | Sdílené mobilní vysouvací menu, Ema obrázek uvnitř, kompaktní lišta, ovládání ×/mimo/Esc; testy HTML pro /, /mail, /projects, /database, /tasks, /account, /superadmin; CI **56 passed** (včetně dalších firemních/projektových podstránek) | **Ostrý mobil 320/375/390/430/760 + tablet**, kontrola PWA a vizuálních přetečení; PR není sloučen ani nasazen |
+| **Mobil celá aplikace** #18, #76 / **PR #81** | Sdílené mobilní vysouvací menu, Ema obrázek uvnitř, kompaktní lišta, ovládání ×/mimo/Esc; testy HTML pro /, /mail, /projects, /database, /tasks, /account, /superadmin; CI **78 passed** (včetně dalších firemních/projektových podstránek) | **Ostrý mobil 320/375/390/430/760 + tablet**, kontrola PWA a vizuálních přetečení; PR není sloučen ani nasazen |
 | **EMA Mail V1** #75 + #32–#36 | Základ více schránek, souhrn, lazy stránkování hlaviček, serverové složky, MIME náhled, compose, PWA shell z PR #77; screenshoty prokazují živý seznam a počet schránek | Funkčnost některých operací není stabilní, v reálu chyby IMAP/SMTP/Koše; přejímku neuzavírat |
-| **Stabilizace pošty** #78 / **PR #79** | Fallback IMAP COPY/STORE pro servery bez MOVE, oddělení SMTP od IMAP Sent, preflight CC/BCC, souhrnný sync, bezpečné HTML, paměť stromu, dvoukrokové vysypání celého Koše; CI **66 passed** | Otestovat reálný IMAP/SMTP, zvláště Koš 3301 položek **pouze na testovacích datech** před nevratným produkčním krokem. PR není sloučen; neprovádět automatické retry SMTP |
+| **Stabilizace pošty** #78 / **PR #81** | Fallback IMAP COPY/STORE pro servery bez MOVE, oddělení SMTP od IMAP Sent, preflight CC/BCC, souhrnný sync, bezpečné HTML, paměť stromu, dvoukrokové vysypání celého Koše; CI **78 passed** | Otestovat reálný IMAP/SMTP, zvláště Koš 3301 položek **pouze na testovacích datech** před nevratným produkčním krokem. PR není sloučen; neprovádět automatické retry SMTP |
 | **Gmail/Google OAuth** #74 | Existuje issue/zadání, ale z aktuálního průchodu není prokázána funkční OAuth cesta | Rozpracovat a samostatně ověřit Google login, účty, odpojení a nastavení hesel |
 | **Worker/sync a provoz** #23, #33, #56–#59 | Základ přímého načítání IMAP a GitHub CI, informace o některých konektorech v UI | Časové synchronizace mimo otevřenou stránku, fronta s názvy, diagnostika, bezpečnostní a restore testy; prodražené nebo neověřené běhy označit, neuzavírat |
 
@@ -26,7 +26,7 @@
 | Issue | Prokázané v kódu / screenshotu | Nedokončeno |
 | --- | --- | --- |
 | #13–#17 | Flask app factory, MariaDB model, firmy/projekty/ACL, základ chatů a uživatelů | Kompletní acceptance včetně revokací, širšího autorizačního auditu a provozních migrací |
-| #18–#19 | Poppins, design systém, sidebar, chat, CI testy/fixtures | Responzivita všech obrazovek řešena PR #80; release gate, reálné zařízení |
+| #18–#19 | Poppins, design systém, sidebar, chat, CI testy/fixtures | Responzivita všech obrazovek řešena PR #81; release gate, reálné zařízení |
 | #20–#23 | Základ superadminu, účtů, oprávnění, health a mailbox status | Opravdová platformní izolace superadmina od obsahu, granularita práv, diagnostika workeru |
 | #28–#29 | Základ CRUD firem/kontaktů v CRM; základ importu CSV v kódu | Úplná historie, deduplikace, dry-run a akceptace konkrétních reálných importů |
 | #32–#37 | Více schránek a metadata-first UI, čtení/výpis/kompozice a části přenosů | Google OAuth, reálné chyby, přílohy/projektové připnutí, vlákna, automatický worker |
@@ -54,10 +54,20 @@
 
 ## Pořadí realizace
 
-1. **PR #79:** přijmout poštu na testovacím IMAP/SMTP a bezpečně ověřit Koš/Sent/HTML + novou zprávu.
-2. **PR #80:** na reálných mobilech projít všechny hlavní stránky; zachovat ilustraci a ověřit menu, formuláře, scroll a navigaci. Merge až po testu.
+1. **PR #81:** přijmout poštu na testovacím IMAP/SMTP a bezpečně ověřit Koš/Sent/HTML + novou zprávu.
+2. **PR #81:** na reálných mobilech projít všechny hlavní stránky; zachovat ilustraci a ověřit menu, formuláře, scroll a navigaci. Merge až po testu.
 3. **#74:** Google OAuth + nastavení schránek a přihlášení.
 4. **#56/#23:** provozní worker/monitoring a pravidelné bezduplicitní sync všech schránek.
 5. Teprve potom pokračovat v **AI Emě (#38–#43)** a obchodním workflow.
 
 **Pozn.:** GitHub API nedává prostřednictvím aktuálního konektoru možnost přímo měnit stav položek GitHub Project #10. Stav na boardu proto musí být synchronizován zvlášť; tento dokument a komentáře v Issues rozlišují skutečné doručení od plánů.
+
+## Doplňující revize podle ostrého testu 20:04 UTC
+
+**Jediná realizace pro další release:** [PR #81](https://github.com/soufekladislav/Ema/pull/81) (`release/ema-mail-mobile-20261117`). Původní poštovní PR #79 a mobilní PR #80 byly uzavřeny jako superseded, *ne jako nasazené*. Nezávislé nasazování PR79 / PR80 přepisovalo funkce; nyní jedna release větev kombinuje změny.
+
+- **Mobil:** chybu starého sidebaru zesilovala cache-first politika původního PWA workeru. Opraveno změnou SW a verzováním souborů; nový drawer s obrázkem Emy je pro všechny stránky.
+- **Pošta:** legacy IMAP bez MOVE/UIDPLUS může po COPY/STORE ukazovat v Roundcube šedý originál `\\Deleted`. Zdroj se vyčistí jen při ověřeném bezpečném seznamu UID, jinak Ema výslovně varuje.
+- **Koš:** Roundcube badge může být počet *nepřečtených*. V nové obrazovce jsou odděleně fyzické ALL, viditelné UNDELETED, nepřečtené UNSEEN UNDELETED a označené Deleted. Tlačítko je opět k dispozici u `INBOX.Trash` s dvojím potvrzením.
+- **HTML:** bezpečně zachována povolená část stylesheetů pro newslettery v sandboxovaném iframe. Externí obrázky po souhlasu, nikdy automaticky.
+- **CI:** [78 testů úspěšných](https://github.com/soufekladislav/Ema/actions/runs/44168240702). **Není potvrzena ostrá mobilní/IMAP přejímka** a nic nebylo nasazeno nebo nevratně smazáno.
