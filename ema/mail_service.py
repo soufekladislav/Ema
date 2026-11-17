@@ -6,7 +6,7 @@ import re
 import smtplib
 import socket
 import ssl
-from email.utils import getaddresses
+from email.utils import getaddresses, make_msgid, formatdate
 from pathlib import PurePath
 from datetime import timezone
 from email.headerregistry import Address
@@ -243,6 +243,8 @@ def send_composed(box, key, to, cc, bcc, subject, body, *, reply_message_id=None
         raise MailError("SMTP vyžaduje TLS na portu 465 nebo 587")
     msg = EmailMessage()
     msg["From"], msg["To"], msg["Subject"] = box.address, ", ".join(primary), subject
+    msg["Date"] = formatdate(localtime=True)
+    msg["Message-ID"] = make_msgid()
     if copy:
         msg["Cc"] = ", ".join(copy)
     if reply_message_id:
@@ -277,7 +279,8 @@ def send_composed(box, key, to, cc, bcc, subject, body, *, reply_message_id=None
                 smtp.login(getattr(box, "smtp_username", "") or box.username, password)
                 smtp.send_message(msg, to_addrs=recipients)
     except Exception as ex:
-        raise MailError("SMTP odeslání není potvrzené; ověřte Odeslané před opakováním") from ex
+        raise MailError("SMTP odeslání není potvrzené; ověřte doručení před opakováním") from ex
+    return msg.as_bytes()
 
 
 def send_plain(box, key, to_addr, subject, text):
