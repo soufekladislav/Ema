@@ -251,8 +251,8 @@ def test_global_mail_sync_action_is_available_only_to_mailbox_managers(web_clien
     login(client, "owner")
     page = client.get(f"/mail?box={box_id}")
     assert page.status_code == 200
-    assert "Načíst 10 e-mailů".encode() in page.data
-    assert "Schránka čeká na první synchronizaci".encode() in page.data
+    assert "Aktualizovat 50 zpráv".encode() in page.data
+    assert "Pošta zatím nesynchronizována".encode() in page.data
     captured = {}
     def fake_sync(db, box, key, limit):
         captured.update(mailbox_id=box.id, limit=limit)
