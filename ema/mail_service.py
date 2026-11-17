@@ -278,8 +278,14 @@ def send_composed(box, key, to, cc, bcc, subject, body, *, reply_message_id=None
                 smtp.ehlo()
                 smtp.login(getattr(box, "smtp_username", "") or box.username, password)
                 smtp.send_message(msg, to_addrs=recipients)
+    except smtplib.SMTPAuthenticationError as ex:
+        raise MailError("SMTP odmítlo přihlášení. Ověř SMTP login, heslo a nastavení portu 465/587.") from ex
+    except smtplib.SMTPRecipientsRefused as ex:
+        raise MailError("SMTP odmítlo alespoň jednoho příjemce. Zkontroluj adresy.") from ex
+    except (ssl.SSLError, socket.timeout, TimeoutError, OSError) as ex:
+        raise MailError("SMTP spojení selhalo nebo vypršelo; výsledek odeslání může být nejistý.") from ex
     except Exception as ex:
-        raise MailError("SMTP odeslání není potvrzené; ověřte doručení před opakováním") from ex
+        raise MailError("SMTP odeslání není potvrzené; ověř doručení před opakováním") from ex
     return msg.as_bytes()
 
 
