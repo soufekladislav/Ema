@@ -5,7 +5,7 @@ The IMAP server owns message history. Only headers and folder references enter M
 import base64
 import re
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from .mail_service import MailError, _connect, parse_metadata, quote_mailbox_name
 from .models import MailFolder, MailMessage, now
 
@@ -455,6 +455,116 @@ def empty_trash_batch(db, box, key, folder, *, limit=100):
         db.rollback()
         raise MailError(str(ex) if isinstance(ex, MailError)
                         else "Mazání Koše není potvrzené; ověřte jeho obsah na IMAP serveru") from None
+    finally:
+        try:
+            client.logout()
+        except Exception:
+            pass
+
+
+
+def _trash_selected_state(client, folder, *, readonly):
+    """Verify the real server Trash and capture a precise immutable UID boundary."""
+    typ, exists = client.select(quote_mailbox_name(folder.name), readonly=readonly)
+    if typ != "OK":
+        raise MailError("IMAP server neotevřel složku Koš")
+    valid = client.response("UIDVALIDITY")[1]
+    try:
+        uidvalidity = int(valid[0]) if valid and valid[0] else 0
+    except (ValueError, TypeError):
+        uidvalidity = 0
+    if not uidvalidity or (folder.uidvalidity and uidvalidity != folder.uidvalidity):
+        raise MailError("UIDVALIDITY Koše se změnilo. Obnovte složku před mazáním.")
+    typ, result = client.uid("SEARCH", None, "ALL")
+    if typ != "OK" or not result:
+        raise MailError("IMAP server nepotvrdil seznam zpráv v Koši")
+    uids = [int(uid) for uid in (result[0] or b"").split() if uid.isdigit()]
+    try:
+        exists_count = int(exists[0])
+    except (ValueError, TypeError, IndexError):
+        raise MailError("Nelze ověřit počet zpráv v Koši") from None
+    if exists_count != len(uids):
+        raise MailError("Obsah Koše se během kontroly změnil. Načtěte počet znovu.")
+    return {"count": len(uids), "uidvalidity": uidvalidity,
+            "max_uid": max(uids, default=0)}
+
+
+def _verify_trash_scope(db, box, folder):
+    if folder.mailbox_id != box.id:
+        raise MailError("Koš nepatří vybrané schránce")
+    detected = special_folder(db, box, "trash")
+    if not detected or detected.id != folder.id:
+        raise MailError("Tato složka není ověřeným IMAP Košem dané schránky")
+
+
+def preview_trash_all(db, box, key, folder):
+    """Read-only snapshot for a separate, explicit all-trash confirmation page."""
+    _verify_trash_scope(db, box, folder)
+    client = _connect(box, key)
+    try:
+        return _trash_selected_state(client, folder, readonly=True)
+    except Exception as ex:
+        raise MailError(str(ex) if isinstance(ex, MailError) else
+                        "Nepodařilo se ověřit obsah serverového Koše.") from None
+    finally:
+        try:
+            client.logout()
+        except Exception:
+            pass
+
+
+def empty_trash_all(db, box, key, folder, expected):
+    """Delete a confirmed *entire* Trash even on legacy IMAP without UIDPLUS.
+
+    Standard EXPUNGE is safe only in a verified Trash, not for arbitrary
+    folders or subsets. One UID STORE range, one server-side EXPUNGE.
+    The preview snapshot count/uidvalidity/highest UID must still match.
+    """
+    _verify_trash_scope(db, box, folder)
+    if (not isinstance(expected, dict) or
+            any(not isinstance(expected.get(k), int) or isinstance(expected.get(k), bool)
+                for k in ("count", "uidvalidity", "max_uid")) or
+            expected["count"] < 0 or expected["max_uid"] < 0):
+        raise MailError("Neplatné potvrzení vyprázdnění Koše")
+    client = _connect(box, key)
+    try:
+        observed = _trash_selected_state(client, folder, readonly=False)
+        if observed != expected:
+            raise MailError("Počet nebo UID zpráv v Koši se změnily od potvrzení. "
+                            "Nic nebylo smazáno, načtěte potvrzení znovu.")
+        if not observed["count"]:
+            return 0
+        # Never use UID 1:*: that could mark messages delivered during this request.
+        # Only existing UIDs <= the last UID the user explicitly confirmed.
+        sequence = f"1:{observed['max_uid']}"
+        typ, _ = client.uid("STORE", sequence, "+FLAGS.SILENT", r"(\Deleted)")
+        if typ != "OK":
+            raise MailError("IMAP server odmítl označení Koše k výmazu. "
+                            "Stav je nejistý; zkontrolujte Koš před opakováním.")
+        capabilities = {word.upper() for item in getattr(client, "capabilities", [])
+                        for word in (item if isinstance(item, bytes) else str(item).encode()).split()}
+        if b"UIDPLUS" in capabilities:
+            typ, _ = client.uid("EXPUNGE", sequence)
+        else:
+            # The user explicitly chose EMPTY ENTIRE TRASH (not a subset).
+            # This is the sole place regular EXPUNGE is allowed.
+            typ, _ = client.expunge()
+        if typ != "OK":
+            raise MailError("IMAP server nepotvrdil vyprázdnění Koše. "
+                            "Zkontrolujte skutečný stav na serveru; automaticky neopakujte.")
+        # One SQL statement, independent of how many remote messages existed.
+        db.execute(update(MailMessage).where(
+            MailMessage.mailbox_id == box.id,
+            MailMessage.folder_id == folder.id,
+            MailMessage.uidvalidity == observed["uidvalidity"],
+            MailMessage.uid <= observed["max_uid"]
+        ).values(moved=True))
+        db.commit()
+        return observed["count"]
+    except Exception as ex:
+        db.rollback()
+        raise MailError(str(ex) if isinstance(ex, MailError)
+                        else "Vyprázdnění Koše není potvrzené; ověřte stav na IMAP serveru") from None
     finally:
         try:
             client.logout()
