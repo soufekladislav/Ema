@@ -210,21 +210,33 @@ def fetch_folder_page(db, box, key, folder, *, before_uid=None, limit=PAGE_SIZE)
 
 
 def special_folder(db, box, action):
-    """Respect IMAP SPECIAL-USE flags; never guess the Trash destination."""
+    """Resolve a real IMAP destination; favor SPECIAL-USE, then known folder leaves.
+
+    Names may be hierarchical (INBOX.Trash, INBOX/Sent), and the delimiter
+    must come from LIST rather than assuming a slash.
+    """
     folders = available_folders(db, box)
-    if action == "trash":
-        options = [f for f in folders if "\\trash" in (f.special_use or "").lower()]
-        if not options:
-            options = [f for f in folders if f.name.lower().rsplit("/", 1)[-1] in ("trash", "deleted messages", "koš")]
-    elif action == "archive":
-        options = [f for f in folders if "\\archive" in (f.special_use or "").lower()]
-        if not options:
-            options = [f for f in folders if "\\all" in (f.special_use or "").lower()]
-        if not options:
-            options = [f for f in folders if f.name.lower().rsplit("/", 1)[-1] == "archive"]
-    else:
-        options = []
-    return options[0] if options else None
+    flags = {"trash": r"\Trash", "archive": r"\Archive", "sent": r"\Sent"}
+    flag = flags.get(action, "").lower()
+    if flag:
+        by_flag = [f for f in folders if flag in (f.special_use or "").lower().split()]
+        if by_flag:
+            return by_flag[0]
+    if action == "archive":
+        by_all = [f for f in folders if r"\all" in (f.special_use or "").lower().split()]
+        if by_all:
+            return by_all[0]
+    names = {
+        "trash": {"trash", "deleted messages", "deleted items", "deleted", "koš", "kos", "bin"},
+        "archive": {"archive", "archiv"},
+        "sent": {"sent", "sent items", "sent mail", "odeslané", "odeslane", "odeslaná pošta"},
+    }.get(action, set())
+    for f in folders:
+        decoded = decode_modified_utf7(f.name).casefold()
+        delimiter = f.delimiter or "/"
+        if decoded.rsplit(delimiter, 1)[-1] in names:
+            return f
+    return None
 
 
 def move_message(db, box, key, msg, action):
@@ -235,14 +247,18 @@ def move_message(db, box, key, msg, action):
     if src is None or src.mailbox_id != box.id or src.uidvalidity != msg.uidvalidity:
         raise MailError("Složka nebo UID zprávy se změnily. Nejdříve obnovte přehled")
     target = special_folder(db, box, action)
-    if not target:
-        raise MailError("Cílová IMAP složka nebyla nalezena. Nejprve načti seznam složek")
-    if target.id == src.id:
-        raise MailError("Zpráva je již v cílové složce")
     client = _connect(box, key)
     try:
-        capabilities = {x.upper() if isinstance(x, bytes) else str(x).upper().encode()
-                        for x in getattr(client, "capabilities", [])}
+        # Folder LIST may not have run yet (especially on imported mailboxes).
+        if target is None:
+            _discover_on_client(db, box, client)
+            target = special_folder(db, box, action)
+        if target is None:
+            raise MailError("Cílová složka Koš/Archiv nebyla na IMAP serveru nalezena; zkontrolujte názvy složek.")
+        if target.id == src.id:
+            raise MailError("Zpráva je již v cílové složce")
+        capabilities = {word.upper() for item in getattr(client, "capabilities", [])
+                        for word in (item if isinstance(item, bytes) else str(item).encode()).split()}
         if b"MOVE" not in capabilities:
             raise MailError("Server nepodporuje bezpečný přesun UID MOVE; schránka se nezměnila")
         validity, _ = _select(client, src)
@@ -264,6 +280,37 @@ def move_message(db, box, key, msg, action):
         db.rollback()
         raise MailError(str(ex) if isinstance(ex, MailError)
                         else "Přesun IMAP zprávy není potvrzen; ověřte ji na serveru") from None
+    finally:
+        try:
+            client.logout()
+        except Exception:
+            pass
+
+
+
+def append_sent_copy(db, box, key, raw_message):
+    """After confirmed SMTP send, store a copy in the *actual* remote Sent folder.
+
+    This must never trigger a second SMTP attempt. A failed APPEND means sent
+    without a confirmed copy, not failed mail delivery.
+    """
+    if not raw_message or len(raw_message) > 25_000_000:
+        raise MailError("Odeslaná zpráva nemá platný formát pro uložení kopie")
+    client = _connect(box, key)
+    try:
+        _discover_on_client(db, box, client)
+        destination = special_folder(db, box, "sent")
+        if destination is None:
+            raise MailError("Na IMAP serveru není rozpoznána složka Odeslané")
+        status, _ = client.append(quote_mailbox_name(destination.name), r"(\Seen)", None, raw_message)
+        if status != "OK":
+            raise MailError("IMAP server odmítl uložit kopii do složky Odeslané")
+        db.commit()
+        return destination
+    except Exception as ex:
+        db.rollback()
+        raise MailError(str(ex) if isinstance(ex, MailError)
+                        else "Kopii odeslaného e-mailu se nepodařilo uložit do IMAP") from None
     finally:
         try:
             client.logout()
