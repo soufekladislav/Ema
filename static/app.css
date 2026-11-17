@@ -68,3 +68,19 @@
   .project-nav-item{flex:0 0 162px;min-width:0}
   .project-filter select{max-width:100%;flex:1}
 }
+
+/* Brand artwork provided in PR review #66. All images are decorative; navigation remains accessible. */
+.sidebar-logo{width:42px;height:42px;object-fit:contain;background:#f5f8ee;border-radius:11px;flex-shrink:0}
+.sidebar-hero{display:flex;flex-direction:column;align-items:center;gap:3px;min-height:92px;padding:7px 12px;margin:0 5px 8px;border:1px solid #34483b;border-radius:12px;background:linear-gradient(150deg,#1e3026,#243c2a);color:#e8f5e4}
+.sidebar-hero:hover{background:#2b4332;border-color:#526c4d}
+.sidebar-hero img{display:block;max-width:100%;width:150px;height:65px;object-fit:contain}
+.sidebar-hero span{font-size:10px;font-weight:600;color:#c6d7c6}
+.chat-page-head{align-items:center}
+.chat-hero-image{display:block;width:134px;height:100px;object-fit:contain;flex-shrink:0;margin-left:auto}
+.chat-empty-state img{display:block;width:155px;max-width:70%;max-height:120px;height:auto;object-fit:contain;margin:0 auto 12px}
+.chat-empty-state p{margin:0}
+@media(max-width:760px){
+  .sidebar-hero{display:none}
+  .sidebar-logo{width:35px;height:35px}
+  .chat-hero-image{width:90px;height:70px}
+}
