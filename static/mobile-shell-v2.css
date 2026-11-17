@@ -1,0 +1,95 @@
+/* EMA 2026-11-17 Mobile Shell V2.
+ * Separate asset path bypasses old service worker's cache-first app.css.
+ * One drawer for all logged-in pages, not just .ema-screen-mail.
+ */
+.ema-appmenu-backdrop[hidden]{display:none!important}
+@media (max-width:760px) {
+  html, body {max-width:100%;overflow-x:clip}
+  body .layout {display:block!important;width:100%;min-width:0;min-height:100dvh}
+  body .layout > .workspace {width:100%;min-width:0;max-width:100%}
+  body .layout > aside.sidebar {
+    display:none!important;position:fixed!important;inset:0 auto 0 0!important;
+    width:min(316px,87vw)!important;max-width:87vw!important;height:100dvh!important;
+    min-height:0!important;max-height:100dvh!important;z-index:1001!important;
+    overflow-y:auto!important;overflow-x:hidden!important;overscroll-behavior:contain;
+    padding:calc(13px + env(safe-area-inset-top, 0px)) 12px calc(13px + env(safe-area-inset-bottom, 0px))!important;
+    flex-direction:column!important;gap:6px!important;
+    box-shadow:12px 0 42px rgba(0,0,0,.3)
+  }
+  body.ema-appmenu-open .layout > aside.sidebar {display:flex!important}
+  body.ema-appmenu-open {overflow:hidden;touch-action:pan-y}
+  #ema-appmenu-backdrop:not([hidden]) {
+    display:block!important;position:fixed!important;inset:0!important;z-index:1000!important;
+    background:rgba(6,17,12,.63)!important;opacity:1!important;border:0!important;
+    border-radius:0!important;padding:0!important;width:100vw;height:100dvh
+  }
+  body .layout > .sidebar .brand {display:flex!important;margin:0 42px 10px 0!important;padding:2px 6px!important}
+  body .layout > .sidebar .sidebar-hero {
+    display:flex!important;flex-direction:column!important;justify-content:center;align-items:center;
+    min-height:112px!important;margin:0 4px 10px!important;padding:8px 12px!important
+  }
+  body .layout > .sidebar .sidebar-hero img {
+    display:block!important;max-width:100%!important;width:166px!important;height:80px!important;
+    object-fit:contain!important
+  }
+  body .layout > .sidebar .sidebar-hero span {display:block!important;font-size:11px}
+  body .layout > .sidebar .label {display:block!important;margin:12px 12px 5px!important}
+  body .layout > .sidebar .main-nav {display:grid!important;overflow:visible!important;gap:3px!important}
+  body .layout > .sidebar .main-nav a {
+    display:flex!important;align-items:center!important;min-height:45px!important;white-space:normal!important;
+    padding:10px 12px!important;font-size:13px!important
+  }
+  body .layout > .sidebar .sidebar-bottom {display:flex!important;margin-top:auto!important}
+  #ema-appmenu-close {
+    display:flex!important;align-items:center;justify-content:center;position:absolute!important;
+    top:calc(10px + env(safe-area-inset-top, 0px));right:10px;
+    width:39px!important;height:39px!important;border-radius:10px!important;
+    background:#283a30!important;color:#fff!important;border:1px solid #586655!important;
+    font-size:26px!important;line-height:1!important;font-weight:500
+  }
+  #ema-mobile-nav-toggle {
+    display:flex!important;align-items:center;justify-content:center;
+    width:42px!important;height:42px!important;min-width:42px!important;
+    border:1px solid #dae4d3!important;border-radius:10px!important;background:#fff!important;
+    color:#182219!important;font-size:21px!important
+  }
+  .topbar.ema-topbar {
+    position:relative!important;display:flex!important;flex-wrap:nowrap!important;align-items:center!important;
+    gap:7px!important;width:100%!important;min-width:0!important;height:auto!important;
+    min-height:56px!important;padding:7px 9px!important
+  }
+  .ema-topbar-brand {width:auto!important;min-width:0!important;flex:1 1 auto!important}
+  .ema-topbar-brand .top-subtitle{display:none!important}
+  .topbar.ema-topbar .ema-global-filter {
+    display:flex!important;flex-direction:row!important;flex-wrap:nowrap!important;
+    align-items:center!important;gap:4px!important;min-width:0!important;
+    max-width:185px!important;width:auto!important;flex:0 1 185px!important;margin:0!important
+  }
+  .ema-topbar .ema-global-filter label {display:none!important}
+  .ema-topbar .ema-global-filter select {
+    display:block!important;flex:1 1 auto!important;min-width:0!important;max-width:100%!important;
+    width:100%!important;padding:7px 5px!important;font-size:11px!important
+  }
+  .ema-topbar .ema-global-filter .btn {
+    display:flex!important;flex:0 0 auto!important;min-width:35px!important;min-height:36px!important;
+    padding:6px 7px!important;font-size:10px!important
+  }
+  body:not(.ema-screen-mail) main.content {
+    width:100%!important;max-width:100%!important;min-width:0!important;
+    margin:0!important;padding:16px 12px 55px!important
+  }
+  body .content .card,body .content .panel,body .content .page-head,body .content .ema-hub-head {
+    min-width:0;max-width:100%;overflow-wrap:anywhere
+  }
+  .ema-global-cards,.metrics,.cards3,.two-col,.chat-layout {grid-template-columns:minmax(0,1fr)!important}
+  .ema-card-actions,.ema-task-right {flex-wrap:wrap!important;max-width:100%}
+  .table-wrap {max-width:100%;overflow-x:auto;overscroll-behavior-x:contain}
+}
+@media (max-width:375px) {
+  .topbar.ema-topbar .ema-global-filter{max-width:153px!important;flex-basis:153px!important}
+  .ema-topbar .ema-global-filter .btn{font-size:0!important}
+  .ema-topbar .ema-global-filter .btn::after{content:"✓";font-size:15px}
+}
+@media (min-width:761px) {
+  #ema-appmenu-backdrop,#ema-appmenu-close,#ema-mobile-nav-toggle {display:none!important}
+}
