@@ -320,7 +320,7 @@ def create_app(test_config=None):
                       assistant_turns=list(reversed(turns)),
                       ai_ready=ai_ready, selected_tasks=selected_tasks,
                       reminders=reminders, reminder_projects={p.id: p.name for p in visible},
-                      is_first_setup=not bool(ctx["orgs"]))
+                      today=now().date(), is_first_setup=not bool(ctx["orgs"]))
 
     @app.post("/account/scope")
     @login_required
