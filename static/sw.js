@@ -28,7 +28,7 @@ self.addEventListener("fetch",(event)=>{
   // Stylesheets and JS must ALWAYS be fetched from server. No stale cache-first
   // app.css/mail-v1.js after future deploys, even when old files keep same names.
   if(url.pathname.startsWith("/static/"))return;
-  if(req.mode==="navigate"){
+  if (req.mode === "navigate") {
     event.respondWith(fetch(req).catch(async()=>(await caches.open(VERSION)).match("/static/offline.html")));
   }
   // No other responses (API, mail content, files or logged-in HTML) are cached.
