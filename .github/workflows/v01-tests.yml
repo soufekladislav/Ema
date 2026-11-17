@@ -25,7 +25,7 @@ jobs:
           python-version: '3.11'
       - run: python -m pip install -r requirements-dev.txt
       - run: python -m compileall -q ema
-      - run: node --check static/pwa-install-v1.js
+      - run: node --check static/pwa-install-v2.js
       - run: node --check static/pwa.js
       - run: node --check static/mobile-shell-v2.js
       - run: python -m pytest -q
