@@ -41,5 +41,5 @@ Větev navazuje na merged PR #77 a řeší P0 #78. **Oprava v repozitáři není
 
 - Schránka bez IMAP MOVE → nově bezpečný COPY+STORE bez EXPUNGE zdroje. Testovat jednou vlastní zprávou a ověřit cíl i zdroj u skutečného poskytovatele.
 - Schránka bez UIDPLUS → vysypání Koše je kompatibilní, jen pokud celý Koš má max 100 zpráv, jinak hlásí jasnou bezpečnostní výjimku. Trvalý výmaz dělat na testovacích zprávách.
-- SMTP formát adresy: především **preflight validace před vytvořením outbound pokusu**; odmítnutý vstup znamená neodesláno, rozepsaná zpráva zůstane v editoru, není nutné „ověřovat doručení“.
+- SMTP formát adresy: především **preflight validace před vytvořením outbound pokusu**; odmítnutý vstup znamená neodesláno, rozepsaná zpráva zůstane v editoru, není nutné „ověřovat doručení“. Zjištěna i konkrétní chyba parseru: prázdné **nepovinné** pole CC/BCC dříve vyvolalo `Zkontrolujte formát adres příjemců`, i když samotný příjemce byl správně. V1.1 vrací pro prázdnou CC/BCC seznam `[]` a pokračuje.
 - Chyba IMAP načítání: neznáme příčinu z obrázku. Nová diagnostická hláška obsahuje bezpečně jen fázi LIST/SELECT/SEARCH/FETCH/DATABASE a typ chyby bez citlivého obsahu. Podle výsledku z testu pokračovat cíleně.
