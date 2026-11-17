@@ -6,6 +6,7 @@ import secrets
 from datetime import datetime, timedelta
 from functools import wraps
 from pathlib import Path
+from email.utils import parseaddr
 
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
@@ -16,7 +17,7 @@ from sqlalchemy import func, select, text, or_, and_, case
 from sqlalchemy.exc import IntegrityError
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from .mail_service import MailError, encrypt_password, preview_message, send_plain, sync_inbox, validate_mail_host
+from .mail_service import MailError, encrypt_password, preview_message, send_plain, send_composed, sync_inbox, validate_mail_host
 from .mail_folders import (
     PAGE_SIZE, discover_folders, available_folders, decode_modified_utf7,
     fetch_folder_page, special_folder, move_message,
@@ -746,6 +747,134 @@ def create_app(test_config=None):
                     continue
             flash(f"Přesunuto {done} zpráv, {failed} nepřesunuto. Při chybě zkontroluj server.", "success" if not failed else "error")
         return redirect(url_for("mail_hub"))
+
+    @app.get("/mail/compose")
+    @login_required
+    def compose_mail():
+        ctx, orgs, _ = current_scope()
+        boxes = visible_mailboxes(g.db, g.user.id, orgs)
+        can_send = []
+        for box in boxes:
+            try:
+                mailbox_access(g.db, g.user.id, box.id, send=True)
+                can_send.append(box)
+            except Forbidden:
+                continue
+        reply_id = request.args.get("reply_id", type=int)
+        forward_id = request.args.get("forward_id", type=int)
+        if reply_id and forward_id:
+            abort(400)
+        source_id = reply_id or forward_id
+        source = g.db.get(MailMessage, source_id) if source_id else None
+        if source_id and (source is None or source.moved):
+            abort(404)
+        if source:
+            src_box = mailbox_or_403(source.mailbox_id, send=True)
+            try:
+                organization_access(g.db, g.user.id, src_box.organization_id)
+            except Forbidden:
+                abort(403)
+            if not any(b.id == src_box.id for b in can_send):
+                abort(403)
+            active_box = src_box
+        else:
+            chosen = request.args.get("box", type=int)
+            active_box = next((b for b in can_send if b.id == chosen), can_send[0] if can_send else None)
+        subject, recipient, content = "", "", ""
+        if source:
+            subject = source.subject or ""
+            if reply_id:
+                subject = subject if subject.lower().startswith("re:") else "Re: " + subject
+                recipient = parseaddr(source.sender or "")[1]
+            else:
+                subject = subject if subject.lower().startswith("fw:") else "Fw: " + subject
+                content = ("\n\n--- Přeposlaný e-mail ---\n"
+                           "Od: " + (source.sender or "") + "\n"
+                           "Předmět: " + (source.subject or "") + "\n"
+                           "Obsah otevři v původní zprávě; přílohy se nepřikládají automaticky.")
+        return render_hub("compose", send_boxes=can_send, active_box=active_box,
+                          recipient=recipient, subject=subject, draft_content=content,
+                          source_message=source, reply_id=reply_id,
+                          csrf_nonce=secrets.token_urlsafe(24))
+
+    @app.get("/mail/contacts/suggest")
+    @login_required
+    def mail_contact_suggest():
+        box_id = request.args.get("box", type=int)
+        if not box_id:
+            abort(400)
+        box = mailbox_or_403(box_id, send=True)
+        try:
+            organization_access(g.db, g.user.id, box.organization_id)
+        except Forbidden:
+            abort(403)
+        query = (request.args.get("q") or "").strip()[:80]
+        if len(query) < 2:
+            return {"contacts": []}
+        rows = g.db.scalars(select(Contact).where(
+            Contact.organization_id == box.organization_id,
+            Contact.email != "",
+            or_(Contact.name.ilike("%" + query + "%"), Contact.email.ilike("%" + query + "%"))
+        ).order_by(Contact.name).limit(12)).all()
+        return {"contacts": [{"name": row.name, "email": row.email} for row in rows]}
+
+    @app.post("/mail/compose/send")
+    @login_required
+    def mail_compose_send():
+        box_id = positive_id("box_id")
+        if not box_id:
+            abort(400)
+        box = mailbox_or_403(box_id, send=True)
+        try:
+            organization_access(g.db, g.user.id, box.organization_id)
+        except Forbidden:
+            abort(403)
+        nonce = required("nonce", 80)
+        to, cc, bcc = field("to", 1500), field("cc", 1500), field("bcc", 1500)
+        subject, body = required("subject", 500), required("body", 100000)
+        reply_id = positive_id("reply_id")
+        message_id = None
+        if reply_id:
+            src = g.db.get(MailMessage, reply_id)
+            if not src or src.mailbox_id != box.id:
+                abort(403)
+            message_id = src.message_id or None
+        if g.db.scalar(select(Outbound.id).where(Outbound.nonce == nonce)):
+            flash("Pokus o odeslání již existuje. Zkontroluj Odeslané před opakováním.", "error")
+            return redirect(url_for("mail_hub", box=box.id))
+        if request.content_length and request.content_length > 11_000_000:
+            abort(413)
+        attached = []
+        for upload in request.files.getlist("attachments"):
+            if not upload or not upload.filename:
+                continue
+            chunk = upload.read(6_000_001)
+            if len(chunk) > 6_000_000 or len(attached) >= 4:
+                abort(400, description="Nejvýše 4 přílohy a 6 MB na soubor")
+            attached.append((upload.filename, chunk))
+        # Do not store body/attachments in MariaDB; record idempotency BEFORE SMTP.
+        record = Outbound(nonce=nonce, mailbox_id=box.id, author_id=g.user.id,
+                          recipient=to[:500], subject=subject, state="sending")
+        g.db.add(record)
+        audit("mail.compose.request", nonce, box.organization_id)
+        try:
+            g.db.commit()
+        except IntegrityError:
+            g.db.rollback()
+            flash("Odeslání již bylo zahájeno. Před opakováním zkontroluj Odeslané.", "error")
+            return redirect(url_for("mail_hub", box=box.id))
+        try:
+            send_composed(box, app.config["MAIL_ENCRYPTION_KEY"], to, cc, bcc,
+                          subject, body, reply_message_id=message_id, attachments=attached)
+            record.state, record.sent_at = "sent", now()
+            audit("mail.compose.sent", nonce, box.organization_id)
+            flash("Zpráva byla předána SMTP serveru.", "success")
+        except MailError:
+            record.state = "uncertain"
+            audit("mail.compose.uncertain", nonce, box.organization_id)
+            flash("Odeslání není potvrzené. Zkontroluj složku Odeslané, bez opakování.", "error")
+        g.db.commit()
+        return redirect(url_for("mail_hub", box=box.id))
 
     @app.post("/mail/order")
     @login_required
