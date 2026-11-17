@@ -12,38 +12,52 @@
 {% if me is defined and me %}
 <div class="layout">
   <aside class="sidebar" aria-label="Hlavní navigace">
-    <a class="brand" href="{{ url_for('home') }}"><span class="brand-mark">E</span><span><strong>EMA HUB</strong><small>Fresh Crackers • V0.1</small></span></a>
+    <a class="brand" href="{{ url_for('home') }}"><span class="brand-mark">E</span><span><strong>EMA HUB</strong><small>Fresh Crackers • pilot</small></span></a>
     <span class="label">PRACOVNÍ PROSTOR</span>
-    <a class="navitem" href="{{ url_for('home') }}">⌂ &nbsp; Moje firmy a projekty</a>
-    {% if active_org %}
-    <div class="org-label"><strong>{{ active_org.name }}</strong><small>Firma #{{ active_org.id }}</small></div>
-    <nav class="main-nav">
-      <a href="{{ url_for('organization_home', org_id=active_org.id) }}">▦ &nbsp; Nástěnka</a>
-      <a href="{{ url_for('org_chat', org_id=active_org.id) }}">◉ &nbsp; Chat</a>
-      <a href="{{ url_for('mail', org_id=active_org.id) }}">✉ &nbsp; E-maily</a>
-      <a href="{{ url_for('projects', org_id=active_org.id) }}">▥ &nbsp; Projekty</a>
-      <a href="{{ url_for('pipeline', org_id=active_org.id) }}">↗ &nbsp; Pipeline</a>
-      <a href="{{ url_for('clients', org_id=active_org.id) }}">♧ &nbsp; Klienti / CRM</a>
-      <a href="{{ url_for('tasks', org_id=active_org.id) }}">✓ &nbsp; Úkoly a plánovač</a>
-      <a href="{{ url_for('settings', org_id=active_org.id) }}">⚙ &nbsp; Nastavení</a>
+    <a class="navitem {{ 'active' if request.path == '/' else '' }}" href="{{ url_for('home') }}">▦ &nbsp; Přehled projektů</a>
+    <span class="label">MOJE PROJEKTY</span>
+    <nav class="project-nav" aria-label="Přepínání projektů">
+      {% for p in accessible_projects %}
+      <a class="project-nav-item {{ 'active' if selected_project and selected_project.id == p.id else '' }}" href="{{ url_for('project_detail', project_id=p.id) }}" title="{{ p.name }}">
+        <span class="project-nav-title">{{ p.name }}</span>
+        <small>{{ project_org_names.get(p.organization_id, '') }}</small>
+      </a>
+      {% else %}
+      <p class="sidebar-empty">Zatím nemáte přiřazený projekt.</p>
+      {% endfor %}
+    </nav>
+    {% if selected_project %}
+    <span class="label">AKTUÁLNÍ PROJEKT</span>
+    <nav class="main-nav" aria-label="Aktuální projekt">
+      <a class="{{ 'active' if request.path == url_for('project_detail', project_id=selected_project.id) else '' }}" href="{{ url_for('project_detail', project_id=selected_project.id) }}">▥ &nbsp; Přehled projektu</a>
+      <a class="{{ 'active' if request.path == url_for('project_chat', project_id=selected_project.id) else '' }}" href="{{ url_for('project_chat', project_id=selected_project.id) }}">◉ &nbsp; Chat projektu</a>
     </nav>
     {% endif %}
-    {% if orgs|length > 0 %}
-    <span class="label">DALŠÍ FIRMY</span>
-    {% for org in orgs if not active_org or org.id != active_org.id %}
-    <a class="navitem secondary" href="{{ url_for('organization_home', org_id=org.id) }}">{{ org.name }}</a>
-    {% endfor %}
+    {% if active_org %}
+    <span class="label">FIREMNÍ ZDROJE</span>
+    <div class="org-label"><strong>{{ active_org.name }}</strong><small>Data, e-maily, fakturace</small></div>
+    <nav class="main-nav" aria-label="Firemní data a správa">
+      <a href="{{ url_for('mail', org_id=active_org.id) }}">✉ &nbsp; E-maily firmy</a>
+      <a href="{{ url_for('clients', org_id=active_org.id) }}">♧ &nbsp; Klienti / CRM</a>
+      <a href="{{ url_for('pipeline', org_id=active_org.id) }}">↗ &nbsp; Obchodní pipeline</a>
+      <a href="{{ url_for('tasks', org_id=active_org.id) }}">✓ &nbsp; Úkoly firmy</a>
+      <a href="{{ url_for('settings', org_id=active_org.id) }}">⚙ &nbsp; Nastavení firmy</a>
+    </nav>
     {% endif %}
+    <span class="label">SPRÁVA</span>
+    <a class="navitem secondary" href="{{ url_for('home') }}#firms">⌂ &nbsp; Firmy a pracovní účty</a>
     {% if me.superadmin %}<a class="navitem" href="{{ url_for('superadmin') }}">♜ &nbsp; Superadmin</a>{% endif %}
     <div class="sidebar-bottom"><span class="mini">{{ me.name }}<br><small>{{ me.email }}</small></span><form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="logout" type="submit">Odhlásit</button></form></div>
   </aside>
-  <div class="workspace"><header class="topbar"><div><strong>EMA</strong> <span class="top-subtitle">obchodní a projektová asistentka</span></div><span class="chip">Funkční základ V0.1</span></header>
-  <main class="content">
-    {% with messages = get_flashed_messages(with_categories=true) %}
-      {% for category, msg in messages %}<div class="flash {{ category }}" role="status">{{ msg }}</div>{% endfor %}
-    {% endwith %}
-    {% block content %}{% endblock %}
-  </main></div>
+  <div class="workspace">
+    <header class="topbar"><div><strong>EMA</strong><span class="top-subtitle">{{ selected_project.name if selected_project else 'Moje projekty a obchodní komunikace' }}</span></div><span class="chip">Testovací V0.1</span></header>
+    <main class="content">
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, msg in messages %}<div class="flash {{ category }}" role="status">{{ msg }}</div>{% endfor %}
+      {% endwith %}
+      {% block content %}{% endblock %}
+    </main>
+  </div>
 </div>
 {% else %}{% block login %}{% endblock %}{% endif %}
 </body>
