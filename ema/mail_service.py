@@ -41,14 +41,14 @@ def validate_mail_host(host):
 def quote_mailbox_name(name):
     """imaplib does not quote folder arguments; preserve modified UTF-7 safely."""
     if not isinstance(name, str) or not name or len(name) > 190 or any(
-        char in name for char in ("\\r", "\\n", "\\x00")
+        char in name for char in ("\r", "\n", "\x00")
     ):
         raise MailError("Neplatná IMAP složka")
     try:
         name.encode("ascii")
     except UnicodeEncodeError:
         raise MailError("IMAP složka není v serverovém kódování") from None
-    return '"' + name.replace("\\\\", "\\\\\\\\").replace('"', '\\\\"') + '"'
+    return '"' + name.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
 def encrypt_password(password, key):
