@@ -37,16 +37,20 @@ def test_mobile_drawer_on_superadmin_page(web_client):
 
 
 def test_mobile_shell_css_js_have_closed_state_and_accessible_dismissal():
-    css = (ROOT / "static" / "app.css").read_text(encoding="utf-8")
-    script = (ROOT / "static" / "mail-v1.js").read_text(encoding="utf-8")
-    assert "body.ema-appmenu-open .layout > .sidebar," in css
-    assert "body.ema-screen-mail.ema-appmenu-open .layout > .sidebar{display:flex}" in css
-    assert ".sidebar .sidebar-hero img{display:block" in css
-    assert ".ema-appmenu-backdrop:not([hidden])" in css
-    assert "closeAppMenu" in script and 'event.key === "Escape"' in script
-    assert "window.innerWidth > 760" in script
-    assert "appSidebar.querySelectorAll" in script
-
+    css = (ROOT / "static" / "mobile-shell-v2.css").read_text(encoding="utf-8")
+    script = (ROOT / "static" / "mobile-shell-v2.js").read_text(encoding="utf-8")
+    worker = (ROOT / "static" / "sw.js").read_text(encoding="utf-8")
+    assert "body.ema-appmenu-open .layout > aside.sidebar {display:flex!important}" in css
+    assert "body .layout > aside.sidebar" in css
+    assert "sidebar-hero img" in css
+    assert "#ema-appmenu-backdrop:not([hidden])" in css
+    assert "function close(" in script and 'ev.key === "Escape"' in script
+    assert "stopImmediatePropagation()" in script  # bypass cache-first old handler
+    assert 'window.matchMedia("(max-width:760px)")' in script
+    assert "sidebar.querySelectorAll" in script
+    assert "/static/app.css" not in worker
+    assert "/static/mail-v1.js" not in worker
+    assert "url.pathname.startsWith(\"/static/\")" in worker
 
 
 def test_mobile_shell_is_shared_by_secondary_company_and_project_pages(web_client):
