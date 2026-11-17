@@ -84,6 +84,8 @@ class Contact(Base):
     name: Mapped[str] = mapped_column(String(190), nullable=False)
     email: Mapped[str] = mapped_column(String(190), default="", nullable=False)
     phone: Mapped[str] = mapped_column(String(60), default="", nullable=False)
+    # Source and extra CSV fields are preserved within the same organization boundary.
+    metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     __table_args__ = (Index("ix_contact_org", "organization_id"),)
 
 
