@@ -33,6 +33,13 @@ Větev navazuje na merged PR #77 a řeší P0 #78. **Oprava v repozitáři není
 
 - Jeden průchod souhrnným inboxem synchronizuje postupně maximálně 50 *hlaviček* na zapojený mailbox, nikoli celou historii ani MIME přílohy.
 - Synchronizace v browseru běží pouze při otevřené stránce a každé 2 minuty. **Trvalý background worker na serveru tím není nahrazen** (#33/#56).
-- Hromadný přesun seskupí výběr max. 50 zpráv podle mailboxu a zdrojové složky, přes `UID MOVE`. Bez podpory MOVE je akce odmítnuta bez náhradního nebezpečného EXPUNGE.
-- Trvalý výmaz používá pouze `UIDPLUS / UID EXPUNGE` vybrané složky Koš, explicitně požadovaný uživatelem. Nepoužívá obecné EXPUNGE celé schránky.
+- Hromadný přesun seskupí výběr max. 50 zpráv podle mailboxu a zdrojové složky. Pokud má server `UID MOVE`, používá jej. Na starším IMAP použije `UID COPY` do cíle a pak `UID STORE +FLAGS.SILENT (\\Deleted)` pro vybrané původní UID. **Nespouští EXPUNGE zdrojové složky**; zdrojové zprávy mohou fyzicky zůstat označené jako `\\Deleted` do serverového úklidu. Při selhání STORE po COPY se nesmí automaticky opakovat (možná duplicitní kopie).
+- Trvalý výmaz používá přednostně `UIDPLUS / UID EXPUNGE`. U staršího serveru bez UIDPLUS je standardní `EXPUNGE` dovolen **výhradně po výslovném potvrzení vysypání Koše, ve vybrané ověřené složce Trash a pouze pokud kompletní obsah obsahuje nejvýše 100 zpráv**. Pro více než 100 zpráv bez UIDPLUS se akce odmítne a nic se nemaže; takový provoz vyžaduje zvláštní bezpečný návrh nebo nástroj poskytovatele.
 - Na produkčním serveru bez přístupu k reálným credentials a IMAP stavu nelze konec-konec potvrdit jen testy CI. Před ostrým používáním nutná přejímka.
+
+## Reakce na ostré screenshoty 17. 11. 2026, 18:09
+
+- Schránka bez IMAP MOVE → nově bezpečný COPY+STORE bez EXPUNGE zdroje. Testovat jednou vlastní zprávou a ověřit cíl i zdroj u skutečného poskytovatele.
+- Schránka bez UIDPLUS → vysypání Koše je kompatibilní, jen pokud celý Koš má max 100 zpráv, jinak hlásí jasnou bezpečnostní výjimku. Trvalý výmaz dělat na testovacích zprávách.
+- SMTP formát adresy: především **preflight validace před vytvořením outbound pokusu**; odmítnutý vstup znamená neodesláno, rozepsaná zpráva zůstane v editoru, není nutné „ověřovat doručení“.
+- Chyba IMAP načítání: neznáme příčinu z obrázku. Nová diagnostická hláška obsahuje bezpečně jen fázi LIST/SELECT/SEARCH/FETCH/DATABASE a typ chyby bez citlivého obsahu. Podle výsledku z testu pokračovat cíleně.
