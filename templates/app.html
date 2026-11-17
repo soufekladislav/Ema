@@ -179,7 +179,7 @@
 {% elif section == 'mail-detail' %}
 <div class="page-head"><div><span class="eyebrow">E-mail #{{ message.id }}</span><h1>{{ message.subject or '(bez předmětu)' }}</h1>
 <p>Od: {{ message.sender }}<br>Komu: {{ message.recipients }}<br>Datum: {{ message.sent_at.strftime('%d.%m.%Y %H:%M') if message.sent_at else '—' }}</p></div>
-<a href="{{ url_for('mail_hub', box=selected_box.id) }}" class="btn">Zpět do schránky</a></div>
+<a href="{{ url_for('mail_hub', box=selected_box.id, folder=mail_folder_id) }}" class="btn">Zpět do schránky</a></div>
 <div class="card panel ema-message-content">
   <div class="ema-card-head">
     <h3>Obsah zprávy</h3>
