@@ -22,7 +22,10 @@
 <body class="ema-screen-{{ section|default('other') }}">
 {% if me is defined and me %}
 <div class="layout">
-  <aside class="sidebar" aria-label="Hlavní navigace">
+  <button id="ema-appmenu-backdrop" class="ema-appmenu-backdrop" type="button"
+          aria-label="Zavřít hlavní menu" tabindex="-1" hidden></button>
+  <aside class="sidebar" id="ema-app-main-nav" aria-label="Hlavní navigace">
+    <button class="ema-appmenu-close" id="ema-appmenu-close" type="button" aria-label="Zavřít menu">×</button>
     <a class="brand" href="{{ url_for('home') }}">
       <img class="sidebar-logo" src="https://www.freshcrackers.cz/wp-content/uploads/2023/10/Fresh-Crackers-Logo.png" alt="Fresh Crackers" referrerpolicy="no-referrer">
       <span><strong>EMA HUB</strong><small>Fresh Crackers · asistentka</small></span>
@@ -54,7 +57,8 @@
   </aside>
   <div class="workspace">
     <header class="topbar ema-topbar">
-      <button class="ema-mobile-nav-toggle" id="ema-mobile-nav-toggle" type="button" aria-label="Otevřít hlavní menu" aria-expanded="false">☰</button>
+      <button class="ema-mobile-nav-toggle" id="ema-mobile-nav-toggle" type="button"
+              aria-label="Otevřít hlavní menu" aria-expanded="false" aria-controls="ema-app-main-nav">☰</button>
       <div class="ema-topbar-brand"><strong>EMA</strong><span class="top-subtitle">{{ selected_project.name if selected_project else 'Obchodní a projektová asistentka' }}</span></div>
       <form method="post" action="{{ url_for('set_firm_scope') }}" class="ema-global-filter">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
