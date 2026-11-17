@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 import click
-from flask import Flask, abort, flash, g, redirect, render_template, request, session, url_for
+from flask import Flask, abort, flash, g, redirect, render_template, request, session, url_for, send_from_directory
 from sqlalchemy import func, select, text, or_, and_, case
 from sqlalchemy.exc import IntegrityError
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -323,17 +323,20 @@ def create_app(test_config=None):
         resp.headers["X-Frame-Options"] = "DENY"
         # Remote email images are only possible in the isolated HTML preview
         # after explicit click, never in the default mail display.
-        images = ("'self' data: https:" if request.endpoint == "mail_detail"
-                  and request.args.get("images") == "1" else
+        # Email iframe has its OWN restrictive CSP and only enables images on
+        # user opt-in. Parent mail page permits HTTPS for that isolated iframe.
+        images = ("'self' data: https:" if request.endpoint in ("mail_hub", "mail_quick_preview")
+                  or request.endpoint == "mail_detail" and request.args.get("images") == "1" else
                   "'self' data: https://www.freshcrackers.cz")
         resp.headers["Content-Security-Policy"] = (
             "default-src 'self'; script-src 'self'; "
             "style-src 'self' https://fonts.googleapis.com; "
             "font-src 'self' https://fonts.gstatic.com; "
             "img-src " + images + "; frame-src 'self' about:; "
+            "worker-src 'self'; manifest-src 'self'; "
             "object-src 'none'; frame-ancestors 'none'; form-action 'self'; base-uri 'self'"
         )
-        resp.headers["Cache-Control"] = "no-store" if request.path != "/static" else "public, max-age=3600"
+        resp.headers["Cache-Control"] = ("public, max-age=3600" if request.path.startswith("/static/") else "no-store")
         return resp
 
     @app.errorhandler(403)
@@ -341,6 +344,17 @@ def create_app(test_config=None):
     @app.errorhandler(400)
     def simple_error(err):
         return (f"{getattr(err, 'code', 400)} — {getattr(err, 'description', 'Chyba požadavku')}", getattr(err, "code", 400), {"Content-Type": "text/plain; charset=utf-8"})
+
+    @app.get("/manifest.webmanifest")
+    def pwa_manifest():
+        return send_from_directory(app.static_folder, "manifest.webmanifest", mimetype="application/manifest+json")
+
+    @app.get("/service-worker.js")
+    def pwa_worker():
+        resp = send_from_directory(app.static_folder, "sw.js", mimetype="application/javascript")
+        resp.headers["Service-Worker-Allowed"] = "/"
+        resp.headers["Cache-Control"] = "no-cache"
+        return resp
 
     @app.route("/health")
     def health():
