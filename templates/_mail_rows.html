@@ -6,9 +6,10 @@
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="hidden" name="action" value="{{ 'unstar' if st['starred'] else 'star' }}">
       <input type="hidden" name="box" value="{{ selected_box.id if selected_box else '' }}">
+      <input type="hidden" name="folder" value="{{ selected_folder.id if selected_folder else '' }}">
       <button class="ema-mail-star" type="submit" aria-label="{{ 'Odebrat hvězdičku' if st['starred'] else 'Označit hvězdičkou' }}" title="Příznak v Emě">{{ '★' if st['starred'] else '☆' }}</button>
     </form>
-    <a class="ema-mail-item" href="{{ url_for('mail_detail', org_id=mb.organization_id, message_id=m.id) }}">
+    <a class="ema-mail-item" href="{{ url_for('mail_detail', org_id=mb.organization_id, message_id=m.id, folder=m.folder_id) }}">
       <strong>{{ m.subject or '(bez předmětu)' }}</strong>
       <span>{{ m.sender }}</span>
       <small>{{ mb.address }} · {{ m.sent_at.strftime('%d.%m.%Y %H:%M') if m.sent_at else 'Bez data' }}</small>
@@ -18,6 +19,7 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="action" value="{{ 'unread' if st['read'] else 'read' }}">
         <input type="hidden" name="box" value="{{ selected_box.id if selected_box else '' }}">
+      <input type="hidden" name="folder" value="{{ selected_folder.id if selected_folder else '' }}">
         <button class="ema-mail-read-toggle" type="submit" title="{{ 'Označit jako nepřečtené' if st['read'] else 'Označit jako přečtené' }}">{{ 'Nepřečtené' if st['read'] else 'Přečíst' }}</button>
       </form>
       {% if m.mailbox_id in can_move_ids %}
