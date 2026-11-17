@@ -73,7 +73,9 @@ def test_create_client_and_pipeline(client):
 def test_login_uses_legacy_php_hero_without_open_registration(client):
     response = client.get("/login")
     assert response.status_code == 200
-    assert b"fresh-hub.png" in response.data
+    assert b"https://www.freshcrackers.cz/wp-content/uploads/2026/10/fresh-hub.png" in response.data
+    assert b"https://www.freshcrackers.cz/wp-content/uploads/2023/10/Fresh-Crackers-Logo.png" in response.data
+    assert b'rel="icon" type="image/png"' in response.data
     assert "Projekty, klienti a komunikace.".encode() in response.data
     assert b'name="csrf_token"' in response.data
     assert b'href="/register"' not in response.data
@@ -122,3 +124,16 @@ def test_project_guest_can_navigate_own_project_not_company_or_other_projects(cl
     })
     assert response.status_code == 403
     assert client.get(f"/project/{secret_id}").status_code == 403
+
+
+def test_hero_art_in_sidebar_and_project_chat(client):
+    assert login(client, "alice@example.cz", "a-password-12345").status_code == 302
+    project_id = client.application.test_ids["project"]
+    index_html = client.get("/").data
+    assert b'class="sidebar-hero"' in index_html
+    assert b"2026/10/fresh-hub.png" in index_html
+    assert b"2023/10/Fresh-Crackers-Logo.png" in index_html
+    chat_html = client.get(f"/project/{project_id}/chat").data
+    assert b'class="chat-hero-image"' in chat_html
+    assert b'class="empty-state chat-empty-state"' in chat_html
+    assert b"2026/10/fresh-hub.png" in chat_html
