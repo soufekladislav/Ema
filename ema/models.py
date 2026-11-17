@@ -155,8 +155,21 @@ class Mailbox(Base):
     status: Mapped[str] = mapped_column(String(24), default="not_synced", nullable=False)
     sync_error: Mapped[str] = mapped_column(String(400), default="", nullable=False)
     last_sync: Mapped[datetime | None] = mapped_column(DateTime)
+    # Snapshot of IMAP INBOX message count; not the size of our metadata index.
+    server_message_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
     __table_args__ = (Index("ix_mailbox_org", "organization_id"),)
+
+
+class MailboxView(Base):
+    """Per-user mailbox order and inclusion in the combined inbox."""
+    __tablename__ = "mailbox_views"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    mailbox_id: Mapped[int] = mapped_column(ForeignKey("mailboxes.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    position: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    included: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    __table_args__ = (UniqueConstraint("mailbox_id", "user_id"), Index("ix_mailbox_view_user", "user_id"),)
 
 
 class MailboxGrant(Base):
@@ -196,6 +209,17 @@ class MailMessage(Base):
     project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
     __table_args__ = (UniqueConstraint("folder_id", "uidvalidity", "uid"), Index("ix_mail_box_date", "mailbox_id", "id"))
+
+
+class MailUserState(Base):
+    """Personal read/star actions in Ema; never modify the remote IMAP mailbox."""
+    __tablename__ = "mail_user_states"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    mail_id: Mapped[int] = mapped_column(ForeignKey("mail_messages.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    read_override: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    starred: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    __table_args__ = (UniqueConstraint("mail_id", "user_id"), Index("ix_mail_state_user", "user_id"),)
 
 
 class Outbound(Base):
