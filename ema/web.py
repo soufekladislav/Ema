@@ -4,6 +4,7 @@ import re
 import json
 import secrets
 from datetime import datetime, timedelta
+from time import time
 from functools import wraps
 from pathlib import Path
 from email.utils import parseaddr
@@ -21,7 +22,7 @@ from .mail_service import MailError, encrypt_password, preview_message, send_pla
 from .mail_folders import (
     PAGE_SIZE, discover_folders, available_folders, decode_modified_utf7,
     fetch_folder_page, special_folder, move_message, move_many_messages,
-    append_sent_copy, empty_trash_batch,
+    append_sent_copy, empty_trash_batch, preview_trash_all, empty_trash_all,
 )
 from .assistant_service import AssistantError, run_assistant
 from .contact_import import ImportErrorCSV, extract_contacts
@@ -700,6 +701,33 @@ def create_app(test_config=None):
         return redirect(url_for("mail_hub", box=box.id, folder=msg.folder_id))
 
 
+    @app.post("/mail/<int:box_id>/trash/prepare")
+    @login_required
+    def mail_prepare_trash(box_id):
+        """Read-only IMAP preview before any irreversible full-folder cleanup."""
+        box = mailbox_or_403(box_id, manage=True)
+        try:
+            organization_access(g.db, g.user.id, box.organization_id)
+        except Forbidden:
+            abort(403)
+        folder_id = positive_id("folder_id")
+        folder = g.db.get(MailFolder, folder_id) if folder_id else None
+        if not folder or folder.mailbox_id != box.id:
+            abort(403)
+        session.pop("ema_trash_prepared", None)
+        try:
+            snapshot = preview_trash_all(g.db, box, app.config["MAIL_ENCRYPTION_KEY"], folder)
+        except MailError as ex:
+            flash(str(ex), "error")
+            return redirect(url_for("mail_hub", box=box.id, folder=folder.id))
+        nonce = secrets.token_urlsafe(20)
+        session["ema_trash_prepared"] = {
+            "uid": g.user.id, "box": box.id, "folder": folder.id,
+            "snapshot": snapshot, "nonce": nonce, "expires": int(time()) + 300,
+        }
+        return render_template("trash_confirm.html", **base_context(), section="mail",
+                               box=box, folder=folder, snapshot=snapshot, nonce=nonce)
+
     @app.post("/mail/<int:box_id>/trash/empty")
     @login_required
     def mail_empty_trash(box_id):
@@ -710,16 +738,25 @@ def create_app(test_config=None):
             abort(403)
         folder_id = positive_id("folder_id")
         folder = g.db.get(MailFolder, folder_id) if folder_id else None
-        if not folder or folder.mailbox_id != box.id or field("confirmation", 30) != "permanently-delete":
-            abort(400)
+        if not folder or folder.mailbox_id != box.id:
+            abort(403)
+        prepared = session.pop("ema_trash_prepared", None)
+        if (not isinstance(prepared, dict) or
+                prepared.get("uid") != g.user.id or
+                prepared.get("box") != box.id or prepared.get("folder") != folder.id or
+                prepared.get("expires", 0) < int(time()) or
+                field("confirmation", 40) != "permanently-delete-whole-trash" or
+                field("acknowledge", 10) != "yes" or
+                not secrets.compare_digest(str(prepared.get("nonce", "")), field("nonce", 80))):
+            abort(400, description="Potvrzení vysypání Koše chybí nebo vypršelo.")
+        # Consume session permission BEFORE remote IMAP; never auto-retry after uncertainty.
         try:
-            deleted, has_more = empty_trash_batch(g.db, box, app.config["MAIL_ENCRYPTION_KEY"],
-                                                   folder, limit=100)
-            audit("mail.trash.empty", f"box={box.id},folder={folder.id},count={deleted}",
+            deleted = empty_trash_all(g.db, box, app.config["MAIL_ENCRYPTION_KEY"],
+                                      folder, prepared["snapshot"])
+            audit("mail.trash.empty_all", f"box={box.id},folder={folder.id},count={deleted}",
                   box.organization_id)
             g.db.commit()
-            flash(f"Trvale odstraněno {deleted} zpráv z Koše." +
-                  (" V Koši jsou další zprávy, opakuj potvrzený krok." if has_more else ""), "success")
+            flash(f"Server potvrdil vyprázdnění Koše: {deleted} zpráv.", "success")
         except MailError as ex:
             flash(str(ex), "error")
         return redirect(url_for("mail_hub", box=box.id, folder=folder.id))
