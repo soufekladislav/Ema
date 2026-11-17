@@ -395,8 +395,12 @@ def test_legacy_move_can_clean_prior_ema_deleted_uid(state, monkeypatch):
         box, inbox = db.get(Mailbox, box_id), db.get(MailFolder, inbox_id)
         discover_folders(db, box, "key")
         fetch_folder_page(db, box, "key", inbox)
-        past = db.scalar(select(MailMessage).where(MailMessage.uid == 1))
-        past.moved = True
+        # UID 1 is already \\Deleted on server; header fetch excludes it.
+        # Recreate the historical local move marker that EMA had persisted.
+        past = MailMessage(mailbox_id=box.id, folder_id=inbox.id,
+                           uidvalidity=inbox.uidvalidity, uid=1, moved=True,
+                           subject="Previously moved by EMA")
+        db.add(past)
         db.commit()
         msg = db.scalar(select(MailMessage).where(MailMessage.uid == 4))
         move_message(db, box, "key", msg, "trash")
