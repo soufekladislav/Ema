@@ -28,6 +28,23 @@ def upgrade_schema(engine):
             conn.execute(text("ALTER TABLE mailboxes ADD COLUMN server_message_count INTEGER NULL"))
             applied.append("mailboxes.server_message_count")
     inspector = inspect(engine)
+    if inspector.has_table("mail_folders"):
+        columns = {col["name"] for col in inspector.get_columns("mail_folders")}
+        with engine.begin() as conn:
+            if "special_use" not in columns:
+                conn.execute(text("ALTER TABLE mail_folders ADD COLUMN special_use VARCHAR(190) NOT NULL DEFAULT ''"))
+                applied.append("mail_folders.special_use")
+            if "delimiter" not in columns:
+                conn.execute(text("ALTER TABLE mail_folders ADD COLUMN delimiter VARCHAR(10) NOT NULL DEFAULT '/'"))
+                applied.append("mail_folders.delimiter")
+    inspector = inspect(engine)
+    if inspector.has_table("mail_messages"):
+        columns = {col["name"] for col in inspector.get_columns("mail_messages")}
+        if "moved" not in columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE mail_messages ADD COLUMN moved BOOLEAN NOT NULL DEFAULT 0"))
+            applied.append("mail_messages.moved")
+    inspector = inspect(engine)
     if inspector.has_table("contacts"):
         contact_columns = {col["name"] for col in inspector.get_columns("contacts")}
         if "metadata_json" not in contact_columns:
