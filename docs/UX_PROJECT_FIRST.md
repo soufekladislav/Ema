@@ -25,7 +25,7 @@ Přejímáme strukturu původní PHP stránky:
 4. **Pravdivý stav:** v pilotu neuvádět AI třídění nebo autonomní odpovědi jako dostupné funkce.
 5. **Bezpečnost:** formulář používá stávající CSRF, žádná veřejná registrace nebyla do Python V0.1 doplněna.
 
-Původní ilustrační obrázek a logo jsou nyní načítané přes jejich původní adresy na `www.freshcrackers.cz`, nikoli uloženy jako lokální soubory. Před produkčním nasazením je vhodné ověřit dostupnost a licenční oprávnění i případně připravit lokální kopie do `static/`.
+**Upřesnění z komentáře PR #66:** úvodní obrázek `https://www.freshcrackers.cz/wp-content/uploads/2026/10/fresh-hub.png`; logo a favicon `https://www.freshcrackers.cz/wp-content/uploads/2023/10/Fresh-Crackers-Logo.png`. Původní ilustrace je nyní také v hlavičce chatu, prázdném stavu chatu a levém menu. Zdroje se načítají přímo z webu Fresh Crackers (nejsou součástí Git repozitáře). Dostupnost URL se nepodařilo z tohoto prostředí nezávisle ověřit; vizuální kontrola v prohlížeči je součástí akceptace. Před produkcí lze pro spolehlivost zvážit lokální kopie v `static/`.
 
 ## 3. Výchozí pracovní obrazovka a menu
 
@@ -76,7 +76,8 @@ V první UX změně **neměníme tabulky ani schéma DB**. Pouze měníme prezen
 
 ## 5. Akceptace první UX úpravy
 
-- [ ] Přihlášení zobrazuje dvousloupcový layout a ilustrační obrázek z PHP Emy.
+- [ ] Přihlášení zobrazuje dvousloupcový layout, správný obrázek (2026/10) a logo (2023/10).
+- [ ] Favicon používá dodané logo; ilustrace se zobrazuje v levém menu a v chatu.
 - [ ] Po přihlášení se zobrazí seznam přístupných projektů, **ne firemní rozcestník**.
 - [ ] Uživatel s více firmami může otevřít každý přístupný projekt bez předchozího výběru firmy.
 - [ ] Projekt lze založit přímo z přehledu s přiřazením k firmě.
