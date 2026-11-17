@@ -349,7 +349,11 @@ def create_app(test_config=None):
 
     @app.get("/manifest.webmanifest")
     def pwa_manifest():
-        return send_from_directory(app.static_folder, "manifest.webmanifest", mimetype="application/manifest+json")
+        resp = send_from_directory(app.static_folder, "manifest.webmanifest",
+                                   mimetype="application/manifest+json")
+        # Installed PWA should see renamed app metadata promptly on next launch.
+        resp.headers["Cache-Control"] = "no-cache, must-revalidate"
+        return resp
 
     @app.get("/service-worker.js")
     def pwa_worker():
