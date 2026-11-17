@@ -50,12 +50,12 @@
     <span class="label">SPRÁVA</span>
     <nav class="main-nav ema-fixed-nav" aria-label="Správa účtu">
       <a class="{{ 'active' if request.endpoint in ['account_hub','settings','organization_home'] else '' }}" href="{{ url_for('account_hub') }}">⚙ &nbsp; Nastavení účtu</a>
-      {% if me.superadmin %}<a class="{{ 'active' if request.endpoint == 'superadmin' else '' }}" href="{{ url_for('superadmin') }}">♜ &nbsp; Superadmin</a>{% endif %}
       <button type="button" class="ema-install-menu-item" id="ema-install-button"
               aria-haspopup="dialog" aria-controls="ema-install-dialog"
               title="Nainstalovat EMA jako aplikaci do telefonu nebo počítače">
         <span aria-hidden="true">↓</span> &nbsp; Nainstalovat EMA
       </button>
+      {% if me.superadmin %}<a class="{{ 'active' if request.endpoint == 'superadmin' else '' }}" href="{{ url_for('superadmin') }}">♜ &nbsp; Superadmin</a>{% endif %}
     </nav>
     <div class="sidebar-bottom">
       <span class="mini">{{ me.name }}<br><small>{{ me.email }}</small></span>
@@ -97,6 +97,8 @@
     <div id="ema-install-instructions" role="status" aria-live="polite"></div>
     <button type="button" class="ema-install-ok" id="ema-install-ok">Rozumím</button>
   </dialog>
+
+{% else %}{% block login %}{% endblock %}{% endif %}
   <div id="ema-pwa-splash" class="ema-pwa-splash" aria-hidden="true" hidden>
     <div class="ema-pwa-splash-inner">
       <img src="https://www.freshcrackers.cz/wp-content/uploads/2026/10/fresh-hub.png"
@@ -105,6 +107,5 @@
       <span>Obchodní a projektová asistentka</span>
     </div>
   </div>
-{% else %}{% block login %}{% endblock %}{% endif %}
 </body>
 </html>
