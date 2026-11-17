@@ -122,7 +122,7 @@ def test_archive_and_trash_require_special_use_and_move_without_expunge(state, m
         mail = db.scalar(select(MailMessage).where(MailMessage.uid == 5))
         destination = move_message(db, box, "key", mail, "trash")
         assert destination.name == "[Gmail]/Trash"
-        assert fake.moved == [("5", "[Gmail]/Trash")]
+        assert fake.moved == [("5", '"[Gmail]/Trash"')]
         assert mail.moved is True
         # A second click must not move again.
         with pytest.raises(MailError):
