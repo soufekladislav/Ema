@@ -19,7 +19,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from .mail_service import MailError, encrypt_password, preview_message, send_plain, send_composed, sync_inbox, validate_mail_host
 from .mail_folders import (
-    PAGE_SIZE, discover_folders, available_folders, decode_modified_utf7,
+    PAGE_SIZE, discover_folders, available_folders, folder_tree, decode_modified_utf7,
     fetch_folder_page, special_folder, move_message, move_batch,
 )
 from .assistant_service import AssistantError, run_assistant
@@ -496,6 +496,7 @@ def create_app(test_config=None):
         return render_hub(
             "mail", boxes=boxes, mail_rows=messages, selected_box=selected,
             selected_folder=selected_folder, imap_folders=folder_rows,
+            imap_tree=folder_tree(folder_rows, selected_folder.id if selected_folder else None),
             folder_names={f.id: decode_modified_utf7(f.name) for f in folder_rows},
             box_lookup={box.id: box for box in boxes}, syncable_ids=syncable_ids,
             view_prefs=prefs, indexed_counts=mailbox_counts(g.db, g.user.id, boxes),
