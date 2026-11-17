@@ -84,3 +84,130 @@
   .sidebar-logo{width:35px;height:35px}
   .chat-hero-image{width:90px;height:70px}
 }
+
+/* Login inspired by Boban: dark public composition, original Ema illustration. */
+.auth-page-boban{min-height:100svh;background:#080e0a;color:#f9fdf9;padding:18px 24px 24px;display:flex;justify-content:center;align-items:stretch}
+.ema-public{width:min(1120px,100%);margin:auto;display:flex;flex-direction:column;min-height:min(820px,calc(100svh - 42px))}
+.ema-public-top{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #26342a;padding:4px 0 22px}
+.ema-public-brand{display:flex;align-items:center;gap:10px;font-weight:800;color:#fff}
+.ema-public-brand img{width:36px;height:36px;object-fit:contain}
+.ema-public-brand span{font-size:14px;letter-spacing:.01em}
+.ema-public-brand small{font-size:10px;color:#a1b5a2;margin-left:5px}
+.ema-public-tag{font-size:11px;letter-spacing:.12em;font-weight:700;color:var(--green)}
+.ema-public-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.08fr);align-items:center;gap:52px;flex:1;padding:52px 0}
+.ema-eyebrow{font-size:11px;letter-spacing:.12em;color:#c5ea57;font-weight:800}
+.ema-eyebrow i,.ema-visual-tag i{display:inline-block;background:var(--green);width:8px;height:8px;border-radius:100%;margin-right:8px}
+.ema-public-copy h1{font-size:clamp(36px,4.5vw,62px);letter-spacing:-.05em;line-height:1.12;margin:16px 0 20px;font-weight:800;color:#fff}
+.ema-public-copy h1 em{font-style:normal;color:var(--green)}
+.ema-public-copy h2{font-size:18px;line-height:1.5;font-weight:700;margin:0 0 16px;color:#fff}
+.ema-public-copy>p{color:#c3d4c6;font-size:14px;line-height:1.75;margin:0 0 22px}
+.ema-public-login{border-radius:15px;background:#fff;color:var(--ink);padding:18px;margin-top:23px;max-width:525px}
+.ema-public-login h3{font-size:15px;margin:0 0 8px}
+.ema-login-form{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;gap:9px;align-items:end}
+.ema-login-form label{font-size:11px;font-weight:700;display:grid;gap:6px}
+.ema-login-form input{background:#eef2f8;min-height:43px;padding:10px 9px;border:1px solid #d5e1ee;min-width:0;width:100%;font-size:12px}
+.ema-login-btn{border:0;border-radius:10px;background:var(--green);color:#16220e;font-weight:800;font-size:12px;padding:0 16px;min-height:43px;white-space:nowrap}
+.ema-login-btn:hover{background:#b1d537}
+.ema-login-note{font-size:11px;color:#859085;margin:9px 0 0}
+.ema-public-visual{position:relative;min-width:0}
+.ema-visual-frame{border:1px solid #37453b;border-radius:22px;padding:10px;background:#111b13;box-shadow:0 28px 55px #0005}
+.ema-visual-frame img{display:block;width:100%;aspect-ratio:1.17;object-fit:contain;border-radius:13px;background:#e7ebe6}
+.ema-visual-tag{position:absolute;bottom:18px;left:22px;display:flex;align-items:center;gap:9px;border-radius:13px;border:1px solid #263d2d;background:#0b140fe8;padding:10px 16px;box-shadow:0 10px 28px #0006}
+.ema-visual-tag div{display:flex;flex-direction:column}
+.ema-visual-tag strong{font-size:12px}
+.ema-visual-tag small{font-size:10px;color:#b8d2bd}
+.ema-public-footer{display:flex;gap:7px;justify-content:center;border-top:1px solid #253329;padding:16px 0;color:#95a999;font-size:11px}
+.ema-public-footer strong{color:#fff}
+.ema-public-footer span{margin-left:auto}
+
+/* Ema dashboard is conversation-first; projects provide context instead of dominating the screen. */
+.ema-assistant-hero{display:flex;align-items:center;justify-content:space-between;gap:24px;margin-bottom:20px}
+.ema-assistant-hero h1{font-size:clamp(30px,3.2vw,42px);margin:5px 0 10px}
+.ema-assistant-hero h1 em{font-style:normal;color:#6a9007}
+.ema-assistant-hero p{margin:0;max-width:740px;color:var(--muted)}
+.ema-assistant-hero img{height:115px;width:155px;object-fit:contain}
+.ema-assistant-layout{display:grid;grid-template-columns:minmax(0,1fr) 296px;gap:17px;align-items:stretch}
+.ema-assistant-chat{display:flex;flex-direction:column;min-height:625px;overflow:hidden}
+.ema-assistant-chat-head{padding:18px 20px;display:flex;align-items:center;justify-content:space-between;gap:15px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.ema-chat-title{display:flex;align-items:center;gap:10px}
+.ema-avatar,.ema-welcome-mark{width:42px;height:42px;display:grid;place-items:center;background:var(--green);color:#111b0a;border-radius:12px;font-weight:800;font-size:23px}
+.ema-chat-title strong,.ema-chat-title small{display:block}
+.ema-chat-title small{font-size:11px;color:var(--muted)}
+.ema-context-picker{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ema-context-picker label{font-size:11px;font-weight:700}
+.ema-context-picker select{max-width:240px;width:220px;font-size:12px}
+.ema-context-picker .btn{font-size:11px;padding:9px}
+.ema-assistant-thread{display:flex;flex-direction:column;gap:14px;padding:25px 22px;flex:1;min-height:335px;max-height:560px;overflow-y:auto}
+.ema-chat-welcome{margin:auto;text-align:center;max-width:430px}
+.ema-welcome-mark{margin:0 auto 16px;width:60px;height:60px;font-size:29px;border-radius:18px}
+.ema-chat-welcome h2{font-size:22px;line-height:1.35;margin:0 0 10px}
+.ema-chat-welcome p{font-size:13px;color:#69746b;line-height:1.75}
+.ema-assistant-message{padding:12px 15px;border:1px solid #e2e8df;max-width:90%;border-radius:15px;background:#f8fbf7;align-self:flex-start}
+.ema-assistant-message.from-me{align-self:flex-end;background:#f1f9d9;border-color:#d6eab0}
+.ema-message-role{font-weight:800;font-size:11px;margin-bottom:5px}
+.ema-message-role small{font-weight:400;color:#778278}
+.ema-message-body{font-size:13px;line-height:1.68;white-space:pre-wrap;overflow-wrap:anywhere}
+.ema-chat-compose-wrap{border-top:1px solid var(--line);padding:15px 18px 11px}
+.ema-chat-compose{display:flex;flex-direction:column;gap:9px}
+.ema-chat-compose textarea{width:100%;min-height:77px;resize:vertical}
+.ema-chat-compose button{align-self:flex-end}
+.ema-chat-compose button:disabled,.ema-chat-compose textarea:disabled{opacity:.55;cursor:not-allowed}
+.ema-chat-disclaimer{font-size:10px;text-align:right;color:#89958b;margin:8px 0 0}
+.ema-ai-notice{border:1px solid #e6dfb8;border-radius:10px;padding:9px 11px;background:#fffae9;color:#6e612f;font-size:11px;margin:0 0 12px}
+.ema-assistant-context{display:flex;flex-direction:column;gap:14px;min-width:0}
+.ema-context-card{padding:19px}
+.ema-context-card h2{font-size:19px;margin:6px 0 9px}
+.ema-context-card p{font-size:12px;color:var(--muted);line-height:1.6}
+.ema-context-line{display:flex;justify-content:space-between;align-items:start;gap:10px;border-top:1px solid var(--line);padding:9px 0;font-size:11px}
+.ema-context-line span{color:var(--muted)}
+.ema-context-line strong{text-align:right;max-width:60%}
+.ema-context-card>.btn{display:block;text-align:center;margin-top:12px}
+.ema-aside-top{display:flex;align-items:center;justify-content:space-between}
+.ema-aside-top h3{margin:0}
+.ema-count{border-radius:99px;background:#eef7d7;color:#5d7b12;padding:3px 8px;font-size:11px;font-weight:700}
+.ema-project-shortlist{max-height:295px;overflow-y:auto;margin-top:12px;display:grid;gap:5px}
+.ema-project-shortlist a{display:block;border-radius:10px;padding:10px;border:1px solid transparent}
+.ema-project-shortlist a:hover,.ema-project-shortlist a.active{background:#f3fae8;border-color:#d7e7b9}
+.ema-project-shortlist strong,.ema-project-shortlist small{display:block;font-size:12px}
+.ema-project-shortlist small{color:#778378;font-size:10px;margin-top:2px}
+.ema-project-new summary{cursor:pointer;font-size:13px;font-weight:700}
+.ema-project-new[open] form{margin-top:14px}
+.ema-admin-link{font-size:11px;color:#6e816b;text-align:center;text-decoration:underline}
+.ema-firm-admin{margin-top:22px}
+.sr-only{position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+@media(max-width:1050px){
+  .ema-assistant-layout{grid-template-columns:minmax(0,1fr) 245px}
+  .ema-public-grid{gap:24px}
+  .ema-login-form{grid-template-columns:1fr 1fr}
+  .ema-login-btn{grid-column:1/-1}
+}
+@media(max-width:800px){
+  .ema-assistant-layout{grid-template-columns:1fr}
+  .ema-assistant-context{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+  .ema-assistant-context .ema-project-new,.ema-admin-link{grid-column:1/-1}
+  .ema-public-grid{grid-template-columns:1fr;gap:22px;padding:30px 0}
+  .ema-public-visual{max-width:460px;width:100%;margin:0 auto}
+  .ema-public{min-height:0}
+  .ema-public-copy h1{font-size:42px}
+  .ema-public-footer span{display:none}
+}
+@media(max-width:550px){
+  .auth-page-boban{padding:12px}
+  .ema-public-top{padding-bottom:14px}
+  .ema-public-tag{display:none}
+  .ema-public-copy h1{font-size:36px}
+  .ema-public-grid{padding:24px 0}
+  .ema-login-form{grid-template-columns:1fr}
+  .ema-login-btn{grid-column:auto}
+  .ema-assistant-hero img{width:82px;height:80px}
+  .ema-assistant-hero h1{font-size:28px}
+  .ema-assistant-hero p{font-size:12px}
+  .ema-assistant-chat-head{padding:13px}
+  .ema-context-picker{width:100%}
+  .ema-context-picker select{flex:1;max-width:none;width:auto;min-width:0}
+  .ema-assistant-thread{padding:16px 11px;min-height:250px}
+  .ema-assistant-message{max-width:95%}
+  .ema-assistant-context{display:block}
+  .ema-assistant-context .ema-context-card{margin-bottom:12px}
+  .ema-assistant-chat{min-height:525px}
+}
