@@ -122,6 +122,18 @@ class ChatMessage(Base):
     __table_args__ = (Index("ix_chat_scope", "organization_id", "project_id", "id"),)
 
 
+class AssistantTurn(Base):
+    """Personal AI conversation. Kept separate from shared project/team notes."""
+    __tablename__ = "assistant_turns"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    __table_args__ = (Index("ix_assistant_user_project", "user_id", "project_id", "id"),)
+
+
 class Mailbox(Base):
     __tablename__ = "mailboxes"
     id: Mapped[int] = mapped_column(primary_key=True)
