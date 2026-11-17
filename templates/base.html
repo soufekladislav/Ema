@@ -17,11 +17,11 @@
     <a class="brand" href="{{ url_for('home') }}"><img class="sidebar-logo" src="https://www.freshcrackers.cz/wp-content/uploads/2023/10/Fresh-Crackers-Logo.png" alt="Fresh Crackers" referrerpolicy="no-referrer"><span><strong>EMA HUB</strong><small>Fresh Crackers • pilot</small></span></a>
     <a class="sidebar-hero" href="{{ url_for('home') }}" aria-label="EMA – přejít na projekty"><img src="https://www.freshcrackers.cz/wp-content/uploads/2026/10/fresh-hub.png" alt="Ilustrace Emy" loading="lazy" referrerpolicy="no-referrer"><span>Moje projekty</span></a>
     <span class="label">PRACOVNÍ PROSTOR</span>
-    <a class="navitem {{ 'active' if request.path == '/' else '' }}" href="{{ url_for('home') }}">▦ &nbsp; Přehled projektů</a>
+    <a class="navitem {{ 'active' if request.path == '/' and not selected_project else '' }}" href="{{ url_for('home') }}">◉ &nbsp; Chat s Emou</a>
     <span class="label">MOJE PROJEKTY</span>
     <nav class="project-nav" aria-label="Přepínání projektů">
       {% for p in accessible_projects %}
-      <a class="project-nav-item {{ 'active' if selected_project and selected_project.id == p.id else '' }}" href="{{ url_for('project_detail', project_id=p.id) }}" title="{{ p.name }}">
+      <a class="project-nav-item {{ 'active' if selected_project and selected_project.id == p.id else '' }}" href="{{ url_for('home', project=p.id) }}" title="{{ p.name }}">
         <span class="project-nav-title">{{ p.name }}</span>
         <small>{{ project_org_names.get(p.organization_id, '') }}</small>
       </a>
@@ -32,8 +32,9 @@
     {% if selected_project %}
     <span class="label">AKTUÁLNÍ PROJEKT</span>
     <nav class="main-nav" aria-label="Aktuální projekt">
-      <a class="{{ 'active' if request.path == url_for('project_detail', project_id=selected_project.id) else '' }}" href="{{ url_for('project_detail', project_id=selected_project.id) }}">▥ &nbsp; Přehled projektu</a>
-      <a class="{{ 'active' if request.path == url_for('project_chat', project_id=selected_project.id) else '' }}" href="{{ url_for('project_chat', project_id=selected_project.id) }}">◉ &nbsp; Chat projektu</a>
+      <a class="{{ 'active' if request.path == url_for('home') else '' }}" href="{{ url_for('home', project=selected_project.id) }}">◉ &nbsp; Chat s Emou</a>
+      <a href="{{ url_for('project_detail', project_id=selected_project.id) }}">▥ &nbsp; Přehled projektu</a>
+      <a href="{{ url_for('project_chat', project_id=selected_project.id) }}">☷ &nbsp; Poznámky týmu</a>
     </nav>
     {% endif %}
     {% if active_org %}
@@ -53,7 +54,7 @@
     <div class="sidebar-bottom"><span class="mini">{{ me.name }}<br><small>{{ me.email }}</small></span><form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="logout" type="submit">Odhlásit</button></form></div>
   </aside>
   <div class="workspace">
-    <header class="topbar"><div><strong>EMA</strong><span class="top-subtitle">{{ selected_project.name if selected_project else 'Moje projekty a obchodní komunikace' }}</span></div><span class="chip">Testovací V0.1</span></header>
+    <header class="topbar"><div><strong>EMA</strong><span class="top-subtitle">{{ selected_project.name if selected_project else 'Asistentka pro projekty a obchod' }}</span></div><span class="chip">TESTOVACÍ PROSTŘEDÍ</span></header>
     <main class="content">
       {% with messages = get_flashed_messages(with_categories=true) %}
         {% for category, msg in messages %}<div class="flash {{ category }}" role="status">{{ msg }}</div>{% endfor %}
