@@ -1,0 +1,41 @@
+{% extends 'base.html' %}
+{% block title %}Potvrdit vysypání Koše • Ema{% endblock %}
+{% block content %}
+<section class="card panel ema-trash-confirm" style="max-width:760px;margin:24px auto;">
+  <h1>Opravdu vysypat celý Koš?</h1>
+  <p>Vybraná schránka: <strong>{{ box.label }} ({{ box.address }})</strong></p>
+  <p>Serverová složka: <strong>{{ folder.name }}</strong></p>
+  <p class="ema-trash-confirm-count">
+    Počet zpráv ověřený přímo na IMAP serveru:
+    <strong>{{ '{:,}'.format(snapshot.count).replace(',', ' ') }}</strong>
+  </p>
+  {% if snapshot.count %}
+  <p><strong>Všechny zprávy z tohoto Koše budou trvale odstraněny.</strong>
+     Nepřesunou se do jiné složky a operaci nelze vrátit.
+     Ostatních poštovních schránek a složek se akce netýká.</p>
+  <p class="small muted">Před smazáním Ema znovu ověří počet zpráv a jejich identifikátory.
+     Pokud se obsah mezitím změní, operaci odmítne a nic nebude mazat.
+     Potvrzení platí 5 minut.</p>
+  <form method="post" action="{{ url_for('mail_empty_trash', box_id=box.id) }}" class="formstack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="folder_id" value="{{ folder.id }}">
+    <input type="hidden" name="confirmation" value="permanently-delete-whole-trash">
+    <input type="hidden" name="nonce" value="{{ nonce }}">
+    <label class="ema-trash-acknowledge">
+      <input type="checkbox" name="acknowledge" value="yes" required>
+      Rozumím, že trvale odstraním všech {{ '{:,}'.format(snapshot.count).replace(',', ' ') }}
+      zpráv z uvedeného Koše.
+    </label>
+    <div class="ema-card-actions">
+      <button type="submit" class="btn primary ema-trash-danger">
+        Nevratně vysypat celý Koš
+      </button>
+      <a class="btn" href="{{ url_for('mail_hub', box=box.id, folder=folder.id) }}">Zrušit a vrátit se</a>
+    </div>
+  </form>
+  {% else %}
+  <p>Koš je na serveru prázdný, není co mazat.</p>
+  <a class="btn" href="{{ url_for('mail_hub', box=box.id, folder=folder.id) }}">Zpět do Koše</a>
+  {% endif %}
+</section>
+{% endblock %}
