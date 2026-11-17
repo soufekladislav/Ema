@@ -12,7 +12,7 @@ from email.message import EmailMessage
 from email.parser import BytesHeaderParser
 from email.policy import default
 from email.utils import parsedate_to_datetime
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy import select
 from .models import MailFolder, MailMessage, now
 
@@ -50,14 +50,31 @@ def decrypt_password(ciphertext, key):
 
 
 def _connect(box, key):
+    """Connect safely and map connection/authentication failures to actionable user messages."""
     validate_mail_host(box.imap_host)
-    client = imaplib.IMAP4_SSL(box.imap_host, box.imap_port, ssl_context=ssl.create_default_context(), timeout=18)
     try:
-        client.login(box.username, decrypt_password(box.credential, key))
+        password = decrypt_password(box.credential, key)
+    except (InvalidToken, ValueError, UnicodeError):
+        raise MailError("Uložené heslo schránky nelze rozšifrovat. Ověřte původní MAIL_ENCRYPTION_KEY; klíč neměňte naslepo.") from None
+    try:
+        client = imaplib.IMAP4_SSL(box.imap_host, box.imap_port, ssl_context=ssl.create_default_context(), timeout=18)
+    except ssl.SSLError:
+        raise MailError("IMAP TLS certifikát nebo zabezpečené spojení není v pořádku.") from None
+    except (OSError, TimeoutError):
+        raise MailError("Nelze navázat spojení s IMAP serverem (port 993). Zkontrolujte hostitele a dostupnost z Exonu.") from None
+    try:
+        client.login(box.username, password)
         return client
-    except Exception:
-        client.logout()
-        raise
+    except (imaplib.IMAP4.error, ssl.SSLError, OSError, TimeoutError) as ex:
+        try:
+            client.logout()
+        except Exception:
+            pass
+        if isinstance(ex, imaplib.IMAP4.error):
+            raise MailError("IMAP server odmítl přihlášení. Ověřte IMAP login, heslo a případné aplikační heslo.") from None
+        if isinstance(ex, ssl.SSLError):
+            raise MailError("Při IMAP přihlášení selhalo zabezpečené spojení TLS.") from None
+        raise MailError("Spojení s IMAP serverem se během přihlášení přerušilo.") from None
 
 
 def parse_metadata(raw, uid, box_id, folder_id, uidvalidity):
@@ -90,9 +107,10 @@ def parse_metadata(raw, uid, box_id, folder_id, uidvalidity):
 def sync_inbox(db, box, key, limit=30):
     """IMAP UID metadata sync. Safe to rerun; never downloads bodies or attachments."""
     limit = max(1, min(int(limit), 100))
-    client = _connect(box, key)
+    client = None
     count = 0
     try:
+        client = _connect(box, key)
         typ, _ = client.select("INBOX", readonly=True)
         if typ != "OK":
             raise MailError("Nelze otevřít INBOX")
@@ -131,14 +149,17 @@ def sync_inbox(db, box, key, limit=30):
         return count
     except Exception as ex:
         db.rollback()
-        box.status, box.sync_error = "error", str(ex)[:380] if isinstance(ex, MailError) else "Připojení/synchronizace selhala"
+        # Never persist raw IMAP exceptions, tokens or server traceback into customer-facing UI.
+        description = str(ex)[:380] if isinstance(ex, MailError) else "IMAP synchronizace selhala. Zkontrolujte server a zkuste znovu."
+        box.status, box.sync_error = "error", description
         db.commit()
-        raise MailError(box.sync_error) from ex
+        raise MailError(description) from None
     finally:
-        try:
-            client.logout()
-        except Exception:
-            pass
+        if client is not None:
+            try:
+                client.logout()
+            except Exception:
+                pass
 
 
 def preview_message(box, row, key):
