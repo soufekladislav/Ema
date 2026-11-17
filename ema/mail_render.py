@@ -13,17 +13,19 @@ import bleach
 # When tinycss2 is absent, HTML still renders safely but inline styles are removed.
 try:
     from bleach.css_sanitizer import CSSSanitizer
+    import tinycss2
 except ImportError:
     CSSSanitizer = None
+    tinycss2 = None
 
 
-MAX_PREVIEW_BYTES = 196608
+MAX_PREVIEW_BYTES = 393216
 ALLOWED_TAGS = {
     "a", "b", "blockquote", "br", "caption", "center", "code", "dd", "del",
     "div", "dl", "dt", "em", "h1", "h2", "h3", "h4", "h5", "h6",
     "hr", "i", "img", "li", "ol", "p", "pre", "s", "small", "span",
     "strong", "sub", "sup", "table", "tbody", "td", "th", "thead",
-    "tr", "u", "ul",
+    "tr", "u", "ul", "font",
 }
 IMAGE_MIME = {"image/png", "image/jpeg", "image/gif", "image/webp"}
 EMAIL_CSS = CSSSanitizer(allowed_css_properties={
@@ -67,6 +69,46 @@ def safe_image_url(value):
         return False
 
 
+def _safe_newsletter_styles(html_body):
+    """Safely render a subset of stylesheet rules from HTML email templates.
+
+    CSS remains inside a sandboxed srcdoc iframe. Never allow URLs, @import,
+    @font-face, active-content directives or selectors outside a strict allowlist.
+    Missing optional tinycss2 simply means class styles are omitted.
+    """
+    if EMAIL_CSS is None or tinycss2 is None:
+        return ""
+    result = []
+    used = 0
+    for sheet in re.findall(r"<style\b[^>]*>([\s\S]*?)</style\s*>",
+                            html_body[:MAX_PREVIEW_BYTES], flags=re.I)[:5]:
+        try:
+            rules = tinycss2.parse_stylesheet(sheet[:32_768], skip_comments=True,
+                                               skip_whitespace=True)
+        except Exception:
+            continue
+        for rule in rules:
+            if rule.type != "qualified-rule":
+                continue  # @import, @font-face, @media, unsupported directives
+            selector = tinycss2.serialize(rule.prelude).strip()
+            if not selector or len(selector) > 240 or not re.fullmatch(
+                    r"[A-Za-z0-9_\-.,#\s>*:+()]+", selector):
+                continue
+            text = tinycss2.serialize(rule.content)
+            if len(text) > 3000 or re.search(
+                    r"(?i)url\s*\(|expression\s*\(|@|\\\\|behaviou?r\s*:", text):
+                continue
+            safe = EMAIL_CSS.sanitize_css(text).strip()
+            if not safe:
+                continue
+            candidate = f"{selector}{{{safe}}}"
+            if used + len(candidate) > 16_000:
+                return "\n".join(result)
+            used += len(candidate)
+            result.append(candidate)
+    return "\n".join(result)
+
+
 def make_preview(data, *, show_images=False, truncated=False):
     """Parse a capped raw RFC822 MIME slice; untrusted HTML is bleached and sandboxed."""
     msg = BytesParser(policy=policy.default).parsebytes(data or b"")
@@ -100,13 +142,27 @@ def make_preview(data, *, show_images=False, truncated=False):
 
     # Remove executable/style blocks WITH their content before bleach. Otherwise
     # email newsletter CSS is displayed as raw text at the top of the preview.
+    safe_style_rules = _safe_newsletter_styles(rich)
     rich = re.sub(r"<(script|style|head|iframe|object|svg)\b[^>]*>[\s\S]*?</\1\s*>",
                   "", rich, flags=re.I)
     has_remote_images = bool(re.search(r"<img\b[^>]*\bsrc\s*=\s*['\"]?https?://", rich, re.I))
     if rich:
         def allowed(tag, name, value):
             if name == "style":
-                return EMAIL_CSS is not None and len(value) <= 10000
+                return EMAIL_CSS is not None and len(value) <= 10000 and not re.search(
+                    r"(?i)url\s*\(|expression\s*\(|@|\\\\", value)
+            if name == "class":
+                return bool(re.fullmatch(r"[a-zA-Z0-9_\- ]{1,240}", value))
+            if name == "id":
+                return bool(re.fullmatch(r"[a-zA-Z0-9_\-]{1,100}", value))
+            if tag in ("table", "td", "th") and name in ("align", "valign"):
+                return value.lower() in ("left", "right", "center", "justify", "top", "middle", "bottom")
+            if tag == "table" and name in ("cellspacing", "cellpadding", "border"):
+                return bool(re.fullmatch(r"\d{1,2}", value))
+            if tag in ("table", "td", "th") and name == "bgcolor":
+                return bool(re.fullmatch(r"#[a-fA-F0-9]{3,8}|[a-zA-Z]{1,20}", value))
+            if tag == "font" and name in ("color", "size", "face"):
+                return bool(re.fullmatch(r"[a-zA-Z0-9_#., \-]{1,80}", value))
             if tag == "a" and name in ("href", "title"):
                 if name == "title":
                     return len(value) <= 300
@@ -152,7 +208,7 @@ def make_preview(data, *, show_images=False, truncated=False):
             "overflow-wrap:anywhere;}table{max-width:100%;border-collapse:collapse}"
             "td,th{padding:4px;}img{max-width:100%;height:auto}"
             "a{color:#436c08}blockquote{border-left:3px solid #b9d98e;padding-left:10px}"
-            "</style></head><body>" + sanitized + "</body></html>"
+            "</style><style>" + safe_style_rules + "</style></head><body>" + sanitized + "</body></html>"
         )
         return MailPreview(envelope, plain, True, has_remote_images, truncated)
 
