@@ -95,13 +95,14 @@
       </form>
       {% endif %}
       {% if selected_box and selected_folder and is_trash_folder and selected_box.id in syncable_ids %}
-      <form method="post" action="{{ url_for('mail_empty_trash', box_id=selected_box.id) }}"
-            class="ema-mail-refresh-form"
-            onsubmit="return confirm('Trvale smazat nejvýše 100 zpráv ze serverového Koše této schránky? Tento krok nelze vrátit.');">
+      <form method="post" action="{{ url_for('mail_prepare_trash', box_id=selected_box.id) }}"
+            class="ema-mail-refresh-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="folder_id" value="{{ selected_folder.id }}">
-        <input type="hidden" name="confirmation" value="permanently-delete">
-        <button class="ema-toolbar-button ema-mail-trash" type="submit">🗑 Vysypat Koš</button>
+        <button class="ema-toolbar-button ema-mail-trash" type="submit"
+                title="Nejdříve ověřit počet zpráv a potvrdit nevratné vyprázdnění celého Koše">
+          🗑 Vysypat Koš
+        </button>
       </form>
       {% endif %}
       <a class="ema-toolbar-button" href="{{ url_for('account_hub') }}" title="Nastavení schránek">⚙</a>
