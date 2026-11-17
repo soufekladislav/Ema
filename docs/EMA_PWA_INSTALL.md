@@ -32,3 +32,15 @@ Při spuštění instalované PWA systém nejprve může ukázat vlastní splash
 7. Nezaměňovat úspěšné pytest/JS syntax checks s ověřenou instalací v konkrétních prohlížečích.
 
 **Nasazení ani fyzická instalace na zařízení nebyly provedeny přes GitHub.** PR #81 vyžaduje běžný release a kontrolu na skutečném Android/iOS zařízení.
+
+## Diagnostika instalačního tlačítka (18. 11. 2026)
+
+Uživatelský test odhalil, že v Chrome při kliknutí na `Nainstalovat EMA` místo systémového dialogu vyskočilo `Otevři EMU v Chrome`, následně `Rozumím` jen zavřelo okno. **Tlačítko nebylo rozbité v části kliknutí; prohlížeč dosud nevydal `beforeinstallprompt`.** To může znamenat různé důvody: neschválená instalovatelnost, manifest/ikony chybně publikované na serveru, PWA již nainstalovaná, potlačená nabídka, nebo prohlížeč který tuto událost nevydává. Ze samotné hlášky nelze určit skutečnou příčinu.
+
+- `static/pwa-install-v2.js` nahradil slepé `Rozumím` diagnostickým oknem: ukáže bezpečný kontext, platformu, standalone, obdržení instalační události, načtení manifestu, nalezení lokálních ikon 192/512px a stav Service Workeru; lze **Zkopírovat diagnostiku** (bez poštovního obsahu/tokenu/user-agent stringu). Když Chrome později vydá `beforeinstallprompt`, objeví se `Spustit instalaci`.
+- Manifest nyní používá **jen stejnodoménové PNG ikony**. Vzdálený obrázek Emy zůstává na ilustrativní úvodní obrazovce, ne jako instalačně kritická ikona. Tím je odstraněna jedna z možných příčin nekompatibility Chrome.
+- **Superadmin → EMA PWA – instalace a manifest**: tlačítko Otestovat PWA, Zobrazit manifest a Service Worker. Samotný manifest je veřejný: `https://hub.freshcrackers.cz/manifest.webmanifest` a není exportním souborem Superadminu.
+- Na Androidu se vždy nejprve doporučuje vyzkoušet menu skutečného Chrome **⋮ → Přidat na plochu / Nainstalovat aplikaci**. Chrome není možné přímo přinutit k instalačnímu dialogu, pokud neposkytne `beforeinstallprompt`. Pokud se nabídne pouze zástupce, nepovažovat to za ověřenou instalaci PWA.
+- Po úspěšném CI nasadit **pouze sjednocenou PR #81 větev**, obnovit stránku a v Superadminu zkopírovat diagnostiku přímo z problémového telefonu. Při `Manifest: CHYBA` nebo `SW registrace: NENÍ` opravit hosting; při zelených kontrolách a bez události ověřit Chrome verzi/již instalovanou aplikaci/manuální instalaci.
+
+Pozor: Nelze zaručit, že samotná diagnostická změna vyvolá nativní instalační nabídku na konkrétním zařízení. Rozhodnutí je na Chrome.
