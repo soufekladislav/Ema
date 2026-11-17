@@ -209,9 +209,9 @@ def test_schema_upgrade_restores_mailbox_columns_without_data_loss(tmp_path):
                           "VALUES (1,'legacy@example.cz','Legacy','hash',1,0,'2026-01-01')"))
         conn.execute(text("INSERT INTO organizations (id,name,active,created_at) VALUES (1,'Legacy org',1,'2026-01-01')"))
         conn.execute(text("INSERT INTO mailboxes (id,organization_id,owner_id,label,address,username,"
-                          "imap_host,imap_port,smtp_host,smtp_port,credential,status,sync_error) "
+                          "imap_host,imap_port,smtp_host,smtp_port,credential,status,sync_error,created_at) "
                           "VALUES (1,1,1,'Mailbox','legacy@example.cz','legacy@example.cz',"
-                          "'mail.example.cz',993,'mail.example.cz',465,'encrypted','not_synced','')"))
+                          "'mail.example.cz',993,'mail.example.cz',465,'encrypted','not_synced','','2026-01-01')"))
     assert set(upgrade_schema(engine)) == {"mailboxes.smtp_username", "mailboxes.signature_html"}
     assert upgrade_schema(engine) == []
     with engine.begin() as conn:
