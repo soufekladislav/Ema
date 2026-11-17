@@ -209,7 +209,8 @@ def test_empty_trash_requires_fresh_server_preview_nonce_and_mailbox_manage(seed
         db.add(folder)
         db.commit()
         trash_id = folder.id
-    snapshot = {"count": 3301, "uidvalidity": 9, "max_uid": 3301}
+    snapshot = {"count": 3301, "uidvalidity": 9, "max_uid": 3301,
+                "visible_count": 1270, "unread_count": 950, "already_deleted": 2031}
     calls = []
     monkeypatch.setattr("ema.web.preview_trash_all", lambda db, box, key, folder: snapshot)
     def fake_empty(db, box, key, folder, expected):
