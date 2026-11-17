@@ -490,9 +490,10 @@ def create_app(test_config=None):
         item = g.db.scalar(select(MailboxView).where(
             MailboxView.user_id == g.user.id, MailboxView.mailbox_id == box_id))
         if item is None:
-            item = MailboxView(user_id=g.user.id, mailbox_id=box_id)
+            item = MailboxView(user_id=g.user.id, mailbox_id=box_id, included=False)
             g.db.add(item)
-        item.included = not item.included
+        else:
+            item.included = not item.included
         g.db.commit()
         return redirect(url_for("mail_hub"))
 
@@ -516,7 +517,7 @@ def create_app(test_config=None):
         else:
             state.starred = action == "star"
         g.db.commit()
-        if field("return_to", 20) == "detail":
+        if field("return_to", 20) == "detail" and action != "unread":
             return redirect(url_for("mail_detail", org_id=box.organization_id, message_id=mail_id))
         return redirect(url_for("mail_hub", box=box.id) if field("box", 20) else url_for("mail_hub"))
 
