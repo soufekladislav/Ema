@@ -29,6 +29,7 @@ from .security import Forbidden, mailbox_access, organization_access, project_ac
 
 STAGES = ("lead", "qualified", "proposal", "negotiation", "won", "lost")
 PROJ_STATES = ("planning", "active", "paused", "completed")
+PROJECT_KINDS = ("shop", "campaign", "development", "other")
 ORG_ROLES = ("owner", "admin", "member")
 PROJECT_ROLES = ("manager", "editor", "viewer")
 
@@ -561,8 +562,11 @@ def create_app(test_config=None):
             organization_access(g.db, g.user.id, org_id, write=True)
         except Forbidden:
             abort(403)
+        kind = field("kind", 20) or "other"
+        if kind not in PROJECT_KINDS:
+            abort(400, description="Neplatný typ projektu")
         item = Project(organization_id=org_id, name=required("name"),
-                       description=field("description", 1500))
+                       kind=kind, description=field("description", 1500))
         g.db.add(item)
         audit("project.create", item.name, org_id)
         g.db.commit()
@@ -623,9 +627,20 @@ def create_app(test_config=None):
     @app.route("/org/<int:org_id>/pipeline")
     @org_required
     def pipeline(org_id):
-        opps = g.db.scalars(select(Opportunity).where(Opportunity.organization_id == org_id).order_by(Opportunity.id.desc()).limit(150)).all()
-        companies = g.db.scalars(select(Company).where(Company.organization_id == org_id).order_by(Company.name)).all()
-        return render("pipeline", opportunities=opps, companies=companies)
+        projects_in_org = g.db.scalars(select(Project).where(Project.organization_id == org_id)
+            .order_by(Project.name)).all()
+        selected_id = request.args.get("project", type=int)
+        if selected_id and selected_id not in {p.id for p in projects_in_org}:
+            abort(403)
+        conditions = [Opportunity.organization_id == org_id]
+        if selected_id:
+            conditions.append(Opportunity.project_id == selected_id)
+        opps = g.db.scalars(select(Opportunity).where(*conditions)
+            .order_by(Opportunity.id.desc()).limit(150)).all()
+        companies = g.db.scalars(select(Company).where(Company.organization_id == org_id)
+            .order_by(Company.name)).all()
+        return render("pipeline", opportunities=opps, companies=companies,
+                      pipeline_projects=projects_in_org, pipeline_project_id=selected_id)
 
     @app.post("/org/<int:org_id>/pipeline")
     @org_required
@@ -633,11 +648,16 @@ def create_app(test_config=None):
         company_id = positive_id("company_id")
         if company_id and (not (c := g.db.get(Company, company_id)) or c.organization_id != org_id):
             abort(400)
-        opp = Opportunity(organization_id=org_id, company_id=company_id, title=required("title"))
+        pid = positive_id("project_id")
+        if pid and (not (project := g.db.get(Project, pid)) or project.organization_id != org_id):
+            abort(400, description="Projekt nepatří této firmě")
+        opp = Opportunity(organization_id=org_id, company_id=company_id, project_id=pid,
+                          title=required("title"))
         g.db.add(opp)
         audit("opportunity.create", opp.title, org_id)
         g.db.commit()
-        return redirect(url_for("pipeline", org_id=org_id))
+        return redirect(url_for("pipeline", org_id=org_id, project=pid) if pid
+                        else url_for("pipeline", org_id=org_id))
 
     @app.post("/org/<int:org_id>/pipeline/<int:opportunity_id>/stage")
     @org_required
@@ -662,7 +682,11 @@ def create_app(test_config=None):
     @app.post("/org/<int:org_id>/projects")
     @org_required
     def add_project(org_id):
-        item = Project(organization_id=org_id, name=required("name"), description=field("description", 1500))
+        kind = field("kind", 20) or "other"
+        if kind not in PROJECT_KINDS:
+            abort(400)
+        item = Project(organization_id=org_id, name=required("name"),
+                       kind=kind, description=field("description", 1500))
         g.db.add(item)
         audit("project.create", item.name, org_id)
         g.db.commit()
@@ -680,7 +704,12 @@ def create_app(test_config=None):
             g.org = g.db.get(Organization, project.organization_id)
         rows = g.db.scalars(select(Task).where(Task.project_id == project_id, Task.organization_id == project.organization_id).order_by(Task.id.desc()).limit(80)).all()
         role = g.db.scalar(select(Membership.role).where(Membership.organization_id == project.organization_id, Membership.user_id == g.user.id))
-        return render("project", project=project, tasks=rows, can_manage=role in ("owner", "admin"))
+        opps = g.db.scalars(select(Opportunity).where(
+            Opportunity.organization_id == project.organization_id,
+            Opportunity.project_id == project.id
+        ).order_by(Opportunity.id.desc()).limit(30)).all()
+        return render("project", project=project, tasks=rows, project_opportunities=opps,
+                      can_manage=role in ("owner", "admin"))
 
     @app.post("/project/<int:project_id>/status")
     @login_required
