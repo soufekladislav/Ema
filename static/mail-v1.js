@@ -3,22 +3,65 @@
  */
 (() => {
   "use strict";
+  // Global application drawer is shared by Mail, Chat, Projects, CRM, Tasks and Settings.
   const appToggle = document.getElementById("ema-mobile-nav-toggle");
+  const appSidebar = document.getElementById("ema-app-main-nav");
+  const backdrop = document.getElementById("ema-appmenu-backdrop");
+  const closeButton = document.getElementById("ema-appmenu-close");
+  const closeAppMenu = (restoreFocus = true) => {
+    if (!document.body.classList.contains("ema-appmenu-open")) return;
+    document.body.classList.remove("ema-appmenu-open");
+    if (backdrop) backdrop.hidden = true;
+    if (appToggle) appToggle.setAttribute("aria-expanded", "false");
+    if (restoreFocus && appToggle && window.innerWidth <= 760) appToggle.focus();
+  };
+  const openAppMenu = () => {
+    if (window.innerWidth > 760 || !appSidebar) return;
+    document.body.classList.add("ema-appmenu-open");
+    document.body.classList.remove("ema-folder-pane-open");
+    if (backdrop) backdrop.hidden = false;
+    if (appToggle) appToggle.setAttribute("aria-expanded", "true");
+    if (closeButton) closeButton.focus();
+  };
   if (appToggle) appToggle.addEventListener("click", () => {
-    const opened = document.body.classList.toggle("ema-appmenu-open");
-    appToggle.setAttribute("aria-expanded", String(opened));
+    if (document.body.classList.contains("ema-appmenu-open")) closeAppMenu();
+    else openAppMenu();
+  });
+  if (backdrop) backdrop.addEventListener("click", () => closeAppMenu());
+  if (closeButton) closeButton.addEventListener("click", () => closeAppMenu());
+  if (appSidebar) appSidebar.addEventListener("click", (event) => {
+    if (event.target.closest("a")) closeAppMenu(false);
+  });
+  window.addEventListener("resize", () => {
+    if (window.innerWidth > 760) closeAppMenu(false);
   });
 
   const foldersToggle = document.getElementById("ema-folder-drawer-toggle");
   if (foldersToggle) foldersToggle.addEventListener("click", () => {
+    closeAppMenu(false);
     const opened = document.body.classList.toggle("ema-folder-pane-open");
     foldersToggle.setAttribute("aria-expanded", String(opened));
   });
   document.addEventListener("keydown", (event) => {
-    if (event.key !== "Escape") return;
-    document.body.classList.remove("ema-appmenu-open", "ema-folder-pane-open");
-    if (foldersToggle) foldersToggle.setAttribute("aria-expanded", "false");
-    if (appToggle) appToggle.setAttribute("aria-expanded", "false");
+    if (event.key === "Escape") {
+      closeAppMenu();
+      document.body.classList.remove("ema-folder-pane-open");
+      if (foldersToggle) foldersToggle.setAttribute("aria-expanded", "false");
+      return;
+    }
+    // Keep keyboard navigation inside an open modal drawer.
+    if (event.key === "Tab" && document.body.classList.contains("ema-appmenu-open") && appSidebar) {
+      const focusable = Array.from(appSidebar.querySelectorAll(
+        'button:not([disabled]),a[href],select:not([disabled]),input:not([disabled])'
+      )).filter((element) => element.getClientRects().length > 0);
+      if (!focusable.length) return;
+      const first = focusable[0], last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault(); last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault(); first.focus();
+      }
+    }
   });
 
   const items = document.getElementById("ema-mail-items");
