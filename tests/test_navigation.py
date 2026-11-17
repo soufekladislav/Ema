@@ -297,7 +297,7 @@ def test_mailbox_order_visibility_and_personal_read_star_state(web_client):
                          uid=101, sender="contact@example.cz", subject="Unread mail", flags="")
         m2 = MailMessage(mailbox_id=b1.id, folder_id=folder.id, uidvalidity=22,
                          uid=102, sender="contact@example.cz", subject="Already read",
-                         flags=r"\\Seen")
+                         flags=r"\Seen")
         db.add_all([m1, m2])
         db.commit()
         id1, id2, mid1, mid2 = b1.id, b2.id, m1.id, m2.id
