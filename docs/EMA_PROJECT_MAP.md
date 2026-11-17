@@ -2,9 +2,9 @@
 
 > **Projekt:** EMA — AI obchodní a projektová asistentka Fresh Crackers  
 > **Typ dokumentu:** Master specification / Product Requirements Document (PRD) / Project Map  
-> **Verze dokumentu:** 1.1 (rozšíření: superadmin, více firem, přístupy ke konkrétním projektům; návrh k odsouhlasení)  
-> **Datum:** 16. 11. 2026  
-> **Stav projektu:** Koncepce / architektonické zadání; nejedná se o potvrzení implementace  
+> **Verze dokumentu:** 1.2 (doplněno: UX orientované primárně podle projektů, přihlášení podle původní PHP Emy)  
+> **Datum aktualizace:** 17. 11. 2026  
+> **Stav projektu:** Master zadání; Python V0.1 lokálně spuštěna, další funkcionality ve vývoji. Zde popsané plánované funkce nejsou automaticky implementované.  
 > **Cílová technologie:** Python + Flask + MariaDB, provoz typu Passenger/cPanel  
 > **AI:** Fresh AI Engine; **identita a tajné přístupy:** Fresh Key podle možností stávajícího rozhraní  
 > **Vizuální vzor:** Boban / Web Booster  
@@ -18,8 +18,16 @@
 |---|---|---|
 | 1.0 | 16. 11. 2026 | První komplexní produktová a technická mapa |
 | **1.1** | **16. 11. 2026** | **Hierarchie uživatel → více firem → projekty, firemní a projektový chat, práva k poště a dokumentům, superadmin konzole, provozní a datová metrika, účty a kvóty, testy izolace** |
+| **1.2** | **17. 11. 2026** | **Projekt hlavní uživatelský kontext, firma pouze datová/účetní hranice a volitelný filtr; přihlášení převzato z PHP, s aktualizovaným obsahem** |
 
 **Terminologie:** „**Firma (pracovní prostor)**“ = zákaznická/uživatelská organizace provozující Emu (`organizations`); „**klientská firma**“ = kontakt či odběratel vedený v CRM (`companies`). Tyto dvě odlišné věci nesmějí mít společná oprávnění ani jeden identifikátor.
+
+### Závazné UX rozhodnutí 17. 11. 2026 (verze 1.2)
+
+**Projekt je primární navigační a pracovní kontext aplikace. Firma zůstává nadřazenou vrstvou pro vlastnictví dat, fakturaci, klientskou databázi, e-mailové účty a oprávnění, ale nesmí být povinným vstupním rozcestníkem.** Po přihlášení se zobrazují všechny uživateli povolené projekty a firma slouží pouze jako volitelný filtr. Při práci ve vybraném projektu mají přednost přehled projektu, jeho chat, související komunikace a úkoly. Firemní e-maily/CRM zůstanou v pilotu výslovně označené jako **firemní**, dokud nevznikne bezpečný projektový filtr.
+
+Přihlašovací obrazovka použije dvousloupcový layout, logo a původní úvodní obrázek z PHP Emy, s textem odpovídajícím současnému produktu. **Podrobnosti a kritéria:** [UX — Project First](UX_PROJECT_FIRST.md). Toto novější rozhodnutí má přednost před staršími návrhy, které označují firmu za hlavní pracovní prostor.
+
 
 ---
 

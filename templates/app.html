@@ -1,14 +1,57 @@
 {% extends 'base.html' %}
 {% block content %}
 {% if section == 'home' %}
-<div class="page-head"><div><span class="eyebrow">Moje prostředí</span><h1>Vítejte v Emě</h1><p>Vyberte firmu, případně projekt, do kterého máte přístup.</p></div></div>
-<div class="grid cards3">
-{% for o in orgs %}<a class="card tile" href="{{ url_for('organization_home', org_id=o.id) }}"><span class="tile-icon">▦</span><h3>{{ o.name }}</h3><p>Firemní pracovní prostor</p><span class="link">Otevřít →</span></a>{% endfor %}
-{% for p in grants if p.organization_id not in (orgs | map(attribute='id') | list) %}<a class="card tile" href="{{ url_for('project_detail', project_id=p.id) }}"><span class="tile-icon">▥</span><h3>{{ p.name }}</h3><p>Projektový přístup</p><span class="link">Otevřít →</span></a>{% endfor %}
+<div class="page-head project-head"><div><span class="eyebrow">Pracovní prostředí</span><h1>Moje projekty</h1><p>Projekt je hlavním místem práce. Firma určuje vlastnictví dat, fakturaci a přístup k firemním zdrojům.</p></div></div>
+{% if orgs|length > 1 %}
+<form class="project-filter" method="get" action="{{ url_for('home') }}" aria-label="Filtr firem">
+  <label for="firm-filter">Filtrovat podle firmy</label>
+  <select id="firm-filter" name="firm"><option value="">Všechny moje projekty</option>{% for o in orgs %}<option value="{{ o.id }}" {{ 'selected' if filter_org_id == o.id else '' }}>{{ o.name }}</option>{% endfor %}</select>
+  <button class="btn" type="submit">Použít filtr</button>
+</form>
+{% endif %}
+<div class="grid cards3 project-cards">
+{% for p in projects %}
+  <a class="card tile project-tile" href="{{ url_for('project_detail', project_id=p.id) }}">
+    <div class="project-tile-meta"><span class="tile-icon">▥</span><span class="status">{{ p.status }}</span></div>
+    <h3>{{ p.name }}</h3>
+    <p>{{ p.description[:130] if p.description else 'Obchodní projekt a pracovní komunikace' }}</p>
+    <small class="project-company">{{ project_org_names.get(p.organization_id, '') }}</small>
+    <span class="link">Otevřít projekt →</span>
+  </a>
+{% else %}
+  <div class="card panel project-empty"><h3>Zatím tu nejsou žádné projekty</h3><p>Nový projekt můžeš založit níže. Pokud máš přístup pouze k přizvanému projektu, zobrazí se automaticky po přiřazení.</p></div>
+{% endfor %}
 </div>
-<div class="card panel"><h3>Nová firma</h3><p class="muted small">Jedno přihlášení může spravovat více firem. Jejich data se nesmějí prolínat.</p><form method="post" action="{{ url_for('create_organization') }}" class="inline-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input name="name" required maxlength="160" placeholder="Název firmy"><button class="btn primary">Vytvořit pracovní prostor</button></form></div>
+{% if orgs %}
+<section class="card panel project-create" aria-labelledby="new-project-heading">
+  <h3 id="new-project-heading">Nový projekt</h3>
+  <p class="small muted">Pro každý projekt vyber firmu, pod kterou se budou spravovat data a fakturace.</p>
+  <form class="formstack" method="post" action="{{ url_for('create_project') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="project-create-fields">
+      <label>Název projektu<input name="name" maxlength="190" placeholder="Například: Nová obchodní zakázka" required></label>
+      <label>Firma / vlastník dat<select name="organization_id" required>{% for o in orgs %}<option value="{{ o.id }}" {{ 'selected' if filter_org_id == o.id else '' }}>{{ o.name }}</option>{% endfor %}</select></label>
+    </div>
+    <label>Stručný popis (volitelné)<input name="description" maxlength="1500" placeholder="Co je cílem projektu?"></label>
+    <div><button class="btn primary" type="submit">Založit projekt</button></div>
+  </form>
+</section>
+<details id="firms" class="card panel firm-admin">
+  <summary>Správa firem a datových prostorů</summary>
+  <p class="small muted">Firmy slouží pro fakturaci, správu klientských databází, e-mailových účtů a oprávnění. Nejsou hlavní navigací aplikace.</p>
+  <div class="grid cards3">
+    {% for o in orgs %}<a class="card tile" href="{{ url_for('organization_home', org_id=o.id) }}"><h3>{{ o.name }}</h3><p>Správa firmy a dat</p><span class="link">Otevřít nastavení →</span></a>{% endfor %}
+  </div>
+  <h3>Založit firmu</h3>
+  <form method="post" action="{{ url_for('create_organization') }}" class="inline-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input name="name" required maxlength="160" placeholder="Název firmy">
+    <button class="btn" type="submit">Vytvořit firmu</button>
+  </form>
+</details>
+{% endif %}
 {% elif section == 'org-home' %}
-<div class="page-head"><div><span class="eyebrow">Pracovní prostor</span><h1>{{ active_org.name }}</h1><p>Obchodní informace, komunikace a projekty na jednom místě.</p></div><a class="btn primary" href="{{ url_for('org_chat', org_id=active_org.id) }}">Otevřít chat</a></div>
+<div class="page-head"><div><span class="eyebrow">Firemní zázemí</span><h1>{{ active_org.name }}</h1><p>Správa klientů, pošty, účetních údajů a přístupů. Běžnou práci začínáš v projektu.</p></div><a class="btn primary" href="{{ url_for('home') }}">Přejít na projekty</a></div>
 <div class="grid metrics"><a class="card metric" href="{{ url_for('clients', org_id=active_org.id) }}"><span>Klienti</span><strong>{{ counts.companies }}</strong></a><a class="card metric" href="{{ url_for('projects', org_id=active_org.id) }}"><span>Projekty</span><strong>{{ counts.projects }}</strong></a><a class="card metric" href="{{ url_for('mail', org_id=active_org.id) }}"><span>Poštovní účty</span><strong>{{ counts.mailboxes }}</strong></a><a class="card metric" href="{{ url_for('tasks', org_id=active_org.id) }}"><span>Otevřené úkoly</span><strong>{{ counts.tasks }}</strong></a></div>
 <div class="card panel"><h3>První kroky</h3><p>1. Přidejte klienta a projekt. 2. Připojte e-mail v Nastavení. 3. Uložte firemní poznámku do chatu. 4. Ověřte záznamy po opětovném přihlášení.</p><p class="muted small">AI Copilot a automatické obchodní akce zatím nejsou součástí V0.1. Chat nyní bezpečně ukládá pracovní komunikaci.</p></div>
 {% elif section == 'clients' %}
@@ -26,16 +69,18 @@
 <div class="card panel"><h3>Založit projekt</h3><form class="formstack" method="post" action="{{ url_for('add_project', org_id=active_org.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label>Název<input name="name" required maxlength="190"></label><label>Popis<textarea name="description" maxlength="1500" rows="2"></textarea></label><button class="btn primary">Vytvořit projekt</button></form></div>
 <div class="grid cards3">{% for p in projects %}<a class="card tile" href="{{ url_for('project_detail', project_id=p.id) }}"><span class="tile-icon">▥</span><h3>{{ p.name }}</h3><p>{{ p.description[:120] or 'Bez popisu' }}</p><span class="status">{{ p.status }}</span></a>{% else %}<p class="muted">Zatím žádný projekt</p>{% endfor %}</div>
 {% elif section == 'project' %}
-<div class="page-head"><div><span class="eyebrow">Projekt #{{ project.id }}</span><h1>{{ project.name }}</h1><p>{{ project.description or 'Obchodní projekt' }}</p></div><a class="btn primary" href="{{ url_for('project_chat', project_id=project.id) }}">Projektový chat</a></div>
-<div class="grid two-col"><div class="card panel"><h3>Stav projektu</h3><span class="status">{{ project.status }}</span><p class="small muted">V0.1 eviduje obchodní projekt. Přenos a řízení developmentu přes Karla bude doplněno integrací.</p></div><div class="card panel"><h3>Úkoly v projektu</h3>{% for task in tasks %}<div class="list-row"><span>{{ '✓' if task.done else '○' }} {{ task.title }}</span></div>{% else %}<p class="muted">Bez úkolů</p>{% endfor %}</div></div>
+<div class="page-head"><div><span class="eyebrow">Projekt · {{ project_org_names.get(project.organization_id, '') }}</span><h1>{{ project.name }}</h1><p>{{ project.description or 'Obchodní projekt – komunikace, závazky a úkoly na jednom místě.' }}</p></div><a class="btn primary" href="{{ url_for('project_chat', project_id=project.id) }}">Otevřít chat projektu</a></div>
+<div class="project-workspace-nav"><a class="active" href="{{ url_for('project_detail', project_id=project.id) }}">Přehled</a><a href="{{ url_for('project_chat', project_id=project.id) }}">Chat</a><a href="#project-tasks">Úkoly</a>{% if active_org %}<a href="{{ url_for('mail', org_id=active_org.id) }}">E-maily firmy</a><a href="{{ url_for('clients', org_id=active_org.id) }}">Klienti firmy</a>{% endif %}</div>
+<p class="small muted">V0.1 má projekt vlastní chat a úkoly. Samostatný projektový pohled na e-maily a klienty připravíme nad již existujícími vazbami.</p>
+<div class="grid two-col"><div class="card panel"><h3>Stav projektu</h3><span class="status">{{ project.status }}</span><p class="small muted">V0.1 eviduje obchodní projekt. Přenos a řízení developmentu přes Karla bude doplněno integrací.</p></div><div class="card panel" id="project-tasks"><h3>Úkoly v projektu</h3>{% for task in tasks %}<div class="list-row"><span>{{ '✓' if task.done else '○' }} {{ task.title }}</span></div>{% else %}<p class="muted">Bez úkolů</p>{% endfor %}</div></div>
 {% if can_manage %}<div class="card panel"><h3>Aktualizovat stav projektu</h3><form class="inline-form" method="post" action="{{ url_for('change_project_status', project_id=project.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><select name="status">{% for st in project_states %}<option value="{{ st }}" {{ 'selected' if project.status==st else '' }}>{{ st }}</option>{% endfor %}</select><button class="btn">Uložit stav</button></form></div><div class="card panel"><h3>Přidat projektového spolupracovníka</h3><p class="small muted">Účet musí být nejprve vytvořen superadminem. Přidání do projektu nedává přístup k celé firmě ani ke schránkám.</p><form class="inline-form" method="post" action="{{ url_for('invite_to_project', project_id=project.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="email" name="email" placeholder="E-mail uživatele" required><select name="role"><option value="viewer">Pozorovatel</option><option value="editor">Editor</option><option value="manager">Manažer</option></select><button class="btn">Přidat / změnit přístup</button></form></div>{% endif %}
 {% elif section == 'tasks' %}
 <div class="page-head"><div><span class="eyebrow">Plánovač</span><h1>Úkoly a termíny</h1><p>Základní evidence závazků; kalendářové konektory přijdou v další etapě.</p></div></div>
 <div class="card panel"><h3>Nový úkol</h3><form class="inline-form" method="post" action="{{ url_for('add_task', org_id=active_org.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input name="title" maxlength="240" placeholder="Co je potřeba udělat?" required><input name="due" type="date"><select name="project_id"><option value="">Firemní úkol</option>{% for p in projects %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}</select><button class="btn primary">Přidat úkol</button></form></div>
 <div class="card panel"><h3>Seznam úkolů</h3>{% for t in tasks %}<div class="list-row"><div><strong class="{{ 'strike' if t.done else '' }}">{{ t.title }}</strong><span class="muted small">{{ t.due_at.strftime('%d. %m. %Y') if t.due_at else 'Bez termínu' }}</span></div><form method="post" action="{{ url_for('toggle_task', org_id=active_org.id, task_id=t.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn small-btn">{{ 'Znovu otevřít' if t.done else 'Dokončit' }}</button></form></div>{% else %}<p class="muted">Žádné úkoly</p>{% endfor %}</div>
 {% elif section == 'chat' %}
-<div class="page-head"><div><span class="eyebrow">Pracovní konverzace</span><h1>{{ chat_label }}</h1><p>Trvalá historie v MariaDB. AI vrstvu připojíme až po ověření dat a oprávnění.</p></div></div>
-<div class="chat-layout"><div class="card chat-card"><div class="chat-history">{% for m in chat_messages %}<div class="bubble {{ 'mine' if m.author_id == me.id else '' }}"><div class="bubble-meta">Uživatel #{{ m.author_id }} · {{ m.created_at.strftime('%d.%m. %H:%M') }}</div><div class="bubble-text">{{ m.body }}</div></div>{% else %}<div class="empty-state">Zatím bez zpráv. Zapište první poznámku k obchodnímu případu.</div>{% endfor %}</div><form method="post" class="chat-compose" action="{{ chat_target }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><textarea name="body" maxlength="6000" rows="3" placeholder="Zpráva / pracovní poznámka…" required></textarea><button class="btn primary">Uložit zprávu</button></form></div><aside class="card panel info-panel"><h3>Kontext</h3><p class="small">{{ project.name if project is defined and project else active_org.name if active_org else 'Projekt' }}</p><hr><p class="small muted">V0.1: historie, autor, firemní/projektové oprávnění. AI návrhy a akce až ve V0.2.</p></aside></div>
+<div class="page-head chat-page-head"><div><span class="eyebrow">Pracovní konverzace</span><h1>{{ chat_label }}</h1><p>Historie se ukládá do databáze. AI odpovědi a řízené akce přidáme až po ověření oprávnění.</p></div><img class="chat-hero-image" src="https://www.freshcrackers.cz/wp-content/uploads/2026/10/fresh-hub.png" alt="EMA – ilustrace Fresh HUB" loading="lazy" referrerpolicy="no-referrer"></div>
+<div class="chat-layout"><div class="card chat-card"><div class="chat-history">{% for m in chat_messages %}<div class="bubble {{ 'mine' if m.author_id == me.id else '' }}"><div class="bubble-meta">Uživatel #{{ m.author_id }} · {{ m.created_at.strftime('%d.%m. %H:%M') }}</div><div class="bubble-text">{{ m.body }}</div></div>{% else %}<div class="empty-state chat-empty-state"><img src="https://www.freshcrackers.cz/wp-content/uploads/2026/10/fresh-hub.png" alt="" aria-hidden="true" loading="lazy" referrerpolicy="no-referrer"><p>Zatím bez zpráv. Zapište první poznámku k obchodnímu případu.</p></div>{% endfor %}</div><form method="post" class="chat-compose" action="{{ chat_target }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><textarea name="body" maxlength="6000" rows="3" placeholder="Zpráva / pracovní poznámka…" required></textarea><button class="btn primary">Uložit zprávu</button></form></div><aside class="card panel info-panel"><h3>Kontext</h3><p class="small">{{ project.name if project is defined and project else active_org.name if active_org else 'Projekt' }}</p><hr><p class="small muted">V0.1: historie, autor, firemní/projektové oprávnění. AI návrhy a akce až ve V0.2.</p></aside></div>
 {% elif section == 'mail' %}
 <div class="page-head"><div><span class="eyebrow">Komunikátor</span><h1>E-mailové schránky</h1><p>Metadata-first IMAP. Těla zpráv se načítají pouze na kliknutí; přílohy se neukládají.</p></div><a class="btn" href="{{ url_for('settings', org_id=active_org.id) }}">Správa účtů</a></div>
 <div class="mail-layout"><div class="card panel mailbox-list"><h3>Schránky</h3>{% for b in boxes %}<a class="mailbox-option {{ 'selected' if selected_box and b.id==selected_box.id else '' }}" href="{{ url_for('mail', org_id=active_org.id, box=b.id) }}"><strong>{{ b.label }}</strong><small>{{ b.address }}</small><span class="status">{{ b.status }}</span></a>{% else %}<p class="muted">Připojte schránku v nastavení.</p>{% endfor %}</div><div class="card panel mail-main">{% if selected_box %}<div class="inline-form spread"><div><h3>{{ selected_box.label }}</h3><p class="small muted">Poslední sync: {{ selected_box.last_sync or 'Nikdy' }}</p></div><form method="post" action="{{ url_for('sync_mail', org_id=active_org.id, box_id=selected_box.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn small-btn" type="submit">Načíst 10 hlaviček</button></form></div><div class="message-list">{% for m in mail_rows %}<a class="message-row" href="{{ url_for('mail_detail', org_id=active_org.id, message_id=m.id) }}"><strong>{{ m.subject or '(bez předmětu)' }}</strong><span>{{ m.sender }}</span><small>{{ m.sent_at or '—' }} · {{ m.size_bytes }} B</small></a>{% else %}<p class="muted">Schránka zatím nemá synchronizované hlavičky.</p>{% endfor %}</div>{% endif %}</div></div>
