@@ -649,6 +649,104 @@ def create_app(test_config=None):
             flash(str(ex), "error")
         return redirect(url_for("mail_hub", box=box.id, folder=msg.folder_id))
 
+    @app.get("/mail/<int:mail_id>/quick")
+    @login_required
+    def mail_quick_preview(mail_id):
+        msg = g.db.get(MailMessage, mail_id)
+        if msg is None or msg.moved:
+            abort(404)
+        box = mailbox_or_403(msg.mailbox_id)
+        try:
+            organization_access(g.db, g.user.id, box.organization_id)
+        except Forbidden:
+            abort(403)
+        folder = g.db.get(MailFolder, msg.folder_id)
+        if folder is None or folder.mailbox_id != box.id or folder.uidvalidity != msg.uidvalidity:
+            abort(404)
+        show_images = request.args.get("images") == "1"
+        try:
+            preview = preview_message(box, msg, app.config["MAIL_ENCRYPTION_KEY"],
+                                      folder_name=folder.name, show_images=show_images)
+            state = get_mail_user_state(g.db, g.user.id, msg.id)
+            state.read_override = True
+            g.db.commit()
+            content = render_template("_mail_quick_preview.html", message=msg, box=box,
+                                      preview=preview, show_images=show_images)
+            return {"html": content, "read": True}
+        except MailError as ex:
+            return {"error": str(ex)}, 422
+
+    @app.post("/mail/<int:mail_id>/quick-move")
+    @login_required
+    def mail_quick_move(mail_id):
+        msg = g.db.get(MailMessage, mail_id)
+        if msg is None or msg.moved:
+            abort(404)
+        box = mailbox_or_403(msg.mailbox_id, manage=True)
+        try:
+            organization_access(g.db, g.user.id, box.organization_id)
+        except Forbidden:
+            abort(403)
+        action = field("action", 20)
+        if action not in ("trash", "archive"):
+            abort(400)
+        try:
+            target = move_message(g.db, box, app.config["MAIL_ENCRYPTION_KEY"], msg, action)
+            audit("mail.move", f"mail={mail_id},target={target.id},action={action}", box.organization_id)
+            g.db.commit()
+            flash("Zpráva přesunuta do serverové složky " + decode_modified_utf7(target.name), "success")
+        except MailError as ex:
+            flash(str(ex), "error")
+        return redirect(url_for("mail_hub", box=box.id, folder=msg.folder_id))
+
+    @app.post("/mail/bulk")
+    @login_required
+    def bulk_mail_action():
+        action = field("action", 20)
+        if action not in ("trash", "archive", "read", "unread"):
+            abort(400)
+        raw = request.form.getlist("mail_ids")
+        if not raw or len(raw) > 30 or any(not x.isdigit() or int(x) <= 0 for x in raw):
+            flash("Vyber 1–30 zpráv v jednom kroku.", "error")
+            return redirect(url_for("mail_hub"))
+        msg_ids = list(dict.fromkeys(int(x) for x in raw))
+        if len(msg_ids) != len(raw):
+            abort(400)
+        messages = g.db.scalars(select(MailMessage).where(MailMessage.id.in_(msg_ids))).all()
+        if len(messages) != len(msg_ids) or any(m.moved for m in messages):
+            abort(400, description="Některá zpráva již byla přesunuta")
+        # Preauthorize ALL selected messages before any write or IMAP side effect.
+        authorized = {}
+        for msg in messages:
+            box = mailbox_or_403(msg.mailbox_id, manage=action in ("trash", "archive"))
+            try:
+                organization_access(g.db, g.user.id, box.organization_id)
+            except Forbidden:
+                abort(403)
+            authorized[msg.id] = box
+        if action in ("read", "unread"):
+            for msg in messages:
+                state = get_mail_user_state(g.db, g.user.id, msg.id)
+                state.read_override = action == "read"
+            g.db.commit()
+            flash(f"Upraveno {len(messages)} zpráv v Emě.", "success")
+        else:
+            done = 0
+            failed = 0
+            for msg in messages:
+                box = authorized[msg.id]
+                try:
+                    target = move_message(g.db, box, app.config["MAIL_ENCRYPTION_KEY"], msg, action)
+                    audit("mail.bulk_move", f"mail={msg.id},target={target.id}", box.organization_id)
+                    g.db.commit()
+                    done += 1
+                except MailError:
+                    failed += 1
+                    # The remote result may be uncertain; do not retry automatically.
+                    continue
+            flash(f"Přesunuto {done} zpráv, {failed} nepřesunuto. Při chybě zkontroluj server.", "success" if not failed else "error")
+        return redirect(url_for("mail_hub"))
+
     @app.post("/mail/order")
     @login_required
     def reorder_mailboxes():
