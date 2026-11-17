@@ -186,6 +186,9 @@ class MailFolder(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     mailbox_id: Mapped[int] = mapped_column(ForeignKey("mailboxes.id", ondelete="CASCADE"), nullable=False)
     name: Mapped[str] = mapped_column(String(190), nullable=False, default="INBOX")
+    # IMAP LIST flags identify \All / \Trash; names remain server encoded for SELECT.
+    special_use: Mapped[str] = mapped_column(String(190), default="", nullable=False)
+    delimiter: Mapped[str] = mapped_column(String(10), default="/", nullable=False)
     uidvalidity: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     last_uid: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     __table_args__ = (UniqueConstraint("mailbox_id", "name"),)
@@ -205,6 +208,7 @@ class MailMessage(Base):
     sent_at: Mapped[datetime | None] = mapped_column(DateTime)
     size_bytes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     flags: Mapped[str] = mapped_column(String(160), default="", nullable=False)
+    moved: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     company_id: Mapped[int | None] = mapped_column(ForeignKey("companies.id", ondelete="SET NULL"))
     project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
