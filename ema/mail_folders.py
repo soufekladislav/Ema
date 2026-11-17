@@ -386,10 +386,12 @@ def move_many_messages(db, box, key, messages, action):
 
 
 def empty_trash_batch(db, box, key, folder, *, limit=100):
-    """Irreversible trash cleanup; UIDPLUS only, at most 100 specific UIDs.
+    """Delete at most 100 messages from the verified Trash folder only.
 
-    Never EXPUNGE an entire mailbox: that could permanently delete messages
-    marked \Deleted by another client outside the user's selected batch.
+    UIDPLUS uses targeted UID EXPUNGE. Legacy IMAP may use regular EXPUNGE
+    *only* when the complete Trash fits the limit, because standard EXPUNGE
+    removes every message marked Deleted in the selected folder.
+    Never use regular EXPUNGE in INBOX or for a partial Trash page.
     """
     if folder.mailbox_id != box.id:
         raise MailError("Koš nepatří k vybrané schránce")
@@ -400,8 +402,7 @@ def empty_trash_batch(db, box, key, folder, *, limit=100):
     try:
         capabilities = {word.upper() for item in getattr(client, "capabilities", [])
                         for word in (item if isinstance(item, bytes) else str(item).encode()).split()}
-        if b"UIDPLUS" not in capabilities:
-            raise MailError("Server nepodporuje bezpečné cílené UID EXPUNGE; Koš zůstal beze změny")
+        uidplus = b"UIDPLUS" in capabilities
         status, _ = client.select(quote_mailbox_name(folder.name), readonly=False)
         if status != "OK":
             raise MailError("IMAP server neumožnil otevření Koše pro mazání")
@@ -413,18 +414,33 @@ def empty_trash_batch(db, box, key, folder, *, limit=100):
         if status != "OK":
             raise MailError("Nelze ověřit obsah IMAP Koše")
         all_uids = sorted(int(x) for x in (data[0] or b"").split() if x.isdigit())
+        if not uidplus and len(all_uids) > limit:
+            raise MailError(f"Koš obsahuje {len(all_uids)} zpráv. Server bez UIDPLUS "
+                            f"neumí bezpečně smazat jen {limit} zpráv; nic nebylo smazáno.")
         selected = all_uids[:limit]
         for start in range(0, len(selected), 50):
             batch = ",".join(str(x) for x in selected[start:start+50])
             status, _ = client.uid("STORE", batch, "+FLAGS.SILENT", r"(\Deleted)")
             if status != "OK":
                 raise MailError("IMAP server odmítl označení zpráv ke smazání")
-            status, _ = client.uid("EXPUNGE", batch)
+            if uidplus:
+                status, _ = client.uid("EXPUNGE", batch)
+                if status != "OK":
+                    raise MailError("IMAP server nepotvrdil cílené smazání; neopakujte bez kontroly")
+                for row in db.scalars(select(MailMessage).where(
+                        MailMessage.folder_id == folder.id, MailMessage.uidvalidity == validity,
+                        MailMessage.uid.in_(selected[start:start+50]))).all():
+                    row.moved = True
+                db.commit()
+        if not uidplus and selected:
+            # All server Trash UIDs were explicitly selected and flagged above;
+            # standard EXPUNGE is permitted only on this entire Trash folder.
+            status, _ = client.expunge()
             if status != "OK":
-                raise MailError("IMAP server nepotvrdil cílené smazání; nezkoušej automaticky znovu")
+                raise MailError("IMAP server nepotvrdil vysypání Koše. Zkontrolujte obsah před opakováním")
             for row in db.scalars(select(MailMessage).where(
                     MailMessage.folder_id == folder.id, MailMessage.uidvalidity == validity,
-                    MailMessage.uid.in_(selected[start:start+50]))).all():
+                    MailMessage.uid.in_(selected))).all():
                 row.moved = True
             db.commit()
         return len(selected), len(all_uids) > len(selected)
