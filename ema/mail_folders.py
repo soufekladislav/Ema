@@ -495,10 +495,19 @@ def _trash_selected_state(client, folder, *, readonly):
         uidvalidity = 0
     if not uidvalidity or (folder.uidvalidity and uidvalidity != folder.uidvalidity):
         raise MailError("UIDVALIDITY Koše se změnilo. Obnovte složku před mazáním.")
-    typ, result = client.uid("SEARCH", None, "ALL")
-    if typ != "OK" or not result:
-        raise MailError("IMAP server nepotvrdil seznam zpráv v Koši")
-    uids = [int(uid) for uid in (result[0] or b"").split() if uid.isdigit()]
+    def search_uids(*conditions):
+        typ, result = client.uid("SEARCH", None, *conditions)
+        if typ != "OK" or not result:
+            raise MailError("IMAP server nepotvrdil počty zpráv v Koši")
+        return {int(uid) for uid in (result[0] or b"").split() if uid.isdigit()}
+
+    # Roundcube's blue folder badge can show UNREAD, while SELECT/SEARCH ALL
+    # counts physical messages including already \\Deleted copies.
+    uids = search_uids("ALL")
+    visible = search_uids("UNDELETED")
+    unread = search_uids("UNDELETED", "UNSEEN")
+    if not visible.issubset(uids) or not unread.issubset(visible):
+        raise MailError("IMAP server vrátil nekonzistentní počet zpráv. Načtěte Koš znovu.")
     try:
         exists_count = int(exists[0])
     except (ValueError, TypeError, IndexError):
@@ -506,7 +515,10 @@ def _trash_selected_state(client, folder, *, readonly):
     if exists_count != len(uids):
         raise MailError("Obsah Koše se během kontroly změnil. Načtěte počet znovu.")
     return {"count": len(uids), "uidvalidity": uidvalidity,
-            "max_uid": max(uids, default=0)}
+            "max_uid": max(uids, default=0),
+            "visible_count": len(visible),
+            "unread_count": len(unread),
+            "already_deleted": len(uids) - len(visible)}
 
 
 def _verify_trash_scope(db, box, folder):
@@ -550,7 +562,10 @@ def empty_trash_all(db, box, key, folder, expected):
     client = _connect(box, key)
     try:
         observed = _trash_selected_state(client, folder, readonly=False)
-        if observed != expected:
+        # Read/unread flags may change normally. Verify identity and visible
+        # membership instead, so even a new \\Deleted state invalidates preview.
+        identity = ("count", "uidvalidity", "max_uid", "visible_count", "already_deleted")
+        if any(observed.get(key) != expected.get(key) for key in identity):
             raise MailError("Počet nebo UID zpráv v Koši se změnily od potvrzení. "
                             "Nic nebylo smazáno, načtěte potvrzení znovu.")
         if not observed["count"]:
