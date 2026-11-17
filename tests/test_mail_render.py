@@ -78,3 +78,54 @@ def test_newsletter_css_not_rendered_as_raw_code_and_safe_inline_style_survives(
     assert "table { border: 0" not in p.srcdoc
     assert "alert(" not in p.srcdoc
     assert "color:green" in p.srcdoc or "color: green" in p.srcdoc
+
+
+
+def test_newsletter_preserves_safe_css_classes_tables_and_strips_remote_css():
+    from email.message import EmailMessage
+    from ema.mail_render import make_preview
+    msg = EmailMessage()
+    msg.set_content("Textová alternativa")
+    msg.add_alternative("""
+      <html><head>
+      <style>
+        @import url("https://tracker.example/evil.css");
+        @font-face {font-family: X;src:url(https://tracker.example/x.woff)}
+        .hero { background-color: #223344; color: #ffffff; padding: 24px; }
+        .danger { background-image: url(https://tracker.example/track) }
+        table td { padding: 12px; font-size: 18px; }
+      </style></head>
+      <body><table cellpadding="0" cellspacing="0">
+      <tr><td class="hero" style="font-weight:bold">Produktový katalog</td></tr>
+      </table><img src="https://tracker.example/pixel" alt="pixel">
+      </body></html>
+    """, subtype="html")
+    preview = make_preview(msg.as_bytes())
+    assert preview.is_html
+    assert 'class="hero"' in preview.srcdoc
+    assert "background-color" in preview.srcdoc
+    assert "table td{" in preview.srcdoc
+    assert "Produktový katalog" in preview.srcdoc
+    assert "tracker.example" not in preview.srcdoc
+    assert "@import" not in preview.srcdoc
+    assert "@font-face" not in preview.srcdoc
+    assert "background-image:" not in preview.srcdoc
+    assert "<script" not in preview.srcdoc
+    assert "sandbox" not in preview.srcdoc  # sandbox is on the embedding iframe
+
+
+def test_html_preview_still_works_without_optional_css_parser(monkeypatch):
+    import ema.mail_render as renderer
+    from email.message import EmailMessage
+    msg = EmailMessage()
+    msg.set_content("Plain")
+    msg.add_alternative(
+        '<html><head><style>.title{font-weight:bold}</style></head>'
+        '<body><div class="title">Obsah HTML</div></body></html>',
+        subtype="html",
+    )
+    monkeypatch.setattr(renderer, "tinycss2", None)
+    preview = renderer.make_preview(msg.as_bytes())
+    assert preview.is_html
+    assert "Obsah HTML" in preview.srcdoc
+    assert "font-weight:bold" not in preview.srcdoc
