@@ -17,7 +17,7 @@ from sqlalchemy import func, select, text, or_, and_, case
 from sqlalchemy.exc import IntegrityError
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from .mail_service import MailError, encrypt_password, preview_message, send_plain, send_composed, sync_inbox, validate_mail_host
+from .mail_service import MailError, encrypt_password, preview_message, send_plain, send_composed, validate_recipients, sync_inbox, validate_mail_host
 from .mail_folders import (
     PAGE_SIZE, discover_folders, available_folders, decode_modified_utf7,
     fetch_folder_page, special_folder, move_message, move_many_messages,
@@ -922,6 +922,16 @@ def create_app(test_config=None):
         if g.db.scalar(select(Outbound.id).where(Outbound.nonce == nonce)):
             flash("Pokus o odeslání již existuje. Zkontroluj Odeslané před opakováním.", "error")
             return redirect(url_for("mail_hub", box=box.id))
+        try:
+            validate_recipients(to, cc, bcc)
+        except MailError as ex:
+            # SMTP never started and no idempotency row was created; allow correction.
+            flash(str(ex) + " Zpráva nebyla odeslána, opravte adresu.", "error")
+            return render_hub("compose", send_boxes=[box], active_box=box,
+                              recipient=to, subject=subject, draft_content=body,
+                              cc_prefill=cc, bcc_prefill=bcc,
+                              source_message=src if reply_id else None, reply_id=reply_id,
+                              csrf_nonce=secrets.token_urlsafe(24)), 422
         if request.content_length and request.content_length > 11_000_000:
             abort(413)
         attached = []
