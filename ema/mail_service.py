@@ -225,8 +225,8 @@ def _parse_addresses(value, *, required=False):
     return list(dict.fromkeys(result))
 
 
-def send_composed(box, key, to, cc, bcc, subject, body, *, reply_message_id=None, attachments=None):
-    """Only explicit SMTP send. No retry if delivery outcome is uncertain."""
+def validate_outgoing(box, to, cc, bcc, subject, body, *, reply_message_id=None, attachments=None):
+    """Synchronous validation before an Outbound idempotency record is committed."""
     primary = _parse_addresses(to, required=True)
     copy = _parse_addresses(cc)
     blind = _parse_addresses(bcc)
@@ -235,12 +235,33 @@ def send_composed(box, key, to, cc, bcc, subject, body, *, reply_message_id=None
     if not subject or len(subject) > 500 or any(c in subject for c in "\r\n"):
         raise MailError("Neplatný předmět")
     if not body.strip() or len(body) > 100000:
-        raise MailError("Text zprávy chybí nebo překračuje limit")
+        raise MailError("Chybí text zprávy nebo překračuje limit")
     if any(c in box.address for c in "\r\n"):
         raise MailError("Neplatná adresa odesílatele")
     validate_mail_host(box.smtp_host)
     if box.smtp_port not in (465, 587):
         raise MailError("SMTP vyžaduje TLS na portu 465 nebo 587")
+    if reply_message_id and (len(reply_message_id) > 250 or
+                             any(c in reply_message_id for c in "\r\n") or
+                             not reply_message_id.startswith("<") or
+                             not reply_message_id.endswith(">")):
+        raise MailError("Neplatná reference původní zprávy")
+    total = 0
+    if len(attachments or []) > 4:
+        raise MailError("Maximálně 4 přílohy")
+    for filename, data in attachments or []:
+        total += len(data)
+        if len(data) > 6_000_000 or total > 10_000_000:
+            raise MailError("Přílohy přesahují limit 6 MB na soubor / 10 MB dohromady")
+    return primary, copy, blind
+
+
+def send_composed(box, key, to, cc, bcc, subject, body, *, reply_message_id=None, attachments=None):
+    """Only explicit SMTP send. No retry if delivery outcome is uncertain."""
+    primary, copy, blind = validate_outgoing(
+        box, to, cc, bcc, subject, body,
+        reply_message_id=reply_message_id, attachments=attachments,
+    )
     msg = EmailMessage()
     msg["From"], msg["To"], msg["Subject"] = box.address, ", ".join(primary), subject
     if copy:
