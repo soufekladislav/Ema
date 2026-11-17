@@ -6,7 +6,7 @@ import base64
 import re
 
 from sqlalchemy import select
-from .mail_service import MailError, _connect, parse_metadata
+from .mail_service import MailError, _connect, parse_metadata, quote_mailbox_name
 from .models import MailFolder, MailMessage, now
 
 PAGE_SIZE = 50
@@ -105,7 +105,7 @@ def _select(client, folder):
         remote_name = "INBOX"
     else:
         remote_name = folder.name
-    typ, info = client.select(remote_name, readonly=True)
+    typ, info = client.select(quote_mailbox_name(remote_name), readonly=True)
     if typ != "OK":
         raise MailError("IMAP složku nelze otevřít")
     validity = client.response("UIDVALIDITY")[1]
@@ -249,10 +249,10 @@ def move_message(db, box, key, msg, action):
         if validity != msg.uidvalidity:
             raise MailError("UIDVALIDITY se změnilo. Zprávu je nutné znovu načíst")
         # SELECT was readonly: reopen with write permissions before MOVE.
-        typ, _ = client.select(src.name, readonly=False)
+        typ, _ = client.select(quote_mailbox_name(src.name), readonly=False)
         if typ != "OK":
             raise MailError("Server neumožňuje zápis do zdrojové složky")
-        typ, _ = client.uid("MOVE", str(msg.uid), target.name)
+        typ, _ = client.uid("MOVE", str(msg.uid), quote_mailbox_name(target.name))
         if typ != "OK":
             raise MailError("IMAP server přesun zprávy odmítl")
         # No EXPUNGE, no action on the user's other mail. Keep original row for
