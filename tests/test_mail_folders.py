@@ -339,7 +339,8 @@ def test_full_trash_requires_same_server_uid_boundary(state, monkeypatch):
             empty_trash_all(db, box, "key", trash, snapshot)
         assert fake.deleted == []
         assert fake.full_expunge == 0
+        inbox = db.scalar(select(MailFolder).where(
+            MailFolder.mailbox_id == box.id, MailFolder.name == "INBOX"))
         with pytest.raises(MailError, match="ověřeným IMAP Košem"):
-            empty_trash_all(db, box, "key", db.get(MailFolder, inbox_id) if False else
-                            db.scalar(select(MailFolder).where(MailFolder.name == "INBOX")), snapshot)
+            empty_trash_all(db, box, "key", inbox, snapshot)
         assert fake.full_expunge == 0
