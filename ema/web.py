@@ -17,6 +17,10 @@ from sqlalchemy.exc import IntegrityError
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from .mail_service import MailError, encrypt_password, preview_message, send_plain, sync_inbox, validate_mail_host
+from .mail_folders import (
+    PAGE_SIZE, discover_folders, available_folders, decode_modified_utf7,
+    fetch_folder_page, special_folder, move_message,
+)
 from .assistant_service import AssistantError, run_assistant
 from .contact_import import ImportErrorCSV, extract_contacts
 from .schema_upgrade import upgrade_schema
@@ -230,11 +234,28 @@ def mailbox_counts(db, uid, boxes):
         .join(MailFolder, MailFolder.id == MailMessage.folder_id)
         .outerjoin(MailUserState, and_(
             MailUserState.mail_id == MailMessage.id, MailUserState.user_id == uid))
-        .where(MailMessage.mailbox_id.in_(ids),
+        .where(MailMessage.mailbox_id.in_(ids), MailFolder.name == "INBOX",
+               MailMessage.moved.is_(False),
                MailMessage.uidvalidity == MailFolder.uidvalidity)
         .group_by(MailMessage.mailbox_id)
     ).all()
     return {box_id: (int(unread or 0), int(total or 0)) for box_id, total, unread in rows}
+
+
+def mail_rows_state(db, uid, messages):
+    ids = [m.id for m in messages]
+    states = {row.mail_id: row for row in db.scalars(
+        select(MailUserState).where(
+            MailUserState.user_id == uid,
+            MailUserState.mail_id.in_(ids)
+        )).all()} if ids else {}
+    return {
+        m.id: {
+            "read": states[m.id].read_override if m.id in states and
+                    states[m.id].read_override is not None else is_imap_read(m),
+            "starred": bool(states[m.id].starred) if m.id in states else False,
+        } for m in messages
+    }
 
 
 def get_mail_user_state(db, uid, mail_id):
@@ -419,30 +440,37 @@ def create_app(test_config=None):
             abort(403)
         box_id = int(raw_box) if raw_box else None
         selected = next((box for box in boxes if box.id == box_id), None)
-        included = [b.id for b in boxes if b.id not in prefs or prefs[b.id].included]
-        target = [selected.id] if selected else included
-        if target:
-            messages = g.db.scalars(
-                select(MailMessage).join(MailFolder, MailMessage.folder_id == MailFolder.id)
-                .where(MailMessage.mailbox_id.in_(target),
-                       MailMessage.uidvalidity == MailFolder.uidvalidity)
-                .order_by(MailMessage.sent_at.is_(None), MailMessage.sent_at.desc(),
-                          MailMessage.id.desc()).limit(120)
-            ).all()
+        selected_folder = None
+        folder_rows = []
+        if selected:
+            folder_rows = available_folders(g.db, selected)
+            if not folder_rows:
+                g.db.add(MailFolder(mailbox_id=selected.id, name="INBOX"))
+                g.db.commit()
+                folder_rows = available_folders(g.db, selected)
+            raw_folder = request.args.get("folder")
+            if raw_folder and (not raw_folder.isdigit() or int(raw_folder) not in {f.id for f in folder_rows}):
+                abort(403)
+            folder_id = int(raw_folder) if raw_folder else None
+            selected_folder = (next((f for f in folder_rows if f.id == folder_id), None)
+                               if folder_id else
+                               next((f for f in folder_rows if f.name == "INBOX"), folder_rows[0]))
+            query = select(MailMessage).join(MailFolder, MailMessage.folder_id == MailFolder.id).where(
+                MailMessage.mailbox_id == selected.id,
+                MailMessage.folder_id == selected_folder.id,
+                MailMessage.uidvalidity == MailFolder.uidvalidity,
+                MailMessage.moved.is_(False),
+            ).order_by(MailMessage.uid.desc(), MailMessage.id.desc())
         else:
-            messages = []
-        states = {}
-        if messages:
-            states = {row.mail_id: row for row in g.db.scalars(
-                select(MailUserState).where(MailUserState.user_id == g.user.id,
-                    MailUserState.mail_id.in_([m.id for m in messages]))
-            ).all()}
-        mail_state = {
-            m.id: {"read": states[m.id].read_override if m.id in states and
-                   states[m.id].read_override is not None else is_imap_read(m),
-                   "starred": bool(states[m.id].starred) if m.id in states else False}
-            for m in messages
-        }
+            included = [b.id for b in boxes if b.id not in prefs or prefs[b.id].included]
+            query = select(MailMessage).join(MailFolder, MailMessage.folder_id == MailFolder.id).where(
+                MailMessage.mailbox_id.in_(included), MailFolder.name == "INBOX",
+                MailMessage.uidvalidity == MailFolder.uidvalidity,
+                MailMessage.moved.is_(False),
+            ).order_by(MailMessage.sent_at.is_(None), MailMessage.sent_at.desc(), MailMessage.id.desc())
+        messages = g.db.scalars(query.limit(PAGE_SIZE + 1)).all()
+        initial_has_more = len(messages) > PAGE_SIZE
+        messages = messages[:PAGE_SIZE]
         syncable_ids = set()
         for box in boxes:
             try:
@@ -452,10 +480,174 @@ def create_app(test_config=None):
                 continue
         return render_hub(
             "mail", boxes=boxes, mail_rows=messages, selected_box=selected,
+            selected_folder=selected_folder, imap_folders=folder_rows,
+            folder_names={f.id: decode_modified_utf7(f.name) for f in folder_rows},
             box_lookup={box.id: box for box in boxes}, syncable_ids=syncable_ids,
             view_prefs=prefs, indexed_counts=mailbox_counts(g.db, g.user.id, boxes),
-            mail_state=mail_state, combined_count=len(included),
+            mail_state=mail_rows_state(g.db, g.user.id, messages),
+            combined_count=len([b for b in boxes if b.id not in prefs or prefs[b.id].included]),
+            initial_has_more=initial_has_more,
+            initial_cursor=min((m.uid for m in messages), default=None),
+            can_move_ids=syncable_ids,
         )
+
+    @app.post("/mail/<int:box_id>/page")
+    @login_required
+    def mail_folder_page(box_id):
+        """Fetch one newest/older 50-mail IMAP page on demand; no bodies or attachments."""
+        box = mailbox_or_403(box_id)
+        try:
+            organization_access(g.db, g.user.id, box.organization_id)
+        except Forbidden:
+            abort(403)
+        payload = request.get_json(silent=True) or {}
+        raw_folder = payload.get("folder_id")
+        cursor = payload.get("before_uid")
+        if not isinstance(raw_folder, int) or isinstance(raw_folder, bool):
+            abort(400, description="Neplatná složka")
+        if cursor is not None and (not isinstance(cursor, int) or isinstance(cursor, bool) or cursor <= 0):
+            abort(400, description="Neplatný kurzor")
+        folder = g.db.get(MailFolder, raw_folder)
+        if folder is None or folder.mailbox_id != box.id:
+            abort(403)
+        try:
+            page = fetch_folder_page(g.db, box, app.config["MAIL_ENCRYPTION_KEY"],
+                                     folder, before_uid=cursor, limit=PAGE_SIZE)
+        except MailError as ex:
+            return {"error": str(ex)}, 422
+        rows = g.db.scalars(select(MailMessage).where(
+            MailMessage.folder_id == folder.id, MailMessage.uidvalidity == page["uidvalidity"],
+            MailMessage.uid.in_(page["uids"]), MailMessage.moved.is_(False))
+            .order_by(MailMessage.uid.desc())).all() if page["uids"] else []
+        state = mail_rows_state(g.db, g.user.id, rows)
+        try:
+            mailbox_access(g.db, g.user.id, box_id, manage=True)
+            can_move = True
+        except Forbidden:
+            can_move = False
+        folder_names = {f.id: decode_modified_utf7(f.name) for f in available_folders(g.db, box)}
+        return {
+            "html": render_template("_mail_rows.html", mail_rows=rows, mail_state=state,
+                                    box_lookup={box.id: box}, selected_box=box,
+                                    selected_folder=folder, can_move_ids={box.id} if can_move else set()),
+            "has_more": page["has_more"], "next_cursor": page["cursor"],
+            "folders": [{"id": f.id, "name": folder_names[f.id]} for f in available_folders(g.db, box)],
+            "server_total": page["server_total"],
+            "indexed_count": list(mailbox_counts(g.db, g.user.id, [box]).get(box.id, (0, 0))),
+        }
+
+    @app.post("/mail/<int:box_id>/refresh-50")
+    @login_required
+    def mail_refresh_50(box_id):
+        """Manual fallback for users with JavaScript disabled."""
+        box = mailbox_or_403(box_id, manage=True)
+        try:
+            organization_access(g.db, g.user.id, box.organization_id)
+        except Forbidden:
+            abort(403)
+        folder_id = positive_id("folder_id")
+        folder = g.db.get(MailFolder, folder_id) if folder_id else None
+        if folder is None or folder.mailbox_id != box.id:
+            abort(403)
+        try:
+            info = fetch_folder_page(g.db, box, app.config["MAIL_ENCRYPTION_KEY"],
+                                     folder, limit=PAGE_SIZE)
+            flash(f"Načteno posledních {len(info['uids'])} zpráv ze složky.", "success")
+        except MailError as ex:
+            flash(str(ex), "error")
+        return redirect(url_for("mail_hub", box=box.id, folder=folder.id))
+
+    @app.get("/mail/aggregate/page")
+    @login_required
+    def mail_aggregate_page():
+        ctx, orgs, _ = current_scope()
+        boxes = visible_mailboxes(g.db, g.user.id, orgs)
+        prefs = user_mail_preferences(g.db, g.user.id, boxes)
+        included = [b.id for b in boxes if b.id not in prefs or prefs[b.id].included]
+        try:
+            offset = int(request.args.get("offset", "0"))
+        except ValueError:
+            abort(400)
+        if offset < 0 or offset > 10000:
+            abort(400)
+        query = (select(MailMessage)
+                 .join(MailFolder, MailMessage.folder_id == MailFolder.id)
+                 .where(MailMessage.mailbox_id.in_(included), MailFolder.name == "INBOX",
+                        MailMessage.moved.is_(False),
+                        MailMessage.uidvalidity == MailFolder.uidvalidity)
+                 .order_by(MailMessage.sent_at.is_(None), MailMessage.sent_at.desc(),
+                           MailMessage.id.desc()))
+        rows = g.db.scalars(query.offset(offset).limit(PAGE_SIZE + 1)).all()
+        has_more = len(rows) > PAGE_SIZE
+        rows = rows[:PAGE_SIZE]
+        permitted = set()
+        for box in boxes:
+            try:
+                mailbox_access(g.db, g.user.id, box.id, manage=True)
+                permitted.add(box.id)
+            except Forbidden:
+                continue
+        return {"html": render_template("_mail_rows.html", mail_rows=rows,
+                                        box_lookup={b.id: b for b in boxes},
+                                        mail_state=mail_rows_state(g.db, g.user.id, rows),
+                                        selected_box=None, selected_folder=None, can_move_ids=permitted),
+                "has_more": has_more, "next_offset": offset + len(rows)}
+
+    @app.post("/mail/<int:box_id>/folders/refresh")
+    @login_required
+    def mail_refresh_folders(box_id):
+        box = mailbox_or_403(box_id)
+        try:
+            organization_access(g.db, g.user.id, box.organization_id)
+            count = discover_folders(g.db, box, app.config["MAIL_ENCRYPTION_KEY"])
+            flash(f"Načteno {count} složek přímo z IMAP serveru.", "success")
+        except Forbidden:
+            abort(403)
+        except MailError as ex:
+            flash(str(ex), "error")
+        return redirect(url_for("mail_hub", box=box_id))
+
+    @app.get("/mail/<int:mail_id>/move/confirm")
+    @login_required
+    def confirm_mail_move(mail_id):
+        msg = g.db.get(MailMessage, mail_id)
+        if not msg or msg.moved:
+            abort(404)
+        box = mailbox_or_403(msg.mailbox_id, manage=True)
+        try:
+            organization_access(g.db, g.user.id, box.organization_id)
+        except Forbidden:
+            abort(403)
+        action = request.args.get("action")
+        if action not in ("archive", "trash"):
+            abort(400)
+        target = special_folder(g.db, box, action)
+        return render("mail-move-confirm", message=msg, selected_box=box,
+                      mail_action=action, target=target,
+                      target_label=decode_modified_utf7(target.name) if target else None)
+
+    @app.post("/mail/<int:mail_id>/move")
+    @login_required
+    def execute_mail_move(mail_id):
+        msg = g.db.get(MailMessage, mail_id)
+        if not msg or msg.moved:
+            abort(404)
+        box = mailbox_or_403(msg.mailbox_id, manage=True)
+        try:
+            organization_access(g.db, g.user.id, box.organization_id)
+        except Forbidden:
+            abort(403)
+        action = field("action", 20)
+        if action not in ("archive", "trash") or field("confirm", 8) != "yes":
+            abort(400)
+        try:
+            target = move_message(g.db, box, app.config["MAIL_ENCRYPTION_KEY"], msg, action)
+            audit("mail.move", f"mail={mail_id},folder={target.id},action={action}", box.organization_id)
+            g.db.commit()
+            flash(f"Zpráva přesunuta do složky {decode_modified_utf7(target.name)}. Nebyla trvale smazána.", "success")
+        except MailError as ex:
+            flash(str(ex), "error")
+        return redirect(url_for("mail_hub", box=box.id, folder=msg.folder_id))
 
     @app.post("/mail/order")
     @login_required
@@ -519,7 +711,14 @@ def create_app(test_config=None):
         g.db.commit()
         if field("return_to", 20) == "detail" and action != "unread":
             return redirect(url_for("mail_detail", org_id=box.organization_id, message_id=mail_id))
-        return redirect(url_for("mail_hub", box=box.id) if field("box", 20) else url_for("mail_hub"))
+        folder_id = positive_id("folder")
+        folder = g.db.get(MailFolder, folder_id) if folder_id else None
+        if folder and folder.mailbox_id != box.id:
+            folder_id = None
+        return redirect(
+            url_for("mail_hub", box=box.id, folder=folder_id)
+            if field("box", 20) else url_for("mail_hub")
+        )
 
     @app.post("/mail/<int:box_id>/sync")
     @login_required
@@ -1051,6 +1250,12 @@ def create_app(test_config=None):
         box = mailbox_or_403(msg.mailbox_id)
         if box.organization_id != org_id:
             abort(403)
+        if msg.moved:
+            flash("Tato zpráva již byla na poštovním serveru přesunuta. Otevři cílovou složku.", "error")
+            return redirect(url_for("mail_hub", box=box.id))
+        folder = g.db.get(MailFolder, msg.folder_id)
+        if folder is None or folder.mailbox_id != box.id:
+            abort(404)
         # Personal read state is local to Ema; IMAP is opened read-only.
         state = get_mail_user_state(g.db, g.user.id, msg.id)
         if state.read_override is not True:
@@ -1059,7 +1264,7 @@ def create_app(test_config=None):
         show_images = request.args.get("images") == "1"
         try:
             preview = preview_message(box, msg, app.config["MAIL_ENCRYPTION_KEY"],
-                                      show_images=show_images)
+                                      show_images=show_images, folder_name=folder.name)
             warning = ("HTML a prostý text jsou čtené přímo z IMAP, maximálně 192 KiB."
                        " Přílohy a obsah zprávy se neukládají do databáze.")
         except MailError as ex:
@@ -1068,7 +1273,7 @@ def create_app(test_config=None):
         projs = g.db.scalars(select(Project).where(Project.organization_id == org_id)).all()
         return render("mail-detail", message=msg, selected_box=box, preview=preview,
                       warning=warning, show_images=show_images, starred=state.starred,
-                      companies=companies, projects=projs)
+                      mail_folder_id=folder.id, companies=companies, projects=projs)
 
     @app.post("/org/<int:org_id>/mail/message/<int:message_id>/link")
     @org_required

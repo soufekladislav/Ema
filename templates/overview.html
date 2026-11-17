@@ -98,7 +98,7 @@
             <a class="ema-mail-filter {{ 'active' if selected_box and selected_box.id == b.id else '' }}" href="{{ url_for('mail_hub', box=b.id) }}">
               <strong>{{ b.label }}</strong><small>{{ b.address }}</small>
               <small>{{ orgs|selectattr('id', 'equalto', b.organization_id)|map(attribute='name')|first|default('') }}</small>
-              <small><strong>{{ indexed[0] }}</strong> nepřečtených / {{ indexed[1] }} načtených{% if b.server_message_count is not none %} · IMAP celkem {{ b.server_message_count }}{% endif %}</small>
+              <small data-mailbox-count="{{ b.id }}"><strong>{{ indexed[0] }}</strong> nepřečtených / {{ indexed[1] }} načtených{% if b.server_message_count is not none %} · IMAP celkem {{ b.server_message_count }}{% endif %}</small>
               <small>Stav: {{ 'Připojeno' if b.status == 'ok' else 'Chyba připojení' if b.status == 'error' else 'Nesynchronizováno' }}</small>
             </a>
             <form method="post" action="{{ url_for('toggle_mailbox_inclusion', box_id=b.id) }}" class="ema-mailbox-visibility-form">
@@ -119,50 +119,59 @@
     <section class="card panel ema-mail-hub-messages">
       <div class="ema-card-head">
         <h3>{{ selected_box.address if selected_box else 'Souhrnný inbox' }}</h3>
-        <span class="status">{{ mail_rows|length }} zpráv v přehledu</span>
+        <span class="status">{% if selected_box %}IMAP – načítání po 50{% else %}Posledních 50 indexovaných{% endif %}</span>
       </div>
       {% if selected_box %}
+        <div class="ema-mail-folder-toolbar">
+          <form method="get" action="{{ url_for('mail_hub') }}" id="ema-mail-folder-select-form" class="ema-mail-folder-form">
+            <input type="hidden" name="box" value="{{ selected_box.id }}">
+            <label for="ema-folder-select">Složka</label>
+            <select id="ema-folder-select" name="folder">
+              {% for folder in imap_folders %}
+                <option value="{{ folder.id }}" {{ 'selected' if selected_folder and folder.id == selected_folder.id else '' }}>{{ folder_names[folder.id] }}</option>
+              {% endfor %}
+            </select>
+            <button class="btn" type="submit">Otevřít</button>
+          </form>
+          <form method="post" action="{{ url_for('mail_refresh_folders', box_id=selected_box.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="btn" type="submit" title="Obnovit názvy složek ze serveru">Obnovit složky</button>
+          </form>
+        </div>
         <div class="ema-mail-sync-controls">
           <div>
-            <strong>{{ 'Připojeno' if selected_box.status == 'ok' else 'Chyba synchronizace' if selected_box.status == 'error' else 'Schránka čeká na první synchronizaci' }}</strong>
+            <strong>{{ 'Připojeno' if selected_box.status == 'ok' else 'Chyba synchronizace' if selected_box.status == 'error' else 'Pošta zatím nesynchronizována' }}</strong>
             <p class="small muted">Poslední úspěšná synchronizace: {{ selected_box.last_sync.strftime('%d.%m.%Y %H:%M') if selected_box.last_sync else 'Nikdy' }}</p>
           </div>
           {% if selected_box.id in syncable_ids %}
-            <form method="post" action="{{ url_for('sync_mail_hub', box_id=selected_box.id) }}">
+            <form method="post" action="{{ url_for('mail_refresh_50', box_id=selected_box.id) }}">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <button class="btn primary" type="submit">Načíst 10 e-mailů</button>
+              <input type="hidden" name="folder_id" value="{{ selected_folder.id }}">
+              <button class="btn primary" type="submit">Aktualizovat 50 zpráv</button>
             </form>
           {% endif %}
         </div>
         {% if selected_box.status == 'error' and selected_box.sync_error %}<div class="notice ema-mail-sync-error" role="alert">{{ selected_box.sync_error }}</div>{% endif %}
       {% else %}
-        <p class="small muted">Souhrnný přehled zobrazuje pouze schránky označené „V přehledu“. Pro načtení vyber konkrétní schránku vlevo.</p>
+        <p class="small muted">V souhrnu se zobrazují jen zahrnuté schránky, vždy posledních 50 indexovaných zpráv; starší se doplní při rolování.</p>
       {% endif %}
-      <p class="small muted">Nepřečtené / načtené jsou počty indexovaných zpráv, nikoli kompletní obsah vzdáleného INBOX. Přečtení a hvězdičky v Emě nemění stav na poštovním serveru.</p>
-      <div class="ema-message-list">
-      {% for m in mail_rows %}
-        {% set mb = box_lookup[m.mailbox_id] %}
-        {% set st = mail_state[m.id] %}
-        <div class="ema-mail-message-row {{ 'is-read' if st['read'] else 'is-unread' }} {{ 'is-starred' if st['starred'] else '' }}">
-          <form method="post" action="{{ url_for('set_mail_state', mail_id=m.id) }}">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <input type="hidden" name="action" value="{{ 'unstar' if st['starred'] else 'star' }}">
-            <input type="hidden" name="box" value="{{ selected_box.id if selected_box else '' }}">
-            <button class="ema-mail-star" type="submit" aria-label="{{ 'Odebrat hvězdičku' if st['starred'] else 'Označit hvězdičkou' }}" title="Příznak v Emě">{{ '★' if st['starred'] else '☆' }}</button>
-          </form>
-          <a class="ema-mail-item" href="{{ url_for('mail_detail', org_id=mb.organization_id, message_id=m.id) }}">
-            <strong>{{ m.subject or '(bez předmětu)' }}</strong>
-            <span>{{ m.sender }}</span>
-            <small>{{ mb.address }} · {{ m.sent_at.strftime('%d.%m.%Y %H:%M') if m.sent_at else 'Bez data' }}</small>
-          </a>
-          <form method="post" action="{{ url_for('set_mail_state', mail_id=m.id) }}">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <input type="hidden" name="action" value="{{ 'unread' if st['read'] else 'read' }}">
-            <input type="hidden" name="box" value="{{ selected_box.id if selected_box else '' }}">
-            <button class="ema-mail-read-toggle" type="submit" title="{{ 'Označit jako nepřečtené' if st['read'] else 'Označit jako přečtené' }}">{{ 'Nepřečtené' if st['read'] else 'Přečíst' }}</button>
-          </form>
+      <p class="small muted">Přečtení a hvězdičky platí jen v Emě. Archivace a přesun do Koše se po potvrzení provádějí přímo na poštovním serveru.</p>
+      <div id="ema-mail-scrollpanel" class="ema-mail-scrollpanel"
+           data-mailbox-id="{{ selected_box.id if selected_box else '' }}"
+           data-folder-id="{{ selected_folder.id if selected_folder else '' }}"
+           data-page-url="{{ url_for('mail_folder_page', box_id=selected_box.id) if selected_box else '' }}"
+           data-aggregate-url="{{ url_for('mail_aggregate_page') }}"
+           data-csrf="{{ csrf_token() }}"
+           data-next-cursor="{{ initial_cursor or '' }}"
+           data-has-more="{{ 'true' if initial_has_more else 'false' }}">
+        <div id="ema-mail-items" class="ema-message-list">
+          {% with can_move_ids=syncable_ids %}
+            {% include "_mail_rows.html" %}
+          {% endwith %}
         </div>
-      {% else %}<div class="empty-state">Žádné synchronizované zprávy v tomto přehledu.</div>{% endfor %}
+        <div id="ema-mail-loader" class="ema-mail-loader" role="status" aria-live="polite">
+          {% if mail_rows|length == 0 %}Zatím nejsou načtené zprávy.{% elif initial_has_more %}Posuň seznam dolů pro další zprávy.{% else %}Zobrazeny dostupné indexované zprávy.{% endif %}
+        </div>
       </div>
     </section>
   </div>

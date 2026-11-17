@@ -38,6 +38,19 @@ def validate_mail_host(host):
     return host
 
 
+def quote_mailbox_name(name):
+    """imaplib does not quote folder arguments; preserve modified UTF-7 safely."""
+    if not isinstance(name, str) or not name or len(name) > 190 or any(
+        char in name for char in ("\r", "\n", "\x00")
+    ):
+        raise MailError("Neplatná IMAP složka")
+    try:
+        name.encode("ascii")
+    except UnicodeEncodeError:
+        raise MailError("IMAP složka není v serverovém kódování") from None
+    return '"' + name.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
 def encrypt_password(password, key):
     if not key:
         raise MailError("Chybí MAIL_ENCRYPTION_KEY")
@@ -168,13 +181,13 @@ def sync_inbox(db, box, key, limit=30):
                 pass
 
 
-def preview_message(box, row, key, *, show_images=False):
+def preview_message(box, row, key, *, show_images=False, folder_name="INBOX"):
     """Fetch bounded MIME directly from IMAP; body and images stay out of MariaDB."""
     client = _connect(box, key)
     try:
-        typ, _ = client.select("INBOX", readonly=True)
+        typ, _ = client.select(quote_mailbox_name(folder_name), readonly=True)
         if typ != "OK":
-            raise MailError("Nelze otevřít INBOX")
+            raise MailError("Nelze otevřít složku zprávy")
         current = client.response("UIDVALIDITY")[1]
         if not current or int(current[0]) != row.uidvalidity:
             raise MailError("UID zprávy již neodpovídá serveru. Proveďte synchronizaci.")

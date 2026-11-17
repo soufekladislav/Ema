@@ -1,0 +1,31 @@
+{% for m in mail_rows %}
+  {% set mb = box_lookup[m.mailbox_id] %}
+  {% set st = mail_state[m.id] %}
+  <div class="ema-mail-message-row {{ 'is-read' if st['read'] else 'is-unread' }} {{ 'is-starred' if st['starred'] else '' }}" data-mail-id="{{ m.id }}">
+    <form method="post" action="{{ url_for('set_mail_state', mail_id=m.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="action" value="{{ 'unstar' if st['starred'] else 'star' }}">
+      <input type="hidden" name="box" value="{{ selected_box.id if selected_box else '' }}">
+      <input type="hidden" name="folder" value="{{ selected_folder.id if selected_folder else '' }}">
+      <button class="ema-mail-star" type="submit" aria-label="{{ 'Odebrat hvězdičku' if st['starred'] else 'Označit hvězdičkou' }}" title="Příznak v Emě">{{ '★' if st['starred'] else '☆' }}</button>
+    </form>
+    <a class="ema-mail-item" href="{{ url_for('mail_detail', org_id=mb.organization_id, message_id=m.id, folder=m.folder_id) }}">
+      <strong>{{ m.subject or '(bez předmětu)' }}</strong>
+      <span>{{ m.sender }}</span>
+      <small>{{ mb.address }} · {{ m.sent_at.strftime('%d.%m.%Y %H:%M') if m.sent_at else 'Bez data' }}</small>
+    </a>
+    <div class="ema-message-actions">
+      <form method="post" action="{{ url_for('set_mail_state', mail_id=m.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="action" value="{{ 'unread' if st['read'] else 'read' }}">
+        <input type="hidden" name="box" value="{{ selected_box.id if selected_box else '' }}">
+      <input type="hidden" name="folder" value="{{ selected_folder.id if selected_folder else '' }}">
+        <button class="ema-mail-read-toggle" type="submit" title="{{ 'Označit jako nepřečtené' if st['read'] else 'Označit jako přečtené' }}">{{ 'Nepřečtené' if st['read'] else 'Přečíst' }}</button>
+      </form>
+      {% if m.mailbox_id in can_move_ids %}
+        <a class="ema-mail-icon" title="Archivovat na serveru – po potvrzení" aria-label="Archivovat zprávu {{ m.subject }}" href="{{ url_for('confirm_mail_move', mail_id=m.id, action='archive') }}">▣</a>
+        <a class="ema-mail-icon ema-mail-trash" title="Přesunout do Koše – po potvrzení, ne trvale smazat" aria-label="Přesunout zprávu {{ m.subject }} do Koše" href="{{ url_for('confirm_mail_move', mail_id=m.id, action='trash') }}">🗑</a>
+      {% endif %}
+    </div>
+  </div>
+{% endfor %}
