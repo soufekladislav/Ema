@@ -1,55 +1,106 @@
 {% extends 'base.html' %}
 {% block content %}
 {% if section == 'home' %}
-<div class="page-head project-head"><div><span class="eyebrow">Pracovní prostředí</span><h1>Moje projekty</h1><p>Projekt je hlavním místem práce. Firma určuje vlastnictví dat, fakturaci a přístup k firemním zdrojům.</p></div></div>
-{% if orgs|length > 1 %}
-<form class="project-filter" method="get" action="{{ url_for('home') }}" aria-label="Filtr firem">
-  <label for="firm-filter">Filtrovat podle firmy</label>
-  <select id="firm-filter" name="firm"><option value="">Všechny moje projekty</option>{% for o in orgs %}<option value="{{ o.id }}" {{ 'selected' if filter_org_id == o.id else '' }}>{{ o.name }}</option>{% endfor %}</select>
-  <button class="btn" type="submit">Použít filtr</button>
-</form>
-{% endif %}
-<div class="grid cards3 project-cards">
-{% for p in projects %}
-  <a class="card tile project-tile" href="{{ url_for('project_detail', project_id=p.id) }}">
-    <div class="project-tile-meta"><span class="tile-icon">▥</span><span class="status">{{ p.status }}</span></div>
-    <h3>{{ p.name }}</h3>
-    <p>{{ p.description[:130] if p.description else 'Obchodní projekt a pracovní komunikace' }}</p>
-    <small class="project-company">{{ project_org_names.get(p.organization_id, '') }}</small>
-    <span class="link">Otevřít projekt →</span>
-  </a>
-{% else %}
-  <div class="card panel project-empty"><h3>Zatím tu nejsou žádné projekty</h3><p>Nový projekt můžeš založit níže. Pokud máš přístup pouze k přizvanému projektu, zobrazí se automaticky po přiřazení.</p></div>
-{% endfor %}
-</div>
-{% if orgs %}
-<section class="card panel project-create" aria-labelledby="new-project-heading">
-  <h3 id="new-project-heading">Nový projekt</h3>
-  <p class="small muted">Pro každý projekt vyber firmu, pod kterou se budou spravovat data a fakturace.</p>
-  <form class="formstack" method="post" action="{{ url_for('create_project') }}">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <div class="project-create-fields">
-      <label>Název projektu<input name="name" maxlength="190" placeholder="Například: Nová obchodní zakázka" required></label>
-      <label>Firma / vlastník dat<select name="organization_id" required>{% for o in orgs %}<option value="{{ o.id }}" {{ 'selected' if filter_org_id == o.id else '' }}>{{ o.name }}</option>{% endfor %}</select></label>
+<div class="ema-assistant-home">
+  <header class="ema-assistant-hero">
+    <div>
+      <span class="eyebrow">EMA · FRESH AI ECOSYSTEM</span>
+      <h1>Co dnes <em>vyřešíme?</em></h1>
+      <p>Ema propojuje projekty, klienty a komunikaci. Napiš jí, co potřebuješ – a vyber projekt, kterého se to týká.</p>
     </div>
-    <label>Stručný popis (volitelné)<input name="description" maxlength="1500" placeholder="Co je cílem projektu?"></label>
-    <div><button class="btn primary" type="submit">Založit projekt</button></div>
-  </form>
-</section>
-<details id="firms" class="card panel firm-admin">
-  <summary>Správa firem a datových prostorů</summary>
-  <p class="small muted">Firmy slouží pro fakturaci, správu klientských databází, e-mailových účtů a oprávnění. Nejsou hlavní navigací aplikace.</p>
-  <div class="grid cards3">
-    {% for o in orgs %}<a class="card tile" href="{{ url_for('organization_home', org_id=o.id) }}"><h3>{{ o.name }}</h3><p>Správa firmy a dat</p><span class="link">Otevřít nastavení →</span></a>{% endfor %}
+    <img src="https://www.freshcrackers.cz/wp-content/uploads/2026/10/fresh-hub.png" alt="Ema – obchodní a projektová asistentka" loading="lazy" referrerpolicy="no-referrer">
+  </header>
+  <div class="ema-assistant-layout">
+    <section class="card ema-assistant-chat" aria-label="Konverzace s Emou">
+      <div class="ema-assistant-chat-head">
+        <div class="ema-chat-title"><span class="ema-avatar">E</span><div><strong>Chat s Emou</strong><small>{{ selected_project.name if selected_project else 'Všechny moje projekty' }}</small></div></div>
+        <form method="get" action="{{ url_for('home') }}" class="ema-context-picker">
+          <label for="ema-project">Kontext projektu</label>
+          <select id="ema-project" name="project">
+            <option value="">Všechny moje projekty</option>
+            {% for p in projects %}<option value="{{ p.id }}" {{ 'selected' if selected_project and selected_project.id==p.id else '' }}>{{ p.name }} · {{ project_org_names.get(p.organization_id, '') }}</option>{% endfor %}
+          </select>
+          <button class="btn" type="submit">Vybrat</button>
+        </form>
+      </div>
+      <div class="ema-assistant-thread" aria-live="polite">
+        {% for item in assistant_turns %}
+          <article class="ema-assistant-message {{ 'from-me' if item.role == 'user' else 'from-ema' }}">
+            <div class="ema-message-role">{{ 'Ty' if item.role == 'user' else 'Ema' }} <small>· {{ item.created_at.strftime('%d.%m. %H:%M') }}</small></div>
+            <div class="ema-message-body">{{ item.body }}</div>
+          </article>
+        {% else %}
+          <div class="ema-chat-welcome">
+            <div class="ema-welcome-mark">E</div>
+            <h2>{{ 'Pracuji nad projektem ' ~ selected_project.name if selected_project else 'Ahoj, jsem Ema.' }}</h2>
+            <p>{% if selected_project %}V tomto chatu budu používat jen informace z vybraného projektu, ke kterým máš přístup.{% else %}Můžeš se zeptat na své rozpracované projekty a rozhodnout, co má dnes prioritu.{% endif %}</p>
+            <p class="small muted">AI zatím navrhuje a vysvětluje, změny v projektech sama neprovádí.</p>
+          </div>
+        {% endfor %}
+      </div>
+      <div class="ema-chat-compose-wrap">
+        {% if not ai_ready %}<p class="ema-ai-notice"><strong>AI zatím není připojena.</strong> Správce musí povolit účet a nastavit přístupový klíč Fresh AI Engine. Historii původních projektových poznámek to neovlivňuje.</p>{% endif %}
+        <form class="ema-chat-compose" method="post" action="{{ url_for('ask_assistant') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="project_id" value="{{ selected_project.id if selected_project else '' }}">
+          <label class="sr-only" for="ema-user-message">Zpráva pro Emu</label>
+          <textarea id="ema-user-message" name="body" rows="3" maxlength="4000" placeholder="{{ 'Zeptej se Emy na projekt ' ~ selected_project.name ~ '…' if selected_project else 'Na čem bychom dnes měli pracovat?…' }}" required {{ 'disabled' if not ai_ready else '' }}></textarea>
+          <button class="btn primary" type="submit" {{ 'disabled' if not ai_ready else '' }}>Odeslat Emě</button>
+        </form>
+        <p class="ema-chat-disclaimer">Chat používá jen přístupné projektové údaje. Bez schválení nic nemaže, neodesílá ani nemění.</p>
+      </div>
+    </section>
+    <aside class="ema-assistant-context" aria-label="Projektový kontext a rychlé akce">
+      <section class="card ema-context-card">
+        <span class="eyebrow">PRACOVNÍ KONTEXT</span>
+        <h2>{{ selected_project.name if selected_project else 'Moje projekty' }}</h2>
+        {% if selected_project %}
+          <p>{{ selected_project.description[:350] if selected_project.description else 'Bez popisu projektu.' }}</p>
+          <div class="ema-context-line"><span>Stav</span><strong>{{ selected_project.status }}</strong></div>
+          <div class="ema-context-line"><span>Firma / data</span><strong>{{ project_org_names.get(selected_project.organization_id, '') }}</strong></div>
+          <div class="ema-context-line"><span>Úkoly v projektu</span><strong>{{ selected_tasks|length }}</strong></div>
+          <a class="btn" href="{{ url_for('project_detail', project_id=selected_project.id) }}">Otevřít detail projektu</a>
+        {% else %}
+          <p>Vyber jeden projekt pro detailní konverzaci nebo zůstaň v přehledu napříč všemi přístupnými projekty.</p>
+        {% endif %}
+      </section>
+      <section class="card ema-context-card">
+        <div class="ema-aside-top"><h3>Projekty</h3><span class="ema-count">{{ projects|length }}</span></div>
+        <div class="ema-project-shortlist">
+          {% for p in projects %}
+            <a href="{{ url_for('home', project=p.id) }}" class="{{ 'active' if selected_project and selected_project.id == p.id else '' }}">
+              <strong>{{ p.name }}</strong><small>{{ project_org_names.get(p.organization_id, '') }} · {{ p.status }}</small>
+            </a>
+          {% else %}<p class="small muted">Zatím nemáš přístup k žádnému projektu.</p>{% endfor %}
+        </div>
+      </section>
+      {% if orgs %}
+      <details class="card ema-context-card ema-project-new" id="create-project">
+        <summary>+ Založit nový projekt</summary>
+        <form class="formstack" method="post" action="{{ url_for('create_project') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <label>Název<input name="name" required maxlength="190"></label>
+          <label>Firma / vlastník dat<select name="organization_id" required>{% for o in orgs %}<option value="{{ o.id }}">{{ o.name }}</option>{% endfor %}</select></label>
+          <label>Popis<input name="description" maxlength="1500"></label>
+          <button class="btn primary" type="submit">Založit projekt</button>
+        </form>
+      </details>
+      {% endif %}
+      <a class="ema-admin-link" href="{{ url_for('home') }}#firms">Správa firem a datových prostorů</a>
+    </aside>
   </div>
-  <h3>Založit firmu</h3>
-  <form method="post" action="{{ url_for('create_organization') }}" class="inline-form">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <input name="name" required maxlength="160" placeholder="Název firmy">
-    <button class="btn" type="submit">Vytvořit firmu</button>
-  </form>
-</details>
-{% endif %}
+  {% if orgs %}
+  <details id="firms" class="card panel firm-admin ema-firm-admin">
+    <summary>Správa firem a datových prostorů</summary>
+    <p class="small muted">Firmy jsou datovou, účetní a přístupovou hranicí, nikoliv hlavní pracovní navigací.</p>
+    <div class="grid cards3">{% for o in orgs %}<a class="card tile" href="{{ url_for('organization_home', org_id=o.id) }}"><h3>{{ o.name }}</h3><span class="link">Firemní zdroje →</span></a>{% endfor %}</div>
+    <h3>Nová firma</h3>
+    <form method="post" action="{{ url_for('create_organization') }}" class="inline-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input name="name" required maxlength="160" placeholder="Název firmy"><button class="btn">Vytvořit firmu</button>
+    </form>
+  </details>
+  {% endif %}
+</div>
 {% elif section == 'org-home' %}
 <div class="page-head"><div><span class="eyebrow">Firemní zázemí</span><h1>{{ active_org.name }}</h1><p>Správa klientů, pošty, účetních údajů a přístupů. Běžnou práci začínáš v projektu.</p></div><a class="btn primary" href="{{ url_for('home') }}">Přejít na projekty</a></div>
 <div class="grid metrics"><a class="card metric" href="{{ url_for('clients', org_id=active_org.id) }}"><span>Klienti</span><strong>{{ counts.companies }}</strong></a><a class="card metric" href="{{ url_for('projects', org_id=active_org.id) }}"><span>Projekty</span><strong>{{ counts.projects }}</strong></a><a class="card metric" href="{{ url_for('mail', org_id=active_org.id) }}"><span>Poštovní účty</span><strong>{{ counts.mailboxes }}</strong></a><a class="card metric" href="{{ url_for('tasks', org_id=active_org.id) }}"><span>Otevřené úkoly</span><strong>{{ counts.tasks }}</strong></a></div>
