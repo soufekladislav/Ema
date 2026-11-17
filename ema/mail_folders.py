@@ -316,3 +316,107 @@ def append_sent_copy(db, box, key, raw_message):
             client.logout()
         except Exception:
             pass
+
+
+
+def move_many_messages(db, box, key, messages, action):
+    """One remote UID MOVE per mailbox/source-folder batch (up to 50 UIDs)."""
+    if not messages or len(messages) > 50:
+        raise MailError("Dávka přesunu musí obsahovat 1–50 zpráv")
+    folders = {m.folder_id for m in messages}
+    if len(folders) != 1 or any(m.mailbox_id != box.id or m.moved for m in messages):
+        raise MailError("Přesun vyžaduje jednu zdrojovou složku a platné zprávy")
+    src = db.get(MailFolder, messages[0].folder_id)
+    if src is None or src.mailbox_id != box.id or any(m.uidvalidity != src.uidvalidity for m in messages):
+        raise MailError("UIDVALIDITY se změnilo; nejprve obnov zprávy")
+    target = special_folder(db, box, action)
+    client = _connect(box, key)
+    try:
+        if target is None:
+            _discover_on_client(db, box, client)
+            target = special_folder(db, box, action)
+        if target is None:
+            raise MailError("Cílová složka Koš/Archiv nebyla na IMAP serveru nalezena")
+        if target.id == src.id:
+            raise MailError("Zprávy jsou již v cílové složce")
+        capabilities = {word.upper() for item in getattr(client, "capabilities", [])
+                        for word in (item if isinstance(item, bytes) else str(item).encode()).split()}
+        if b"MOVE" not in capabilities:
+            raise MailError("Server nepodporuje bezpečný UID MOVE; žádná zpráva nebyla odstraněna")
+        validity, _ = _select(client, src)
+        if validity != src.uidvalidity:
+            raise MailError("UIDVALIDITY se změnilo; obnov zprávy a operaci ověř")
+        status, _ = client.select(quote_mailbox_name(src.name), readonly=False)
+        if status != "OK":
+            raise MailError("IMAP server neumožňuje zápis do zdrojové složky")
+        uids = ",".join(str(uid) for uid in sorted({m.uid for m in messages}))
+        status, _ = client.uid("MOVE", uids, quote_mailbox_name(target.name))
+        if status != "OK":
+            raise MailError("IMAP server odmítl hromadný přesun")
+        for m in messages:
+            m.moved = True
+        db.commit()
+        return target
+    except Exception as ex:
+        db.rollback()
+        raise MailError(str(ex) if isinstance(ex, MailError)
+                        else "Hromadný přesun není potvrzen. Před opakováním ověřte IMAP") from None
+    finally:
+        try:
+            client.logout()
+        except Exception:
+            pass
+
+
+def empty_trash_batch(db, box, key, folder, *, limit=100):
+    """Irreversible trash cleanup; UIDPLUS only, at most 100 specific UIDs.
+
+    Never EXPUNGE an entire mailbox: that could permanently delete messages
+    marked \Deleted by another client outside the user's selected batch.
+    """
+    if folder.mailbox_id != box.id:
+        raise MailError("Koš nepatří k vybrané schránce")
+    if special_folder(db, box, "trash") is None or special_folder(db, box, "trash").id != folder.id:
+        raise MailError("Vybraná složka není ověřený serverový Koš")
+    limit = max(1, min(int(limit), 100))
+    client = _connect(box, key)
+    try:
+        capabilities = {word.upper() for item in getattr(client, "capabilities", [])
+                        for word in (item if isinstance(item, bytes) else str(item).encode()).split()}
+        if b"UIDPLUS" not in capabilities:
+            raise MailError("Server nepodporuje bezpečné cílené UID EXPUNGE; Koš zůstal beze změny")
+        status, _ = client.select(quote_mailbox_name(folder.name), readonly=False)
+        if status != "OK":
+            raise MailError("IMAP server neumožnil otevření Koše pro mazání")
+        valid_info = client.response("UIDVALIDITY")[1]
+        validity = int(valid_info[0]) if valid_info and valid_info[0] else 0
+        if not validity or (folder.uidvalidity and folder.uidvalidity != validity):
+            raise MailError("Koš změnil UIDVALIDITY. Nejdříve obnov složku")
+        status, data = client.uid("SEARCH", None, "ALL")
+        if status != "OK":
+            raise MailError("Nelze ověřit obsah IMAP Koše")
+        all_uids = sorted(int(x) for x in (data[0] or b"").split() if x.isdigit())
+        selected = all_uids[:limit]
+        for start in range(0, len(selected), 50):
+            batch = ",".join(str(x) for x in selected[start:start+50])
+            status, _ = client.uid("STORE", batch, "+FLAGS.SILENT", r"(\Deleted)")
+            if status != "OK":
+                raise MailError("IMAP server odmítl označení zpráv ke smazání")
+            status, _ = client.uid("EXPUNGE", batch)
+            if status != "OK":
+                raise MailError("IMAP server nepotvrdil cílené smazání; nezkoušej automaticky znovu")
+            for row in db.scalars(select(MailMessage).where(
+                    MailMessage.folder_id == folder.id, MailMessage.uidvalidity == validity,
+                    MailMessage.uid.in_(selected[start:start+50]))).all():
+                row.moved = True
+            db.commit()
+        return len(selected), len(all_uids) > len(selected)
+    except Exception as ex:
+        db.rollback()
+        raise MailError(str(ex) if isinstance(ex, MailError)
+                        else "Mazání Koše není potvrzené; ověřte jeho obsah na IMAP serveru") from None
+    finally:
+        try:
+            client.logout()
+        except Exception:
+            pass
