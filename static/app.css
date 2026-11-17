@@ -267,3 +267,11 @@
 @media(max-width:1170px){.ema-global-cards{grid-template-columns:repeat(2,minmax(0,1fr))}.ema-topbar{padding:12px 20px}}
 @media(max-width:800px){.ema-mail-hub{grid-template-columns:1fr}.ema-mail-hub-sidebar{max-height:250px;overflow-y:auto}.ema-global-cards{grid-template-columns:1fr}}
 @media(max-width:550px){.ema-global-filter{margin-left:0;width:100%}.ema-global-filter select{flex:1;min-width:140px}.ema-topbar-brand{width:100%}.ema-hub-head h1{font-size:28px}.ema-task-right{margin:8px 0 0}}
+
+/* Mail readiness: explain that saving credentials is not equivalent to syncing INBOX. */
+.ema-mail-sync-controls{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;border:1px solid #dfe8d8;border-radius:12px;background:#f9fcf6;padding:13px 15px;margin:12px 0}
+.ema-mail-sync-controls strong{font-size:12px}
+.ema-mail-sync-controls p{margin:5px 0 0}
+.ema-mail-sync-controls .btn{white-space:nowrap;min-height:38px}
+.ema-mail-sync-error{border-color:#e9b9b1;background:#fff3f0;color:#80392d;font-size:12px;margin:0 0 14px;overflow-wrap:anywhere}
+@media(max-width:550px){.ema-mail-sync-controls form,.ema-mail-sync-controls .btn{width:100%}}

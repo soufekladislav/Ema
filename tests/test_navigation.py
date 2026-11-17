@@ -234,3 +234,43 @@ def test_mail_hub_only_lists_authorized_company_mailboxes(web_client):
     html = client.get("/mail").data
     assert b"owned@example.cz" in html
     assert b"secret@example.cz" not in html
+
+
+def test_global_mail_sync_action_is_available_only_to_mailbox_managers(web_client, monkeypatch):
+    from ema.models import now
+    client = web_client
+    with Session(client.application.extensions["ema_engine"]) as db:
+        owned = Mailbox(organization_id=client.application.ids["org"],
+                        owner_id=client.application.ids["owner"],
+                        label="Pilot mail", address="pilot@example.cz",
+                        username="pilot@example.cz", imap_host="imap.example.cz",
+                        smtp_host="smtp.example.cz", credential="test-only")
+        db.add(owned)
+        db.commit()
+        box_id = owned.id
+    login(client, "owner")
+    page = client.get(f"/mail?box={box_id}")
+    assert page.status_code == 200
+    assert "Načíst 10 e-mailů".encode() in page.data
+    assert "Schránka je uložena".encode() in page.data
+    captured = {}
+    def fake_sync(db, box, key, limit):
+        captured.update(mailbox_id=box.id, limit=limit)
+        box.status, box.sync_error, box.last_sync = "ok", "", now()
+        db.commit()
+        return 3
+    monkeypatch.setattr("ema.web.sync_inbox", fake_sync)
+    result = client.post(f"/mail/{box_id}/sync", data={"csrf_token": csrf(client)})
+    assert result.status_code == 302
+    assert result.headers["Location"].endswith(f"/mail?box={box_id}")
+    assert captured == {"mailbox_id": box_id, "limit": 10}
+    success = client.get(result.headers["Location"])
+    assert "Připojeno".encode() in success.data
+    assert "načteno 3 nových zpráv".encode() in success.data
+    # Project guests do not acquire access to company mail by being in a project.
+    # Use a fresh client to avoid accidental reliance on the owner session.
+    another = web_client.application.test_client()
+    login(another, "guest")
+    assert another.get(f"/mail?box={box_id}").status_code == 403
+    assert another.post(f"/mail/{box_id}/sync",
+                        data={"csrf_token": csrf(another)}).status_code == 403

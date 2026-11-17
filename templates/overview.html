@@ -74,14 +74,36 @@
       <a class="ema-mail-filter {{ 'active' if not selected_box else '' }}" href="{{ url_for('mail_hub') }}">Všechny schránky</a>
       {% for b in boxes %}
       <a class="ema-mail-filter {{ 'active' if selected_box and selected_box.id == b.id else '' }}" href="{{ url_for('mail_hub', box=b.id) }}">
-        <strong>{{ b.label }}</strong><small>{{ b.address }}</small><small>{{ project_org_names.get(b.organization_id, '') if false else (orgs|selectattr('id', 'equalto', b.organization_id)|map(attribute='name')|first|default('')) }}</small>
+        <strong>{{ b.label }}</strong><small>{{ b.address }}</small><small>{{ orgs|selectattr('id', 'equalto', b.organization_id)|map(attribute='name')|first|default('') }}</small>
+        <small>Stav: {{ 'Připojeno' if b.status == 'ok' else 'Chyba připojení' if b.status == 'error' else 'Ještě nesynchronizováno' }}</small>
       </a>
       {% else %}<p class="small muted">Nemáš zatím připojené žádné poštovní účty.</p>{% endfor %}
       <a class="btn" href="{{ url_for('account_hub') }}">Nastavit schránky</a>
     </aside>
     <section class="card panel ema-mail-hub-messages">
       <div class="ema-card-head"><h3>{{ selected_box.address if selected_box else 'Souhrnný inbox' }}</h3><span class="status">{{ mail_rows|length }} zpráv v přehledu</span></div>
-      <p class="small muted">Ema zatím zobrazuje synchronizované hlavičky zpráv. Automatické třídění podle projektů a objednávek bude následovat po ověření integrací.</p>
+      {% if selected_box %}
+        <div class="ema-mail-sync-controls">
+          <div>
+            <strong>{{ 'Připojeno' if selected_box.status == 'ok' else 'Chyba synchronizace' if selected_box.status == 'error' else 'Schránka je uložena, pošta se zatím nenačetla' }}</strong>
+            <p class="small muted">Poslední úspěšná synchronizace: {{ selected_box.last_sync.strftime('%d.%m.%Y %H:%M') if selected_box.last_sync else 'Nikdy' }}.</p>
+          </div>
+          {% if selected_box.id in syncable_ids %}
+            <form method="post" action="{{ url_for('sync_mail_hub', box_id=selected_box.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn primary" type="submit">Načíst 10 e-mailů</button>
+            </form>
+          {% else %}
+            <span class="small muted">Pro synchronizaci musí správce povolit správu schránky.</span>
+          {% endif %}
+        </div>
+        {% if selected_box.status == 'error' and selected_box.sync_error %}
+          <div class="notice ema-mail-sync-error" role="alert">{{ selected_box.sync_error }}</div>
+        {% endif %}
+      {% else %}
+        <p class="small muted">Pro první načtení vyber schránku vlevo a klikni na „Načíst 10 e-mailů“.</p>
+      {% endif %}
+      <p class="small muted">Ema zatím načítá jen hlavičky posledních zpráv z INBOX. Automatické třídění podle projektů a objednávek bude následovat po ověření integrací.</p>
       {% for m in mail_rows %}
         {% set mb = box_lookup[m.mailbox_id] %}
         <a class="ema-mail-item" href="{{ url_for('mail_detail', org_id=mb.organization_id, message_id=m.id) }}">
@@ -89,7 +111,7 @@
           <span>{{ m.sender }}</span>
           <small>{{ mb.address }} · {{ m.sent_at.strftime('%d.%m.%Y %H:%M') if m.sent_at else 'Bez data' }}</small>
         </a>
-      {% else %}<div class="empty-state">Zatím nejsou načtené zprávy. Pro synchronizaci otevři nastavení nebo firemní schránku.</div>{% endfor %}
+      {% else %}<div class="empty-state">Zatím tu nejsou synchronizované zprávy. Vyber schránku a spusť načtení pošty výše.</div>{% endfor %}
     </section>
   </div>
 {% elif section == 'database' %}
