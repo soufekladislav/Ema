@@ -59,7 +59,7 @@
         <div class="ema-reminders-list">
           {% for t in reminders %}
             <div class="ema-reminder-item"><div><strong>{{ t.title }}</strong><small>{{ reminder_projects.get(t.project_id, 'Firemní úkol') }}</small></div>
-            <span class="ema-reminder-date {{ 'overdue' if t.due_at and t.due_at.date() < now().date() else '' }}">{{ t.due_at.strftime('%d.%m.') if t.due_at else 'Bez termínu' }}</span></div>
+            <span class="ema-reminder-date {{ 'overdue' if t.due_at and t.due_at.date() < today else '' }}">{{ t.due_at.strftime('%d.%m.') if t.due_at else 'Bez termínu' }}</span></div>
           {% else %}<p class="small muted">Žádné otevřené úkoly k připomenutí.</p>{% endfor %}
         </div>
       </section>
