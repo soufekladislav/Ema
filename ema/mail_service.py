@@ -225,13 +225,23 @@ def _parse_addresses(value, *, required=False):
     return list(dict.fromkeys(result))
 
 
+def validate_recipients(to, cc="", bcc=""):
+    """Pure input validation, before recording the first SMTP attempt."""
+    result = []
+    for value, label, required in ((to, "Komu", True), (cc, "Kopie", False),
+                                   (bcc, "Skrytá kopie", False)):
+        try:
+            result.append(_parse_addresses(value, required=required))
+        except MailError as ex:
+            raise MailError(f"{label}: {ex}") from None
+    if sum(len(group) for group in result) > 25:
+        raise MailError("Nejvýše 25 příjemců dohromady")
+    return tuple(result)
+
+
 def send_composed(box, key, to, cc, bcc, subject, body, *, reply_message_id=None, attachments=None):
     """Only explicit SMTP send. No retry if delivery outcome is uncertain."""
-    primary = _parse_addresses(to, required=True)
-    copy = _parse_addresses(cc)
-    blind = _parse_addresses(bcc)
-    if len(primary) + len(copy) + len(blind) > 25:
-        raise MailError("Příliš mnoho příjemců")
+    primary, copy, blind = validate_recipients(to, cc, bcc)
     if not subject or len(subject) > 500 or any(c in subject for c in "\r\n"):
         raise MailError("Neplatný předmět")
     if not body.strip() or len(body) > 100000:
