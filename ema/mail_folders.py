@@ -141,7 +141,7 @@ def fetch_folder_page(db, box, key, folder, *, before_uid=None, limit=PAGE_SIZE)
         if folder.uidvalidity != validity:
             folder.uidvalidity = validity
             folder.last_uid = 0
-        typ, data = client.uid("SEARCH", None, "ALL")
+        typ, data = client.uid("SEARCH", None, "UNDELETED")
         if typ != "OK" or not data:
             raise MailError("IMAP server odmítl vyhledání UID")
         numbers = [int(raw) for raw in (data[0] or b"").split() if raw.isdigit()]
@@ -239,6 +239,35 @@ def special_folder(db, box, action):
     return None
 
 
+def _uid_move_or_soft_delete(client, uids, target):
+    """Use RFC UID MOVE when supported; otherwise COPY then mark only source UIDs \Deleted.
+
+    No EXPUNGE/CLOSE on source: legacy IMAP without UIDPLUS must not delete
+    messages already marked \Deleted by another mail client.
+    A successful COPY with failed STORE is uncertain and MUST NOT be retried.
+    """
+    capabilities = {word.upper() for item in getattr(client, "capabilities", [])
+                    for word in (item if isinstance(item, bytes) else str(item).encode()).split()}
+    if b"MOVE" in capabilities:
+        result, _ = client.uid("MOVE", uids, quote_mailbox_name(target.name))
+        if result != "OK":
+            raise MailError("IMAP server odmítl UID MOVE; stav je nutné ověřit na serveru")
+        return "move"
+    result, _ = client.uid("COPY", uids, quote_mailbox_name(target.name))
+    if result != "OK":
+        raise MailError("IMAP odmítl kopírování do cílové složky; zdroj zůstal beze změn")
+    try:
+        result, _ = client.uid("STORE", uids, "+FLAGS.SILENT", r"(\Deleted)")
+    except Exception:
+        raise MailError("Kopie může být v cílové složce, ale označení zdroje selhalo. "
+                        "Ověřte obě složky; operaci automaticky neopakujte") from None
+    if result != "OK":
+        raise MailError("Kopie může být v cílové složce, zdroj ale nebyl označen jako přesunutý. "
+                        "Před opakováním ověřte obě složky")
+    # Deliberately leave the original \Deleted on the remote server.
+    return "copy-mark-deleted"
+
+
 def move_message(db, box, key, msg, action):
     """Explicit server-side MOVE only. Trash never implies EXPUNGE or permanent deletion."""
     if msg.mailbox_id != box.id or msg.moved:
@@ -257,10 +286,6 @@ def move_message(db, box, key, msg, action):
             raise MailError("Cílová složka Koš/Archiv nebyla na IMAP serveru nalezena; zkontrolujte názvy složek.")
         if target.id == src.id:
             raise MailError("Zpráva je již v cílové složce")
-        capabilities = {word.upper() for item in getattr(client, "capabilities", [])
-                        for word in (item if isinstance(item, bytes) else str(item).encode()).split()}
-        if b"MOVE" not in capabilities:
-            raise MailError("Server nepodporuje bezpečný přesun UID MOVE; schránka se nezměnila")
         validity, _ = _select(client, src)
         if validity != msg.uidvalidity:
             raise MailError("UIDVALIDITY se změnilo. Zprávu je nutné znovu načíst")
@@ -268,9 +293,7 @@ def move_message(db, box, key, msg, action):
         typ, _ = client.select(quote_mailbox_name(src.name), readonly=False)
         if typ != "OK":
             raise MailError("Server neumožňuje zápis do zdrojové složky")
-        typ, _ = client.uid("MOVE", str(msg.uid), quote_mailbox_name(target.name))
-        if typ != "OK":
-            raise MailError("IMAP server přesun zprávy odmítl")
+        _uid_move_or_soft_delete(client, str(msg.uid), target)
         # No EXPUNGE, no action on the user's other mail. Keep original row for
         # future UID reconciliation and its linked project, client and user flag.
         msg.moved = True
@@ -339,10 +362,6 @@ def move_many_messages(db, box, key, messages, action):
             raise MailError("Cílová složka Koš/Archiv nebyla na IMAP serveru nalezena")
         if target.id == src.id:
             raise MailError("Zprávy jsou již v cílové složce")
-        capabilities = {word.upper() for item in getattr(client, "capabilities", [])
-                        for word in (item if isinstance(item, bytes) else str(item).encode()).split()}
-        if b"MOVE" not in capabilities:
-            raise MailError("Server nepodporuje bezpečný UID MOVE; žádná zpráva nebyla odstraněna")
         validity, _ = _select(client, src)
         if validity != src.uidvalidity:
             raise MailError("UIDVALIDITY se změnilo; obnov zprávy a operaci ověř")
@@ -350,9 +369,7 @@ def move_many_messages(db, box, key, messages, action):
         if status != "OK":
             raise MailError("IMAP server neumožňuje zápis do zdrojové složky")
         uids = ",".join(str(uid) for uid in sorted({m.uid for m in messages}))
-        status, _ = client.uid("MOVE", uids, quote_mailbox_name(target.name))
-        if status != "OK":
-            raise MailError("IMAP server odmítl hromadný přesun")
+        _uid_move_or_soft_delete(client, uids, target)
         for m in messages:
             m.moved = True
         db.commit()
