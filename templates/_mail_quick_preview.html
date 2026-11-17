@@ -8,7 +8,7 @@
       <a href="{{ url_for('mail_detail', org_id=box.organization_id, message_id=message.id, folder=message.folder_id) }}" class="btn">Detail</a>
     </div>
   </div>
-  {% if preview.truncated %}<div class="ema-quick-warning">Zkrácený náhled zprávy (max. 192 KiB).</div>{% endif %}
+  {% if preview.truncated %}<div class="ema-quick-warning">Zkrácený náhled zprávy (max. 384 KiB).</div>{% endif %}
   {% if preview.is_html %}
     {% if show_images %}
     <div class="ema-mail-image-warning">Obrázky jsou pro tuto zprávu povolené. Odesílatel může zjistit otevření zprávy.</div>
