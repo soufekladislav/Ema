@@ -12,7 +12,7 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 import click
 from flask import Flask, abort, flash, g, redirect, render_template, request, session, url_for
-from sqlalchemy import func, select, text, or_
+from sqlalchemy import func, select, text, or_, and_, case
 from sqlalchemy.exc import IntegrityError
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -21,7 +21,7 @@ from .assistant_service import AssistantError, run_assistant
 from .contact_import import ImportErrorCSV, extract_contacts
 from .schema_upgrade import upgrade_schema
 from .models import (
-    Audit, AssistantTurn, Base, ChatMessage, Company, Contact, MailFolder, Mailbox, MailboxGrant, MailMessage,
+    Audit, AssistantTurn, Base, ChatMessage, Company, Contact, MailFolder, Mailbox, MailboxGrant, MailboxView, MailMessage, MailUserState,
     Membership, Opportunity, Organization, Outbound, Project, ProjectGrant,
     Task, User, make_session, now,
 )
@@ -202,6 +202,50 @@ def visible_mailboxes(db, uid, orgs):
     return out
 
 
+def is_imap_read(message):
+    return r"\\seen" in (message.flags or "").lower()
+
+
+def user_mail_preferences(db, uid, boxes):
+    ids = [b.id for b in boxes]
+    if not ids:
+        return {}
+    return {row.mailbox_id: row for row in db.scalars(
+        select(MailboxView).where(MailboxView.user_id == uid, MailboxView.mailbox_id.in_(ids))
+    ).all()}
+
+
+def mailbox_counts(db, uid, boxes):
+    """Only locally indexed valid headers; not all remote IMAP messages."""
+    ids = [b.id for b in boxes]
+    if not ids:
+        return {}
+    read_value = case(
+        (MailUserState.read_override.is_not(None), MailUserState.read_override),
+        else_=func.instr(func.lower(MailMessage.flags), r"\\seen") > 0,
+    )
+    rows = db.execute(
+        select(MailMessage.mailbox_id, func.count(MailMessage.id),
+               func.sum(case((read_value, 0), else_=1)))
+        .join(MailFolder, MailFolder.id == MailMessage.folder_id)
+        .outerjoin(MailUserState, and_(
+            MailUserState.mail_id == MailMessage.id, MailUserState.user_id == uid))
+        .where(MailMessage.mailbox_id.in_(ids),
+               MailMessage.uidvalidity == MailFolder.uidvalidity)
+        .group_by(MailMessage.mailbox_id)
+    ).all()
+    return {box_id: (int(unread or 0), int(total or 0)) for box_id, total, unread in rows}
+
+
+def get_mail_user_state(db, uid, mail_id):
+    row = db.scalar(select(MailUserState).where(
+        MailUserState.user_id == uid, MailUserState.mail_id == mail_id))
+    if row is None:
+        row = MailUserState(user_id=uid, mail_id=mail_id)
+        db.add(row)
+    return row
+
+
 def create_app(test_config=None):
     app = Flask(__name__, template_folder="../templates", static_folder="../static")
     config = {
@@ -353,21 +397,41 @@ def create_app(test_config=None):
     def mail_hub():
         ctx, orgs, projects = current_scope()
         boxes = visible_mailboxes(g.db, g.user.id, orgs)
+        prefs = user_mail_preferences(g.db, g.user.id, boxes)
+        boxes.sort(key=lambda b: (
+            not bool(prefs.get(b.id) and prefs[b.id].position > 0),
+            prefs[b.id].position if b.id in prefs else 0, b.label.lower(), b.id,
+        ))
         ids = [box.id for box in boxes]
-        box_id = request.args.get("box", type=int)
-        if box_id is not None and box_id not in ids:
+        raw_box = request.args.get("box")
+        if raw_box is not None and (not raw_box.isdigit() or int(raw_box) not in ids):
             abort(403)
+        box_id = int(raw_box) if raw_box else None
         selected = next((box for box in boxes if box.id == box_id), None)
-        target = [selected.id] if selected else ids
+        included = [b.id for b in boxes if b.id not in prefs or prefs[b.id].included]
+        target = [selected.id] if selected else included
         if target:
             messages = g.db.scalars(
                 select(MailMessage).join(MailFolder, MailMessage.folder_id == MailFolder.id)
                 .where(MailMessage.mailbox_id.in_(target),
                        MailMessage.uidvalidity == MailFolder.uidvalidity)
-                .order_by(MailMessage.id.desc()).limit(120)
+                .order_by(MailMessage.sent_at.is_(None), MailMessage.sent_at.desc(),
+                          MailMessage.id.desc()).limit(120)
             ).all()
         else:
             messages = []
+        states = {}
+        if messages:
+            states = {row.mail_id: row for row in g.db.scalars(
+                select(MailUserState).where(MailUserState.user_id == g.user.id,
+                    MailUserState.mail_id.in_([m.id for m in messages]))
+            ).all()}
+        mail_state = {
+            m.id: {"read": states[m.id].read_override if m.id in states and
+                   states[m.id].read_override is not None else is_imap_read(m),
+                   "starred": bool(states[m.id].starred) if m.id in states else False}
+            for m in messages
+        }
         syncable_ids = set()
         for box in boxes:
             try:
@@ -375,8 +439,75 @@ def create_app(test_config=None):
                 syncable_ids.add(box.id)
             except Forbidden:
                 continue
-        return render_hub("mail", boxes=boxes, mail_rows=messages, selected_box=selected,
-                          box_lookup={box.id: box for box in boxes}, syncable_ids=syncable_ids)
+        return render_hub(
+            "mail", boxes=boxes, mail_rows=messages, selected_box=selected,
+            box_lookup={box.id: box for box in boxes}, syncable_ids=syncable_ids,
+            view_prefs=prefs, indexed_counts=mailbox_counts(g.db, g.user.id, boxes),
+            mail_state=mail_state, combined_count=len(included),
+        )
+
+    @app.post("/mail/order")
+    @login_required
+    def reorder_mailboxes():
+        ctx, orgs, _ = current_scope()
+        boxes = visible_mailboxes(g.db, g.user.id, orgs)
+        allowed = {box.id for box in boxes}
+        values = request.get_json(silent=True)
+        order = values.get("ids") if isinstance(values, dict) else None
+        if not isinstance(order, list) or len(order) != len(allowed) or any(
+            not isinstance(v, int) or isinstance(v, bool) for v in order
+        ) or set(order) != allowed:
+            abort(400, description="Neplatné pořadí schránek")
+        prefs = user_mail_preferences(g.db, g.user.id, boxes)
+        for pos, box_id in enumerate(order, 1):
+            item = prefs.get(box_id)
+            if item is None:
+                item = MailboxView(user_id=g.user.id, mailbox_id=box_id)
+                g.db.add(item)
+            item.position = pos
+        g.db.commit()
+        return {"ok": True}
+
+    @app.post("/mail/<int:box_id>/include")
+    @login_required
+    def toggle_mailbox_inclusion(box_id):
+        box = mailbox_or_403(box_id)
+        try:
+            organization_access(g.db, g.user.id, box.organization_id)
+        except Forbidden:
+            abort(403)
+        item = g.db.scalar(select(MailboxView).where(
+            MailboxView.user_id == g.user.id, MailboxView.mailbox_id == box_id))
+        if item is None:
+            item = MailboxView(user_id=g.user.id, mailbox_id=box_id)
+            g.db.add(item)
+        item.included = not item.included
+        g.db.commit()
+        return redirect(url_for("mail_hub"))
+
+    @app.post("/mail/<int:mail_id>/state")
+    @login_required
+    def set_mail_state(mail_id):
+        msg = g.db.get(MailMessage, mail_id)
+        if msg is None:
+            abort(404)
+        box = mailbox_or_403(msg.mailbox_id)
+        try:
+            organization_access(g.db, g.user.id, box.organization_id)
+        except Forbidden:
+            abort(403)
+        action = field("action", 20)
+        if action not in ("read", "unread", "star", "unstar"):
+            abort(400)
+        state = get_mail_user_state(g.db, g.user.id, mail_id)
+        if action in ("read", "unread"):
+            state.read_override = action == "read"
+        else:
+            state.starred = action == "star"
+        g.db.commit()
+        if field("return_to", 20) == "detail":
+            return redirect(url_for("mail_detail", org_id=box.organization_id, message_id=mail_id))
+        return redirect(url_for("mail_hub", box=box.id) if field("box", 20) else url_for("mail_hub"))
 
     @app.post("/mail/<int:box_id>/sync")
     @login_required
