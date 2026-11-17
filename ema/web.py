@@ -203,7 +203,7 @@ def visible_mailboxes(db, uid, orgs):
 
 
 def is_imap_read(message):
-    return r"\\seen" in (message.flags or "").lower()
+    return r"\seen" in (message.flags or "").lower()
 
 
 def user_mail_preferences(db, uid, boxes):
@@ -222,7 +222,7 @@ def mailbox_counts(db, uid, boxes):
         return {}
     read_value = case(
         (MailUserState.read_override.is_not(None), MailUserState.read_override),
-        else_=func.instr(func.lower(MailMessage.flags), r"\\seen") > 0,
+        else_=func.instr(func.lower(MailMessage.flags), r"\seen") > 0,
     )
     rows = db.execute(
         select(MailMessage.mailbox_id, func.count(MailMessage.id),
