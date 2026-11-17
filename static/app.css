@@ -488,3 +488,12 @@
 .ema-mail-current-label{font-size:10px}
 .ema-screen-mail .ema-mail-hub .ema-mail-action-bar .ema-toolbar-button{font-size:10px}
 }
+
+/* Deep IMAP folder tree; selected path stays expanded without massive drop-down. */
+.ema-mail-tree-group{display:block;min-width:0}
+.ema-mail-tree-group>summary{cursor:pointer;list-style-position:inside;border-radius:6px;padding:7px 4px;font-size:11px;color:#526247;white-space:normal;overflow-wrap:anywhere}
+.ema-mail-tree-group>summary:hover{background:#f2f8e9}
+.ema-mail-tree-children{display:grid;gap:2px;padding-left:11px;border-left:1px solid #dfe8d5;margin:0 0 3px 4px}
+.ema-mail-tree-group>.ema-mail-folder{display:block;margin-left:9px}
+.ema-mail-folder-tree .ema-mail-folder{display:block;font-size:11px}
+@media(max-width:760px){.ema-screen-mail .ema-mail-folder-tree .ema-mail-folder{padding:10px 6px;min-height:39px}}
