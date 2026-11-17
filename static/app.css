@@ -385,6 +385,13 @@
 .ema-mailbox-visibility-form{padding:0 4px 5px}
 .ema-mailbox-visibility-form button{font-size:9px}
 .ema-mail-folder-tree{margin:1px 0 8px;border-left:1px solid #e1ead8;padding-left:9px;display:grid;gap:2px}
+.ema-mail-folders-root{min-width:0}
+.ema-mail-folders-root>summary,.ema-mail-folder-group>summary{cursor:pointer;user-select:none;color:#46632f;font-size:11px;font-weight:700;padding:6px 4px;overflow-wrap:anywhere}
+.ema-mail-folder-entries{display:grid;gap:2px;min-width:0}
+.ema-mail-folder-group{display:block;min-width:0}
+.ema-mail-folder-group-children{display:grid;gap:2px;padding-left:11px;border-left:1px solid #dbe7cc;margin-left:5px}
+.ema-mail-v1-topbar .ema-mail-trash{color:#ad2929;border-color:#efcfcf}
+
 .ema-mail-folder{padding:6px 6px;border-radius:6px;font-size:11px;white-space:normal;overflow-wrap:anywhere;line-height:1.3}
 .ema-mail-folder.active,.ema-mail-folder:hover{background:#eef7df;color:#48661e}
 .ema-mail-folders-refresh{background:none;border:none;color:#607b38;font-size:10px;padding:7px 3px}
