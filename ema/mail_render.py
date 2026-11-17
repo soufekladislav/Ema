@@ -95,7 +95,7 @@ def make_preview(data, *, show_images=False, truncated=False):
 
     # Remove executable/style blocks WITH their content before bleach. Otherwise
     # email newsletter CSS is displayed as raw text at the top of the preview.
-    rich = re.sub(r"<(script|style|head|iframe|object|svg)\\b[^>]*>[\\s\\S]*?</\\1\\s*>",
+    rich = re.sub(r"<(script|style|head|iframe|object|svg)\b[^>]*>[\s\S]*?</\1\s*>",
                   "", rich, flags=re.I)
     has_remote_images = bool(re.search(r"<img\b[^>]*\bsrc\s*=\s*['\"]?https?://", rich, re.I))
     if rich:
