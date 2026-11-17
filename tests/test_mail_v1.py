@@ -200,35 +200,57 @@ def test_aggregate_sync_one_is_scoped_and_only_fetches_latest_50(seeded, monkeyp
     assert denied.status_code == 403 and len(calls) == 1
 
 
-def test_empty_trash_requires_confirmation_and_mailbox_manage(seeded, monkeypatch):
+def test_empty_trash_requires_fresh_server_preview_nonce_and_mailbox_manage(seeded, monkeypatch):
     client = seeded
     login(client, "owner")
     with Session(client.application.extensions["ema_engine"]) as db:
         folder = MailFolder(mailbox_id=client.ids_v1["box"], name="INBOX.Trash",
-                            delimiter=".", special_use=r"\\Trash", uidvalidity=9)
+                            delimiter=".", special_use=r"\Trash", uidvalidity=9)
         db.add(folder)
         db.commit()
         trash_id = folder.id
-    called = []
-    def fake_empty(db, box, key, folder, *, limit):
-        called.append((box.id, folder.id, limit))
-        return 2, False
-    monkeypatch.setattr("ema.web.empty_trash_batch", fake_empty)
-    path = "/mail/{}/trash/empty".format(client.ids_v1["box"])
-    missing = client.post(path, data={"csrf_token": csrf(client),
-                                      "folder_id": str(trash_id)})
-    assert missing.status_code == 400
-    ok = client.post(path, data={"csrf_token": csrf(client),
-                                  "folder_id": str(trash_id),
-                                  "confirmation": "permanently-delete"})
+    snapshot = {"count": 3301, "uidvalidity": 9, "max_uid": 3301}
+    calls = []
+    monkeypatch.setattr("ema.web.preview_trash_all", lambda db, box, key, folder: snapshot)
+    def fake_empty(db, box, key, folder, expected):
+        calls.append((box.id, folder.id, expected))
+        return 3301
+    monkeypatch.setattr("ema.web.empty_trash_all", fake_empty)
+    path = f"/mail/{client.ids_v1['box']}/trash/empty"
+    prepare_path = f"/mail/{client.ids_v1['box']}/trash/prepare"
+    direct = client.post(path, data={"csrf_token": csrf(client),
+                                    "folder_id": str(trash_id),
+                                    "confirmation": "permanently-delete-whole-trash",
+                                    "acknowledge": "yes"})
+    assert direct.status_code == 400
+    preview = client.post(prepare_path, data={"csrf_token": csrf(client),
+                                             "folder_id": str(trash_id)})
+    assert preview.status_code == 200
+    assert b"3 301" in preview.data
+    with client.session_transaction() as sess:
+        nonce = sess["ema_trash_prepared"]["nonce"]
+    confirmed = {"csrf_token": csrf(client), "folder_id": str(trash_id),
+                 "nonce": nonce, "confirmation": "permanently-delete-whole-trash",
+                 "acknowledge": "yes"}
+    no_check = client.post(path, data={k: v for k,v in confirmed.items() if k != "acknowledge"})
+    assert no_check.status_code == 400 and calls == []
+    preview = client.post(prepare_path, data={"csrf_token": csrf(client),
+                                             "folder_id": str(trash_id)})
+    with client.session_transaction() as sess:
+        confirmed["nonce"] = sess["ema_trash_prepared"]["nonce"]
+    ok = client.post(path, data=confirmed)
     assert ok.status_code == 302
-    assert called == [(client.ids_v1["box"], trash_id, 100)]
+    assert calls == [(client.ids_v1["box"], trash_id, snapshot)]
+    repeat = client.post(path, data=confirmed)
+    assert repeat.status_code == 400
+    assert len(calls) == 1
     guest = client.application.test_client()
     login(guest, "guest")
+    assert guest.post(prepare_path, data={"csrf_token": csrf(guest),
+                      "folder_id": str(trash_id)}).status_code == 403
     assert guest.post(path, data={"csrf_token": csrf(guest),
-                                   "folder_id": str(trash_id),
-                                   "confirmation": "permanently-delete"}).status_code == 403
-
+                     "folder_id": str(trash_id), "confirmation": "permanently-delete-whole-trash",
+                     "acknowledge": "yes"}).status_code == 403
 
 
 def test_invalid_recipient_never_starts_smtp_and_preserves_compose_draft(seeded, monkeypatch):
