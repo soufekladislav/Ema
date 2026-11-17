@@ -8,7 +8,7 @@ from ema.models import Base, Mailbox, MailFolder, MailMessage, Organization, Use
 from ema.mail_folders import (
     parse_list_line, decode_modified_utf7, discover_folders,
     fetch_folder_page, move_message, move_many_messages, empty_trash_batch,
-    append_sent_copy, special_folder,
+    append_sent_copy, special_folder, preview_trash_all, empty_trash_all,
 )
 from ema.mail_service import MailError
 
@@ -286,3 +286,60 @@ def test_legacy_trash_larger_than_limit_fails_without_expunge(state, monkeypatch
         assert not fake.deleted
         assert fake.full_expunge == 0
         assert not fake.uid_expunge
+
+
+
+def test_full_3301_legacy_imap_trash_uses_one_uid_range_and_one_expunge(state, monkeypatch):
+    engine, box_id, _ = state
+    fake = FakeImap(count=3301)
+    fake.capabilities = (b"IMAP4rev1",)
+    monkeypatch.setattr("ema.mail_folders._connect", lambda box, key: fake)
+    with Session(engine) as db:
+        box = db.get(Mailbox, box_id)
+        discover_folders(db, box, "key")
+        trash = special_folder(db, box, "trash")
+        snapshot = preview_trash_all(db, box, "key", trash)
+        assert snapshot == {"count": 3301, "uidvalidity": 333, "max_uid": 3301}
+        assert not fake.deleted and not fake.full_expunge
+        deleted = empty_trash_all(db, box, "key", trash, snapshot)
+        assert deleted == 3301
+        assert fake.deleted == [("1:3301", "+FLAGS.SILENT", r"(\Deleted)")]
+        assert fake.full_expunge == 1
+        assert not fake.uid_expunge
+
+
+def test_full_trash_uidplus_uses_targeted_range(state, monkeypatch):
+    engine, box_id, _ = state
+    fake = FakeImap(count=260)
+    monkeypatch.setattr("ema.mail_folders._connect", lambda box, key: fake)
+    with Session(engine) as db:
+        box = db.get(Mailbox, box_id)
+        discover_folders(db, box, "key")
+        trash = special_folder(db, box, "trash")
+        snapshot = preview_trash_all(db, box, "key", trash)
+        deleted = empty_trash_all(db, box, "key", trash, snapshot)
+        assert deleted == 260
+        assert fake.deleted == [("1:260", "+FLAGS.SILENT", r"(\Deleted)")]
+        assert fake.uid_expunge == ["1:260"]
+        assert fake.full_expunge == 0
+
+
+def test_full_trash_requires_same_server_uid_boundary(state, monkeypatch):
+    engine, box_id, _ = state
+    fake = FakeImap(count=3301)
+    fake.capabilities = (b"IMAP4rev1",)
+    monkeypatch.setattr("ema.mail_folders._connect", lambda box, key: fake)
+    with Session(engine) as db:
+        box = db.get(Mailbox, box_id)
+        discover_folders(db, box, "key")
+        trash = special_folder(db, box, "trash")
+        snapshot = preview_trash_all(db, box, "key", trash)
+        fake.count = 3302  # Someone added a new message after user previewed Trash.
+        with pytest.raises(MailError, match="Počet nebo UID"):
+            empty_trash_all(db, box, "key", trash, snapshot)
+        assert fake.deleted == []
+        assert fake.full_expunge == 0
+        with pytest.raises(MailError, match="ověřeným IMAP Košem"):
+            empty_trash_all(db, box, "key", db.get(MailFolder, inbox_id) if False else
+                            db.scalar(select(MailFolder).where(MailFolder.name == "INBOX")), snapshot)
+        assert fake.full_expunge == 0
