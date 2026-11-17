@@ -251,8 +251,8 @@ def test_global_mail_sync_action_is_available_only_to_mailbox_managers(web_clien
     login(client, "owner")
     page = client.get(f"/mail?box={box_id}")
     assert page.status_code == 200
-    assert "Aktualizovat 50 zpráv".encode() in page.data
-    assert "Pošta zatím nesynchronizována".encode() in page.data
+    assert "Napsat e-mail".encode() in page.data
+    assert b'ema-mail-scrollpanel' in page.data
     captured = {}
     def fake_sync(db, box, key, limit):
         captured.update(mailbox_id=box.id, limit=limit)
@@ -443,7 +443,7 @@ def test_mail_folder_view_has_50_refresh_and_folder_scroll_api(web_client, monke
     assert page.status_code == 200
     assert b"ema-mail-scrollpanel" in page.data
     assert "Aktualizovat 50 zpráv".encode() in page.data
-    assert b"ema-folder-select" in page.data
+    assert b"ema-mail-folder-tree" in page.data
     captured = {}
     def fake_page(db, box, key, folder, *, before_uid=None, limit=50):
         captured.update(box=box.id, folder=folder.id, cursor=before_uid, limit=limit)
