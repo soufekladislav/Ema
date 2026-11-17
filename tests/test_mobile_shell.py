@@ -72,3 +72,19 @@ def test_mobile_shell_is_shared_by_secondary_company_and_project_pages(web_clien
         assert b'id="ema-mobile-nav-toggle"' in result.data, path
         assert b'id="ema-appmenu-backdrop"' in result.data, path
         assert b"2026/10/fresh-hub.png" in result.data, path
+
+
+
+def test_release_assets_bypass_stale_cache_first_pwa(web_client):
+    client = web_client
+    login(client, "owner")
+    html = client.get("/mail").data.decode("utf-8")
+    for asset in ("app-v11.css", "mail-v11.js", "mail-pager-v11.js",
+                  "mobile-shell-v2.css", "mobile-shell-v2.js"):
+        assert "/static/" + asset in html
+        response = client.get("/static/" + asset)
+        assert response.status_code == 200
+    sw = client.get("/service-worker.js").data.decode("utf-8")
+    assert "cache.addAll" in sw
+    assert '"/static/app.css"' not in sw
+    assert '"/static/mail-v1.js"' not in sw
