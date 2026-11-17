@@ -100,6 +100,39 @@ def available_folders(db, box):
     return sorted(rows, key=lambda x: (x.name.upper() != "INBOX", decode_modified_utf7(x.name).casefold()))
 
 
+def folder_tree(folders, selected_id=None):
+    """Build a display-only IMAP hierarchy from server delimiters."""
+    roots = []
+    lookup = {}
+    for folder in folders:
+        sep = folder.delimiter or "/"
+        parts = [p for p in folder.name.split(sep) if p]
+        path = []
+        siblings = roots
+        for part in parts:
+            path.append(part)
+            key = (sep, tuple(path))
+            node = lookup.get(key)
+            if node is None:
+                node = {"label": decode_modified_utf7(part), "folder_id": None,
+                        "children": [], "open": False}
+                lookup[key] = node
+                siblings.append(node)
+            siblings = node["children"]
+        if parts:
+            node["folder_id"] = folder.id
+    def mark(nodes):
+        contains = False
+        for node in nodes:
+            child_active = mark(node["children"])
+            active = node["folder_id"] == selected_id
+            node["open"] = active or child_active
+            contains |= active or child_active
+        return contains
+    mark(roots)
+    return roots
+
+
 def _select(client, folder):
     if folder.name == "INBOX":
         remote_name = "INBOX"
