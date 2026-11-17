@@ -1,6 +1,9 @@
 {% extends 'base.html' %}
 {% block content %}
 {% if section == 'home' %}
+{% if is_first_setup %}
+  <div class="card panel ema-onboarding"><span class="eyebrow">NASTAVENÍ ÚČTU</span><h2>Nejdřív založíme první firmu</h2><p>Účet funguje, ale zatím nemáš žádnou firmu. Projektům, klientům a poště tím určíme vlastníka dat.</p><a class="btn primary" href="{{ url_for('account_hub') }}">Založit první firmu</a></div>
+{% endif %}
 <div class="ema-assistant-home">
   <header class="ema-assistant-hero">
     <div>
@@ -51,6 +54,15 @@
       </div>
     </section>
     <aside class="ema-assistant-context" aria-label="Projektový kontext a rychlé akce">
+      <section class="card ema-context-card">
+        <div class="ema-aside-top"><h3>Připomenutí</h3><a class="small" href="{{ url_for('task_hub') }}">Všechny úkoly →</a></div>
+        <div class="ema-reminders-list">
+          {% for t in reminders %}
+            <div class="ema-reminder-item"><div><strong>{{ t.title }}</strong><small>{{ reminder_projects.get(t.project_id, 'Firemní úkol') }}</small></div>
+            <span class="ema-reminder-date {{ 'overdue' if t.due_at and t.due_at.date() < now().date() else '' }}">{{ t.due_at.strftime('%d.%m.') if t.due_at else 'Bez termínu' }}</span></div>
+          {% else %}<p class="small muted">Žádné otevřené úkoly k připomenutí.</p>{% endfor %}
+        </div>
+      </section>
       <section class="card ema-context-card">
         <span class="eyebrow">PRACOVNÍ KONTEXT</span>
         <h2>{{ selected_project.name if selected_project else 'Moje projekty' }}</h2>
