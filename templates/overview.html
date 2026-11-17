@@ -81,6 +81,21 @@
     {% else %}<div class="card panel"><h3>Zatím žádné projekty</h3><p>Jakmile založíš první projekt nebo dostaneš pozvánku, zobrazí se tady.</p></div>{% endfor %}
   </div>
 {% elif section == 'mail' %}
+  {% macro ema_folder_nodes(nodes, box_id, selected_id) %}
+    {% for node in nodes %}
+      {% if node.children %}
+        <details class="ema-mail-tree-group" {{ 'open' if node.open else '' }}>
+          <summary>{{ node.label }}</summary>
+          {% if node.folder_id %}
+            <a class="ema-mail-folder {{ 'active' if node.folder_id == selected_id else '' }}" href="{{ url_for('mail_hub', box=box_id, folder=node.folder_id) }}">▣ {{ node.label }} – zprávy</a>
+          {% endif %}
+          <div class="ema-mail-tree-children">{{ ema_folder_nodes(node.children, box_id, selected_id) }}</div>
+        </details>
+      {% elif node.folder_id %}
+        <a class="ema-mail-folder {{ 'active' if node.folder_id == selected_id else '' }}" href="{{ url_for('mail_hub', box=box_id, folder=node.folder_id) }}">▸ {{ node.label }}</a>
+      {% endif %}
+    {% endfor %}
+  {% endmacro %}
   <div class="ema-mail-v1">
     <div class="ema-mail-v1-topbar">
       <button class="btn ema-folder-drawer-toggle" id="ema-folder-drawer-toggle" type="button" aria-expanded="false" aria-controls="ema-mail-folder-pane">☰ Schránky</button>
@@ -124,11 +139,7 @@
               </form>
               {% if selected_box and selected_box.id == b.id %}
               <nav class="ema-mail-folder-tree" aria-label="Složky schránky {{ b.label }}">
-                {% for f in imap_folders %}
-                  <a class="ema-mail-folder {{ 'active' if selected_folder and selected_folder.id == f.id else '' }}" href="{{ url_for('mail_hub', box=b.id, folder=f.id) }}">
-                    <span>▸ {{ folder_names[f.id] }}</span>
-                  </a>
-                {% endfor %}
+                {{ ema_folder_nodes(imap_tree, b.id, selected_folder.id if selected_folder else None) }}
                 <form method="post" action="{{ url_for('mail_refresh_folders', box_id=b.id) }}">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                   <button class="ema-mail-folders-refresh" type="submit">↻ Aktualizovat složky</button>
