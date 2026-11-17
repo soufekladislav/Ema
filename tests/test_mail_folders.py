@@ -7,7 +7,8 @@ from werkzeug.security import generate_password_hash
 from ema.models import Base, Mailbox, MailFolder, MailMessage, Organization, User, make_session
 from ema.mail_folders import (
     parse_list_line, decode_modified_utf7, discover_folders,
-    fetch_folder_page, move_message, special_folder,
+    fetch_folder_page, move_message, move_many_messages, empty_trash_batch,
+    append_sent_copy, special_folder,
 )
 from ema.mail_service import MailError
 
@@ -19,6 +20,9 @@ class FakeImap:
         self.count = count
         self.selected = "INBOX"
         self.moved = []
+        self.deleted = []
+        self.expunge = []
+        self.appended = []
 
     def list(self):
         return "OK", [
@@ -51,7 +55,17 @@ class FakeImap:
         if action == "MOVE":
             self.moved.append((args[0], args[1]))
             return "OK", [b""]
+        if action == "STORE":
+            self.deleted.append((args[0], args[1], args[2]))
+            return "OK", [b""]
+        if action == "EXPUNGE":
+            self.expunge.append(args[0])
+            return "OK", [b""]
         raise AssertionError(action)
+
+    def append(self, name, flags, when, content):
+        self.appended.append((name, flags, content))
+        return "OK", [b"APPENDUID 333 77"]
 
     def logout(self):
         return "BYE", [b"ok"]
@@ -144,3 +158,59 @@ def test_no_move_extension_must_not_delete_or_expunge(state, monkeypatch):
             move_message(db, box, "key", mail, "trash")
         assert not fake.moved
         assert not mail.moved
+
+
+
+def test_single_uil_move_batch_and_folder_name_with_dot_separator(state, monkeypatch):
+    engine, box_id, inbox_id = state
+    fake = FakeImap(count=3)
+    fake.list = lambda: ("OK", [
+        b'(\HasNoChildren) "." "INBOX"',
+        b'(\HasNoChildren) "." "INBOX.Trash"',
+        b'(\HasNoChildren) "." "INBOX.Sent"',
+    ])
+    monkeypatch.setattr("ema.mail_folders._connect", lambda box, key: fake)
+    with Session(engine) as db:
+        box, inbox = db.get(Mailbox, box_id), db.get(MailFolder, inbox_id)
+        discover_folders(db, box, "key")
+        assert special_folder(db, box, "trash").name == "INBOX.Trash"
+        assert special_folder(db, box, "sent").name == "INBOX.Sent"
+        fetch_folder_page(db, box, "key", inbox)
+        rows = db.scalars(select(MailMessage).order_by(MailMessage.uid)).all()
+        destination = move_many_messages(db, box, "key", rows, "trash")
+        assert destination.name == "INBOX.Trash"
+        assert fake.moved == [("1,2,3", '"INBOX.Trash"')]
+        assert all(m.moved for m in rows)
+
+
+def test_empty_trash_requires_uidplus_and_targeted_expunge(state, monkeypatch):
+    engine, box_id, inbox_id = state
+    fake = FakeImap(count=4)
+    monkeypatch.setattr("ema.mail_folders._connect", lambda box, key: fake)
+    with Session(engine) as db:
+        box = db.get(Mailbox, box_id)
+        discover_folders(db, box, "key")
+        trash = special_folder(db, box, "trash")
+        deleted, more = empty_trash_batch(db, box, "key", trash)
+        assert (deleted, more) == (4, False)
+        assert fake.deleted == [("1,2,3,4", "+FLAGS.SILENT", r"(\Deleted)")]
+        assert fake.expunge == ["1,2,3,4"]
+        fake.capabilities = (b"IMAP4rev1", b"MOVE")
+        with pytest.raises(MailError, match="UID EXPUNGE"):
+            empty_trash_batch(db, box, "key", trash)
+        assert len(fake.expunge) == 1
+
+
+def test_sent_append_uses_discovered_real_folder(state, monkeypatch):
+    engine, box_id, inbox_id = state
+    fake = FakeImap(count=2)
+    fake.list = lambda: ("OK", [
+        b'(\HasNoChildren) "/" "INBOX"',
+        b'(\HasNoChildren \Sent) "/" "Sent"',
+    ])
+    monkeypatch.setattr("ema.mail_folders._connect", lambda box, key: fake)
+    with Session(engine) as db:
+        box = db.get(Mailbox, box_id)
+        destination = append_sent_copy(db, box, "key", b"Subject: test\r\n\r\nHello")
+        assert destination.name == "Sent"
+        assert fake.appended == [('"Sent"', r"(\Seen)", b"Subject: test\r\n\r\nHello")]
