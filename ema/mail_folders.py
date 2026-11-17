@@ -266,19 +266,21 @@ def special_folder(db, box, action):
     return None
 
 
-def _uid_move_or_soft_delete(client, uids, target):
-    """Use RFC UID MOVE when supported; otherwise COPY then mark only source UIDs \Deleted.
+def _uid_move_or_soft_delete(client, uids, target, *, known_deleted_uids=()):
+    """MOVE; otherwise COPY+Deleted and *verified* source cleanup when safe.
 
-    No EXPUNGE/CLOSE on source: legacy IMAP without UIDPLUS must not delete
-    messages already marked \Deleted by another mail client.
-    A successful COPY with failed STORE is uncertain and MUST NOT be retried.
+    UIDPLUS: expunge only copied UIDs. On legacy IMAP standard EXPUNGE is used
+    only when every Deleted UID is either this batch or an earlier EMA move
+    recorded in the same source/UIDVALIDITY; never expunge unrelated UIDs.
+    An unavoidable concurrent-client race remains on legacy servers, so do
+    not attempt cleanup when preconditions or server status are uncertain.
     """
     capabilities = {word.upper() for item in getattr(client, "capabilities", [])
                     for word in (item if isinstance(item, bytes) else str(item).encode()).split()}
     if b"MOVE" in capabilities:
         result, _ = client.uid("MOVE", uids, quote_mailbox_name(target.name))
         if result != "OK":
-            raise MailError("IMAP server odmítl UID MOVE; stav je nutné ověřit na serveru")
+            raise MailError("IMAP server odmítl UID MOVE; stav ověřte na serveru")
         return "move"
     result, _ = client.uid("COPY", uids, quote_mailbox_name(target.name))
     if result != "OK":
@@ -287,12 +289,40 @@ def _uid_move_or_soft_delete(client, uids, target):
         result, _ = client.uid("STORE", uids, "+FLAGS.SILENT", r"(\Deleted)")
     except Exception:
         raise MailError("Kopie může být v cílové složce, ale označení zdroje selhalo. "
-                        "Ověřte obě složky; operaci automaticky neopakujte") from None
+                        "Ověřte obě složky, operaci automaticky neopakujte") from None
     if result != "OK":
         raise MailError("Kopie může být v cílové složce, zdroj ale nebyl označen jako přesunutý. "
                         "Před opakováním ověřte obě složky")
-    # Deliberately leave the original \Deleted on the remote server.
-    return "copy-mark-deleted"
+    # COPY succeeded, so no retries even when EXPUNGE response is uncertain.
+    selected = {int(uid) for uid in uids.split(",") if uid.isdigit()}
+    if b"UIDPLUS" in capabilities:
+        try:
+            result, _ = client.uid("EXPUNGE", uids)
+            return "copy-expunged" if result == "OK" else "copy-pending-cleanup"
+        except Exception:
+            return "copy-pending-cleanup"
+    try:
+        typ, response = client.uid("SEARCH", None, "DELETED")
+        if typ != "OK" or not response:
+            return "copy-pending-cleanup"
+        actually_deleted = {int(uid) for uid in (response[0] or b"").split() if uid.isdigit()}
+        permitted = selected | set(known_deleted_uids)
+        if not selected.issubset(actually_deleted) or not actually_deleted.issubset(permitted):
+            return "copy-pending-cleanup"
+        # Last safe observable check. Standard EXPUNGE is not UID-targeted.
+        # We cannot guarantee cross-client atomicity on older IMAP servers.
+        result, _ = client.expunge()
+        return "copy-expunged" if result == "OK" else "copy-pending-cleanup"
+    except Exception:
+        return "copy-pending-cleanup"
+
+
+def _previously_moved_uids(db, box, source):
+    """Only messages EMA itself marked moved within this source UIDVALIDITY."""
+    return set(db.scalars(select(MailMessage.uid).where(
+        MailMessage.mailbox_id == box.id, MailMessage.folder_id == source.id,
+        MailMessage.uidvalidity == source.uidvalidity, MailMessage.moved.is_(True)
+    ).limit(5000)).all())
 
 
 def move_message(db, box, key, msg, action):
@@ -320,8 +350,11 @@ def move_message(db, box, key, msg, action):
         typ, _ = client.select(quote_mailbox_name(src.name), readonly=False)
         if typ != "OK":
             raise MailError("Server neumožňuje zápis do zdrojové složky")
-        _uid_move_or_soft_delete(client, str(msg.uid), target)
-        # No EXPUNGE, no action on the user's other mail. Keep original row for
+        db.info["ema_move_mode"] = _uid_move_or_soft_delete(
+            client, str(msg.uid), target,
+            known_deleted_uids=_previously_moved_uids(db, box, src))
+        # Legacy cleanup can only EXPUNGE after checking Deleted UIDs. Keep
+        # original row for
         # future UID reconciliation and its linked project, client and user flag.
         msg.moved = True
         db.commit()
@@ -396,7 +429,9 @@ def move_many_messages(db, box, key, messages, action):
         if status != "OK":
             raise MailError("IMAP server neumožňuje zápis do zdrojové složky")
         uids = ",".join(str(uid) for uid in sorted({m.uid for m in messages}))
-        _uid_move_or_soft_delete(client, uids, target)
+        db.info["ema_move_mode"] = _uid_move_or_soft_delete(
+            client, uids, target,
+            known_deleted_uids=_previously_moved_uids(db, box, src))
         for m in messages:
             m.moved = True
         db.commit()
