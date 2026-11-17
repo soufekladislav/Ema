@@ -422,3 +422,108 @@ def test_mail_detail_renders_capped_sanitized_html_and_image_opt_in(web_client, 
         stored = db.scalar(select(MailUserState).where(MailUserState.mail_id == id_mail))
         assert stored.read_override is True
     assert "img-src".encode() in client.get(url + "?images=1").headers["Content-Security-Policy"].encode()
+
+
+def test_mail_folder_view_has_50_refresh_and_folder_scroll_api(web_client, monkeypatch):
+    client = web_client
+    org = client.application.ids["org"]
+    owner = client.application.ids["owner"]
+    with Session(client.application.extensions["ema_engine"]) as db:
+        box = Mailbox(organization_id=org, owner_id=owner, label="Folders",
+                      address="folder@example.cz", username="folder@example.cz",
+                      imap_host="imap.example.cz", smtp_host="smtp.example.cz", credential="none")
+        db.add(box)
+        db.flush()
+        folder = MailFolder(mailbox_id=box.id, name="INBOX", uidvalidity=44)
+        db.add(folder)
+        db.commit()
+        box_id, folder_id = box.id, folder.id
+    login(client, "owner")
+    page = client.get(f"/mail?box={box_id}")
+    assert page.status_code == 200
+    assert b"ema-mail-scrollpanel" in page.data
+    assert "Aktualizovat 50 zpráv".encode() in page.data
+    assert b"ema-folder-select" in page.data
+    captured = {}
+    def fake_page(db, box, key, folder, *, before_uid=None, limit=50):
+        captured.update(box=box.id, folder=folder.id, cursor=before_uid, limit=limit)
+        old = db.scalar(select(MailMessage).where(MailMessage.mailbox_id == box.id))
+        if old is None:
+            db.add(MailMessage(mailbox_id=box.id, folder_id=folder.id, uidvalidity=44,
+                               uid=100, subject="New header", sender="sender@example.cz"))
+            db.commit()
+        return {"uids": [100], "has_more": False, "cursor": 100,
+                "uidvalidity": 44, "server_total": 1}
+    monkeypatch.setattr("ema.web.fetch_folder_page", fake_page)
+    result = client.post(f"/mail/{box_id}/page", json={"folder_id": folder_id,
+                          "before_uid": None}, headers={"X-CSRF-Token": csrf(client)})
+    assert result.status_code == 200
+    assert result.json["has_more"] is False
+    assert b"New header" in result.json["html"].encode()
+    assert captured == {"box": box_id, "folder": folder_id, "cursor": None, "limit": 50}
+    assert client.post(f"/mail/{box_id}/page", json={"folder_id": 99999,
+                       "before_uid": None}, headers={"X-CSRF-Token": csrf(client)}).status_code == 403
+    wrong = web_client.application.test_client()
+    login(wrong, "guest")
+    assert wrong.post(f"/mail/{box_id}/page", json={"folder_id": folder_id,
+                        "before_uid": None}, headers={"X-CSRF-Token": csrf(wrong)}).status_code == 403
+
+
+def test_archive_and_trash_have_confirmation_and_scope(web_client, monkeypatch):
+    from ema.models import MailMessage
+    client = web_client
+    org = client.application.ids["org"]
+    owner = client.application.ids["owner"]
+    with Session(client.application.extensions["ema_engine"]) as db:
+        box = Mailbox(organization_id=org, owner_id=owner, label="Mailbox",
+                      address="move@example.cz", username="move@example.cz",
+                      imap_host="imap.example.cz", smtp_host="smtp.example.cz", credential="none")
+        db.add(box)
+        db.flush()
+        inbox = MailFolder(mailbox_id=box.id, name="INBOX", uidvalidity=90)
+        trash = MailFolder(mailbox_id=box.id, name="Trash", special_use=r"\Trash", uidvalidity=91)
+        db.add_all([inbox, trash])
+        db.flush()
+        msg = MailMessage(mailbox_id=box.id, folder_id=inbox.id, uidvalidity=90,
+                          uid=15, subject="Don't lose this", sender="sender@example.cz")
+        db.add(msg)
+        db.commit()
+        mail_id, trash_id = msg.id, trash.id
+    login(client, "owner")
+    confirm = client.get(f"/mail/{mail_id}/move/confirm?action=trash")
+    assert confirm.status_code == 200
+    assert "Přesunout do Koše".encode() in confirm.data
+    assert client.post(f"/mail/{mail_id}/move", data={"csrf_token": csrf(client),
+                       "action": "trash"}).status_code == 400
+    called = []
+    def fake_move(db, box, key, msg, action):
+        called.append(action)
+        msg.moved = True
+        db.commit()
+        return db.get(MailFolder, trash_id)
+    monkeypatch.setattr("ema.web.move_message", fake_move)
+    done = client.post(f"/mail/{mail_id}/move", data={"csrf_token": csrf(client),
+                       "action": "trash", "confirm": "yes"})
+    assert done.status_code == 302
+    assert called == ["trash"]
+    with Session(client.application.extensions["ema_engine"]) as db:
+        assert db.get(MailMessage, mail_id).moved
+    guest = web_client.application.test_client()
+    login(guest, "guest")
+    assert guest.get(f"/mail/{mail_id}/move/confirm?action=trash").status_code == 404
+
+
+def test_schema_upgrade_preserves_old_mail_folder_and_message_rows(tmp_path):
+    from sqlalchemy import text, inspect
+    from ema.schema_upgrade import upgrade_schema
+    from ema.models import make_session
+    engine, _ = make_session("sqlite:///" + str(tmp_path / "legacy-mail.sqlite"))
+    Base.metadata.create_all(engine)
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE mail_folders DROP COLUMN special_use"))
+        conn.execute(text("ALTER TABLE mail_folders DROP COLUMN delimiter"))
+        conn.execute(text("ALTER TABLE mail_messages DROP COLUMN moved"))
+    changes = set(upgrade_schema(engine))
+    assert {"mail_folders.special_use", "mail_folders.delimiter", "mail_messages.moved"} <= changes
+    assert upgrade_schema(engine) == []
+    assert "moved" in {col["name"] for col in inspect(engine).get_columns("mail_messages")}
