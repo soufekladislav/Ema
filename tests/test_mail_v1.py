@@ -271,3 +271,21 @@ def test_invalid_recipient_never_starts_smtp_and_preserves_compose_draft(seeded,
     assert called == []
     with Session(client.application.extensions["ema_engine"]) as db:
         assert db.scalar(select(Outbound).where(Outbound.nonce == form["nonce"])) is None
+
+
+
+def test_trash_empty_button_shows_for_selected_dotted_folder_without_special_use(seeded):
+    client = seeded
+    login(client, "owner")
+    with Session(client.application.extensions["ema_engine"]) as db:
+        box_id = client.ids_v1["box"]
+        trash = MailFolder(mailbox_id=box_id, name="INBOX.Trash",
+                           delimiter=".", special_use="", uidvalidity=9)
+        db.add(trash)
+        db.commit()
+        trash_id = trash.id
+    response = client.get(f"/mail?box={box_id}&folder={trash_id}")
+    assert response.status_code == 200
+    assert "Vysypat Koš".encode() in response.data
+    assert f'/mail/{box_id}/trash/prepare'.encode() in response.data
+    assert b'name="folder_id"' in response.data
