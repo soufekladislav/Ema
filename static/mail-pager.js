@@ -73,6 +73,12 @@
       if (remote) {
         cursor = Number(data.next_cursor) || null;
         updateFolders(data.folders);
+        const label = document.querySelector('[data-mailbox-count="' + mailbox + '"]');
+        if (label && Array.isArray(data.indexed_count)) {
+          label.textContent = data.indexed_count[0] + " nepřečtených / " +
+            data.indexed_count[1] + " načtených" +
+            (data.server_total != null ? " · IMAP celkem " + data.server_total : "");
+        }
         refreshRequired = false;
       } else offset = Number(data.next_offset) || offset;
       say(hasMore ? "Posuň seznam dolů pro dalších 50 zpráv." : (
