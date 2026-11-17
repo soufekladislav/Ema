@@ -46,6 +46,19 @@
     {% endfor %}
   </div>
   {% if eligible_orgs %}<a class="btn primary" href="{{ url_for('project_hub') }}">Přejít k projektům</a>{% endif %}
+  <div class="card panel ema-account-mailboxes">
+    <div class="ema-card-head"><h3>Poštovní účty</h3><span class="status">{{ account_mailboxes|length }} schránek</span></div>
+    <p class="small muted">Nastavení přístupu, IMAP/SMTP a případné nové heslo schránky. Hesla se nikdy nezobrazují.</p>
+    {% for box in account_mailboxes %}
+      <div class="list-row ema-account-mailbox-row">
+        <div><strong>{{ box.label }}</strong><br><small>{{ box.address }} · {{ eligible_orgs|selectattr('id','equalto',box.organization_id)|map(attribute='name')|first|default('') }}</small></div>
+        <div class="ema-card-actions">
+          <a class="btn" href="{{ url_for('mail_hub', box=box.id) }}">Otevřít poštu</a>
+          {% if box.id in editable_mailbox_ids %}<a class="btn" href="{{ url_for('edit_mailbox', org_id=box.organization_id, box_id=box.id) }}">Upravit nastavení</a>{% endif %}
+        </div>
+      </div>
+    {% else %}<p>Zatím žádné připojené schránky.</p>{% endfor %}
+  </div>
 {% elif section == 'projects' %}
   {% if eligible_orgs %}
   <details class="card panel ema-new-inline"><summary>+ Nový projekt</summary>
@@ -70,48 +83,87 @@
 {% elif section == 'mail' %}
   <div class="ema-mail-hub">
     <aside class="card panel ema-mail-hub-sidebar">
-      <h3>Moje schránky ({{ boxes|length }})</h3>
-      <a class="ema-mail-filter {{ 'active' if not selected_box else '' }}" href="{{ url_for('mail_hub') }}">Všechny schránky</a>
-      {% for b in boxes %}
-      <a class="ema-mail-filter {{ 'active' if selected_box and selected_box.id == b.id else '' }}" href="{{ url_for('mail_hub', box=b.id) }}">
-        <strong>{{ b.label }}</strong><small>{{ b.address }}</small><small>{{ orgs|selectattr('id', 'equalto', b.organization_id)|map(attribute='name')|first|default('') }}</small>
-        <small>Stav: {{ 'Připojeno' if b.status == 'ok' else 'Chyba připojení' if b.status == 'error' else 'Ještě nesynchronizováno' }}</small>
+      <div class="ema-card-head"><h3>Moje schránky ({{ boxes|length }})</h3><small class="muted">Přetažením změníš pořadí</small></div>
+      <a class="ema-mail-filter {{ 'active' if not selected_box else '' }}" href="{{ url_for('mail_hub') }}">
+        <strong>Souhrnný inbox</strong><small>Aktivní: {{ combined_count }} z {{ boxes|length }}</small>
       </a>
-      {% else %}<p class="small muted">Nemáš zatím připojené žádné poštovní účty.</p>{% endfor %}
-      <a class="btn" href="{{ url_for('account_hub') }}">Nastavit schránky</a>
+      <div id="ema-mailbox-sort-list" data-order-url="{{ url_for('reorder_mailboxes') }}" data-csrf="{{ csrf_token() }}">
+      {% for b in boxes %}
+        {% set indexed = indexed_counts.get(b.id, (0, 0)) %}
+        {% set pref = view_prefs.get(b.id) %}
+        {% set is_included = not pref or pref.included %}
+        <div class="ema-mailbox-sort-row {{ 'ema-mailbox-muted' if not is_included else '' }}" draggable="true" data-mailbox-id="{{ b.id }}">
+          <button class="ema-mail-draghandle" type="button" title="Přetáhni pro změnu pořadí; šipky nahoru/dolů fungují také" aria-label="Přesunout schránku {{ b.label }} šipkami">⠿</button>
+          <div class="ema-mailbox-content">
+            <a class="ema-mail-filter {{ 'active' if selected_box and selected_box.id == b.id else '' }}" href="{{ url_for('mail_hub', box=b.id) }}">
+              <strong>{{ b.label }}</strong><small>{{ b.address }}</small>
+              <small>{{ orgs|selectattr('id', 'equalto', b.organization_id)|map(attribute='name')|first|default('') }}</small>
+              <small><strong>{{ indexed[0] }}</strong> nepřečtených / {{ indexed[1] }} načtených{% if b.server_message_count is not none %} · IMAP celkem {{ b.server_message_count }}{% endif %}</small>
+              <small>Stav: {{ 'Připojeno' if b.status == 'ok' else 'Chyba připojení' if b.status == 'error' else 'Nesynchronizováno' }}</small>
+            </a>
+            <form method="post" action="{{ url_for('toggle_mailbox_inclusion', box_id=b.id) }}" class="ema-mailbox-visibility-form">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="ema-mail-visibility {{ 'is-off' if not is_included else '' }}" type="submit"
+                      title="{{ 'Vyloučit ze souhrnného inboxu' if is_included else 'Zahrnout do souhrnného inboxu' }}">
+                <span class="ema-mail-visibility-dot"></span>{{ 'V přehledu' if is_included else 'Vyloučena' }}
+              </button>
+            </form>
+          </div>
+        </div>
+      {% else %}<p class="small muted">Zatím nemáš připojené schránky.</p>{% endfor %}
+      </div>
+      <p id="ema-mail-order-status" class="small muted" aria-live="polite"></p>
+      <a class="btn" href="{{ url_for('account_hub') }}">Spravovat schránky</a>
     </aside>
+
     <section class="card panel ema-mail-hub-messages">
-      <div class="ema-card-head"><h3>{{ selected_box.address if selected_box else 'Souhrnný inbox' }}</h3><span class="status">{{ mail_rows|length }} zpráv v přehledu</span></div>
+      <div class="ema-card-head">
+        <h3>{{ selected_box.address if selected_box else 'Souhrnný inbox' }}</h3>
+        <span class="status">{{ mail_rows|length }} zpráv v přehledu</span>
+      </div>
       {% if selected_box %}
         <div class="ema-mail-sync-controls">
           <div>
-            <strong>{{ 'Připojeno' if selected_box.status == 'ok' else 'Chyba synchronizace' if selected_box.status == 'error' else 'Schránka je uložena, pošta se zatím nenačetla' }}</strong>
-            <p class="small muted">Poslední úspěšná synchronizace: {{ selected_box.last_sync.strftime('%d.%m.%Y %H:%M') if selected_box.last_sync else 'Nikdy' }}.</p>
+            <strong>{{ 'Připojeno' if selected_box.status == 'ok' else 'Chyba synchronizace' if selected_box.status == 'error' else 'Schránka čeká na první synchronizaci' }}</strong>
+            <p class="small muted">Poslední úspěšná synchronizace: {{ selected_box.last_sync.strftime('%d.%m.%Y %H:%M') if selected_box.last_sync else 'Nikdy' }}</p>
           </div>
           {% if selected_box.id in syncable_ids %}
             <form method="post" action="{{ url_for('sync_mail_hub', box_id=selected_box.id) }}">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button class="btn primary" type="submit">Načíst 10 e-mailů</button>
             </form>
-          {% else %}
-            <span class="small muted">Pro synchronizaci musí správce povolit správu schránky.</span>
           {% endif %}
         </div>
-        {% if selected_box.status == 'error' and selected_box.sync_error %}
-          <div class="notice ema-mail-sync-error" role="alert">{{ selected_box.sync_error }}</div>
-        {% endif %}
+        {% if selected_box.status == 'error' and selected_box.sync_error %}<div class="notice ema-mail-sync-error" role="alert">{{ selected_box.sync_error }}</div>{% endif %}
       {% else %}
-        <p class="small muted">Pro první načtení vyber schránku vlevo a klikni na „Načíst 10 e-mailů“.</p>
+        <p class="small muted">Souhrnný přehled zobrazuje pouze schránky označené „V přehledu“. Pro načtení vyber konkrétní schránku vlevo.</p>
       {% endif %}
-      <p class="small muted">Ema zatím načítá jen hlavičky posledních zpráv z INBOX. Automatické třídění podle projektů a objednávek bude následovat po ověření integrací.</p>
+      <p class="small muted">Nepřečtené / načtené jsou počty indexovaných zpráv, nikoli kompletní obsah vzdáleného INBOX. Přečtení a hvězdičky v Emě nemění stav na poštovním serveru.</p>
+      <div class="ema-message-list">
       {% for m in mail_rows %}
         {% set mb = box_lookup[m.mailbox_id] %}
-        <a class="ema-mail-item" href="{{ url_for('mail_detail', org_id=mb.organization_id, message_id=m.id) }}">
-          <strong>{{ m.subject or '(bez předmětu)' }}</strong>
-          <span>{{ m.sender }}</span>
-          <small>{{ mb.address }} · {{ m.sent_at.strftime('%d.%m.%Y %H:%M') if m.sent_at else 'Bez data' }}</small>
-        </a>
-      {% else %}<div class="empty-state">Zatím tu nejsou synchronizované zprávy. Vyber schránku a spusť načtení pošty výše.</div>{% endfor %}
+        {% set st = mail_state[m.id] %}
+        <div class="ema-mail-message-row {{ 'is-read' if st['read'] else 'is-unread' }} {{ 'is-starred' if st['starred'] else '' }}">
+          <form method="post" action="{{ url_for('set_mail_state', mail_id=m.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="action" value="{{ 'unstar' if st['starred'] else 'star' }}">
+            <input type="hidden" name="box" value="{{ selected_box.id if selected_box else '' }}">
+            <button class="ema-mail-star" type="submit" aria-label="{{ 'Odebrat hvězdičku' if st['starred'] else 'Označit hvězdičkou' }}" title="Příznak v Emě">{{ '★' if st['starred'] else '☆' }}</button>
+          </form>
+          <a class="ema-mail-item" href="{{ url_for('mail_detail', org_id=mb.organization_id, message_id=m.id) }}">
+            <strong>{{ m.subject or '(bez předmětu)' }}</strong>
+            <span>{{ m.sender }}</span>
+            <small>{{ mb.address }} · {{ m.sent_at.strftime('%d.%m.%Y %H:%M') if m.sent_at else 'Bez data' }}</small>
+          </a>
+          <form method="post" action="{{ url_for('set_mail_state', mail_id=m.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="action" value="{{ 'unread' if st['read'] else 'read' }}">
+            <input type="hidden" name="box" value="{{ selected_box.id if selected_box else '' }}">
+            <button class="ema-mail-read-toggle" type="submit" title="{{ 'Označit jako nepřečtené' if st['read'] else 'Označit jako přečtené' }}">{{ 'Nepřečtené' if st['read'] else 'Přečíst' }}</button>
+          </form>
+        </div>
+      {% else %}<div class="empty-state">Žádné synchronizované zprávy v tomto přehledu.</div>{% endfor %}
+      </div>
     </section>
   </div>
 {% elif section == 'database' %}
