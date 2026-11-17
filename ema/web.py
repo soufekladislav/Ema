@@ -385,7 +385,18 @@ def create_app(test_config=None):
     def task_hub():
         ctx, orgs, projects = current_scope()
         tasks = visible_tasks(g.db, orgs, projects)
+        editable = set()
+        for task in tasks:
+            try:
+                if task.project_id:
+                    project_access(g.db, g.user.id, task.project_id, write=True)
+                else:
+                    organization_access(g.db, g.user.id, task.organization_id, write=True)
+                editable.add(task.id)
+            except Forbidden:
+                continue
         return render_hub("tasks", tasks=tasks, eligible_orgs=orgs, projects=projects,
+                          editable_task_ids=editable,
                           project_lookup={p.id:p for p in ctx["accessible_projects"]},
                           today=now().date())
 
