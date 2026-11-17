@@ -1,50 +1,62 @@
 @echo off
-setlocal
+setlocal EnableExtensions
 chcp 65001 >nul
-cd /d "%~dp0"
-title Restart Ema - Fresh Crackers
+title EMA HUB - oprava lokalni databaze a spusteni
 
-if not exist ".venv\Scripts\python.exe" (
-    echo CHYBA: Tento soubor musi byt ve slozce Ema vedle .venv.
-    echo Hledano: %CD%\.venv\Scripts\python.exe
-    pause
-    exit /b 1
+set "EMA_DIR=C:\Users\ladis\Documents\GitHub\Ema"
+set "EMA_PY=%EMA_DIR%\.venv\Scripts\python.exe"
+
+echo ================================================
+echo EMA HUB - oprava lokalni databaze a spusteni
+echo ================================================
+echo.
+echo DULEZITE: pred spustenim zavri puvodni okno
+ echo se serverem Ema, aby nebezely dva procesy.
+echo.
+
+if not exist "%EMA_DIR%\ema\web.py" (
+  echo CHYBA: Nelze najit kod Emy v "%EMA_DIR%".
+  goto :failed
+)
+if not exist "%EMA_PY%" (
+  echo CHYBA: Nelze najit lokalni Python Emy: "%EMA_PY%".
+  goto :failed
+)
+if not exist "%EMA_DIR%\.env" (
+  echo CHYBA: Nelze najit lokalni .env Emy. Nic se nezmenilo.
+  goto :failed
 )
 
-if not exist "ema\web.py" (
-    echo CHYBA: Ve slozce chybi ema\web.py.
-    pause
-    exit /b 1
-)
+cd /d "%EMA_DIR%"
+if errorlevel 1 goto :failed
 
-echo Restartuji lokalni Emu na http://127.0.0.1:5000
-
-rem Kill only Python processes running this specific Flask application.
-powershell -NoProfile -Command "$processes = Get-CimInstance Win32_Process | Where-Object { $_.Name -in @('python.exe','pythonw.exe') -and $_.CommandLine -like '*ema.web:create_app*' }; foreach ($p in $processes) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }"
+echo [1/3] Bezpecna zaloha existujici SQLite databaze...
+"%EMA_PY%" -c "import os,sqlite3,datetime; from dotenv import dotenv_values; from sqlalchemy.engine import make_url; u=make_url(dotenv_values('.env').get('DATABASE_URL','')); assert u.get_backend_name()=='sqlite', 'Tento spoustec je jen pro lokalni SQLite'; p=u.database; assert p and os.path.isfile(p), 'Databazovy soubor neexistuje - zkontroluj DATABASE_URL'; dst=p+'.backup_'+datetime.datetime.now().strftime('%Y%m%d_%H%M%S')+'.sqlite'; src=sqlite3.connect(p); out=sqlite3.connect(dst); src.backup(out); out.close(); src.close(); print('Zaloha vytvorena:', os.path.abspath(dst))"
 if errorlevel 1 (
-    echo Nepodarilo se overit bezici procesy. Zkontroluj Spravce uloh.
-    pause
-    exit /b 1
+  echo CHYBA: Zaloha se nepovedla. Databazova aktualizace nebyla spustena.
+  goto :failed
 )
 
-timeout /t 2 /nobreak >nul
-
-rem Do not interfere with a different application that owns port 5000.
-powershell -NoProfile -Command "if (Get-NetTCPConnection -LocalPort 5000 -State Listen -ErrorAction SilentlyContinue) { exit 1 }"
+echo.
+echo [2/3] Doplnuji chybejici databazove tabulky a sloupce...
+"%EMA_PY%" -m flask --app ema.web:create_app upgrade-db
 if errorlevel 1 (
-    echo Port 5000 je stale obsazeny. Nebyla spustena dalsi kopie Emy.
-    echo Zkontroluj Spravce uloh nebo aplikaci na portu 5000.
-    pause
-    exit /b 1
+  echo CHYBA: Databazova aktualizace se nepovedla. Aplikaci nespoustim.
+  goto :failed
 )
 
-rem Starts in a separate window: no need to type commands.
-start "EMA HUB" ".venv\Scripts\python.exe" -m flask --app ema.web:create_app run --host 127.0.0.1 --port 5000
-if errorlevel 1 (
-    echo Nepodarilo se spustit Emu.
-    pause
-    exit /b 1
-)
+echo.
+echo [3/3] Spoustim Emu na http://127.0.0.1:5000
+start "" "http://127.0.0.1:5000"
+"%EMA_PY%" -m flask --app ema.web:create_app run --host 127.0.0.1 --port 5000
 
-echo Ema se spousti v samostatnem okne. V prohlizeci otevri http://127.0.0.1:5000
+echo.
+echo Ema byla ukoncena.
+pause
 exit /b 0
+
+:failed
+echo.
+echo Zastaveno. Posli mi screenshot teto obrazovky.
+pause
+exit /b 1
