@@ -69,3 +69,54 @@ def test_create_client_and_pipeline(client):
     assert b"ABC s.r.o." in client.get(f"/org/{org}/clients").data
     assert client.post(f"/org/{org}/pipeline", data={"csrf_token": csrf(client), "title": "AI Audit"}).status_code == 302
     assert b"AI Audit" in client.get(f"/org/{org}/pipeline").data
+
+def test_login_uses_legacy_php_hero_without_open_registration(client):
+    response = client.get("/login")
+    assert response.status_code == 200
+    assert b"fresh-hub.png" in response.data
+    assert "Projekty, klienti a komunikace.".encode() in response.data
+    assert b'name="csrf_token"' in response.data
+    assert b'href="/register"' not in response.data
+    assert "https://www.freshcrackers.cz" in response.headers["Content-Security-Policy"]
+
+
+def test_project_index_is_primary_and_project_can_be_created(client):
+    assert login(client, "alice@example.cz", "a-password-12345").status_code == 302
+    org_id = client.application.test_ids["org"]
+    start = client.get("/")
+    assert b"Moje projekty" in start.data
+    assert "Obchodní projekt".encode() in start.data
+    assert b'name="organization_id"' in start.data
+    created = client.post("/projects", data={
+        "csrf_token": csrf(client), "organization_id": str(org_id),
+        "name": "Pilotni zakazka", "description": "Vyvoj a obchod"
+    })
+    assert created.status_code == 302
+    assert "/project/" in created.headers["Location"]
+    assert b"Pilotni zakazka" in client.get("/").data
+    project_html = client.get(created.headers["Location"]).data
+    assert b"Chat projektu" in project_html
+    assert b"Projekt" in project_html
+
+
+def test_project_guest_can_navigate_own_project_not_company_or_other_projects(client):
+    from sqlalchemy.orm import Session
+    with Session(client.application.extensions["ema_engine"]) as db:
+        other = Organization(name="Other private business")
+        db.add(other)
+        db.flush()
+        secret = Project(organization_id=other.id, name="Secret private project")
+        db.add(secret)
+        db.commit()
+    assert login(client, "bob@example.cz", "b-password-12345").status_code == 302
+    data = client.get("/").data
+    assert "Obchodní projekt".encode() in data
+    assert b"Secret private project" not in data
+    assert b"Klienti / CRM" not in data
+    assert b'name="organization_id"' not in data
+    org_id = client.application.test_ids["org"]
+    response = client.post("/projects", data={
+        "csrf_token": csrf(client), "organization_id": str(org_id), "name": "Not authorized"
+    })
+    assert response.status_code == 403
+    assert client.get(f"/project/{secret.id}").status_code == 403
