@@ -384,6 +384,7 @@ def create_app(test_config=None):
         """One explicit bounded IMAP read; accessible from the main global inbox."""
         try:
             box = mailbox_access(g.db, g.user.id, box_id, manage=True)
+            organization_access(g.db, g.user.id, box.organization_id)
         except Forbidden:
             abort(403)
         try:
