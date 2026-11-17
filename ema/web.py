@@ -694,7 +694,12 @@ def create_app(test_config=None):
             target = move_message(g.db, box, app.config["MAIL_ENCRYPTION_KEY"], msg, action)
             audit("mail.move", f"mail={mail_id},folder={target.id},action={action}", box.organization_id)
             g.db.commit()
-            flash(f"Zpráva přesunuta do složky {decode_modified_utf7(target.name)}. Nebyla trvale smazána.", "success")
+            pending = g.db.info.get("ema_move_mode") == "copy-pending-cleanup"
+            flash(f"Zpráva přesunuta do složky {decode_modified_utf7(target.name)}. " +
+                  ("Původní zpráva je zatím na serveru jen označená ke smazání (\\Deleted), "
+                   "může být šedá v Roundcube. Nedojde k mazání cizích zpráv." if pending
+                   else "Původní zpráva byla na serveru bezpečně odstraněna, případně přesunuta."),
+                  "error" if pending else "success")
         except MailError as ex:
             flash(str(ex), "error")
         return redirect(url_for("mail_hub", box=box.id, folder=msg.folder_id))
@@ -805,7 +810,11 @@ def create_app(test_config=None):
             target = move_message(g.db, box, app.config["MAIL_ENCRYPTION_KEY"], msg, action)
             audit("mail.move", f"mail={mail_id},target={target.id},action={action}", box.organization_id)
             g.db.commit()
-            flash("Zpráva přesunuta do serverové složky " + decode_modified_utf7(target.name), "success")
+            pending = g.db.info.get("ema_move_mode") == "copy-pending-cleanup"
+            flash("Zpráva přesunuta do serverové složky " + decode_modified_utf7(target.name) +
+                  ("; původní kopie je pouze označená \\Deleted a může být viditelná "
+                   "v Roundcube, aby nebyly omylem smazány jiné zprávy." if pending else ""),
+                  "error" if pending else "success")
         except MailError as ex:
             flash(str(ex), "error")
         return redirect(url_for("mail_hub", box=box.id, folder=msg.folder_id))
@@ -843,6 +852,7 @@ def create_app(test_config=None):
             flash(f"Upraveno {len(messages)} zpráv v Emě.", "success")
         else:
             done, failed, reasons = 0, 0, []
+            pending_cleanup = []
             groups = {}
             for msg in messages:
                 groups.setdefault((msg.mailbox_id, msg.folder_id), []).append(msg)
@@ -855,13 +865,19 @@ def create_app(test_config=None):
                           box.organization_id)
                     g.db.commit()
                     done += len(batch)
+                    if g.db.info.get("ema_move_mode") == "copy-pending-cleanup":
+                        pending_cleanup.append(box.label)
                 except MailError as ex:
                     failed += len(batch)
                     reasons.append(f"{box.label}: {ex}")
                     # A remote result may be uncertain. Never retry a failed batch automatically.
             detail = " " + " | ".join(reasons[:3]) if reasons else ""
+            if pending_cleanup:
+                detail += " Původní zprávy jsou u serveru bez UIDPLUS označené ke smazání " \
+                          "(\\Deleted) a mohou být v Roundcube šedé; bez bezpečného " \
+                          "EXPUNGE nebudou smazané. Schránky: " + ", ".join(pending_cleanup[:3])
             flash(f"Přesunuto {done} zpráv, {failed} nepřesunuto." + detail,
-                  "success" if not failed else "error")
+                  "success" if not failed and not pending_cleanup else "error")
         return redirect(url_for("mail_hub"))
 
     @app.get("/mail/compose")
