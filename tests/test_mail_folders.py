@@ -23,6 +23,7 @@ class FakeImap:
         self.deleted = []
         self.expunge = []
         self.appended = []
+        self.copied = []
 
     def list(self):
         return "OK", [
@@ -54,6 +55,9 @@ class FakeImap:
             return "OK", result
         if action == "MOVE":
             self.moved.append((args[0], args[1]))
+            return "OK", [b""]
+        if action == "COPY":
+            self.copied.append((args[0], args[1]))
             return "OK", [b""]
         if action == "STORE":
             self.deleted.append((args[0], args[1], args[2]))
@@ -154,10 +158,13 @@ def test_no_move_extension_must_not_delete_or_expunge(state, monkeypatch):
         discover_folders(db, box, "key")
         fetch_folder_page(db, box, "key", folder)
         mail = db.scalar(select(MailMessage).where(MailMessage.uid == 2))
-        with pytest.raises(MailError, match="UID MOVE"):
-            move_message(db, box, "key", mail, "trash")
+        target = move_message(db, box, "key", mail, "trash")
+        assert target.name == "[Gmail]/Trash"
         assert not fake.moved
-        assert not mail.moved
+        assert fake.copied == [("2", '"[Gmail]/Trash"')]
+        assert fake.deleted == [("2", "+FLAGS.SILENT", r"(\Deleted)")]
+        assert not fake.expunge
+        assert mail.moved
 
 
 
@@ -214,3 +221,45 @@ def test_sent_append_uses_discovered_real_folder(state, monkeypatch):
         destination = append_sent_copy(db, box, "key", b"Subject: test\r\n\r\nHello")
         assert destination.name == "Sent"
         assert fake.appended == [('"Sent"', r"(\Seen)", b"Subject: test\r\n\r\nHello")]
+
+
+
+def test_legacy_imap_bulk_copy_flags_only_selected_without_expunge(state, monkeypatch):
+    engine, box_id, inbox_id = state
+    fake = FakeImap(count=4)
+    fake.capabilities = (b"IMAP4rev1",)
+    monkeypatch.setattr("ema.mail_folders._connect", lambda box, key: fake)
+    with Session(engine) as db:
+        box, inbox = db.get(Mailbox, box_id), db.get(MailFolder, inbox_id)
+        discover_folders(db, box, "key")
+        fetch_folder_page(db, box, "key", inbox)
+        messages = db.scalars(select(MailMessage).where(MailMessage.uid.in_([2, 4]))).all()
+        target = move_many_messages(db, box, "key", messages, "trash")
+        assert target.name == "[Gmail]/Trash"
+        assert fake.copied == [("2,4", '"[Gmail]/Trash"')]
+        assert fake.deleted == [("2,4", "+FLAGS.SILENT", r"(\Deleted)")]
+        assert not fake.expunge
+        assert all(m.moved for m in messages)
+
+
+def test_legacy_copy_store_failure_marks_remote_result_uncertain(state, monkeypatch):
+    engine, box_id, inbox_id = state
+    fake = FakeImap(count=3)
+    fake.capabilities = (b"IMAP4rev1",)
+    original_uid = fake.uid
+    def fail_store(action, *args):
+        if action == "STORE":
+            return "NO", [b"refused"]
+        return original_uid(action, *args)
+    fake.uid = fail_store
+    monkeypatch.setattr("ema.mail_folders._connect", lambda box, key: fake)
+    with Session(engine) as db:
+        box, inbox = db.get(Mailbox, box_id), db.get(MailFolder, inbox_id)
+        discover_folders(db, box, "key")
+        fetch_folder_page(db, box, "key", inbox)
+        message = db.scalar(select(MailMessage).where(MailMessage.uid == 3))
+        with pytest.raises(MailError, match="Kopie může být"):
+            move_message(db, box, "key", message, "trash")
+        assert len(fake.copied) == 1
+        assert not fake.expunge
+        assert message.moved is False
