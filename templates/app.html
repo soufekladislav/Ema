@@ -248,6 +248,15 @@
 <div class="card panel"><h3>Připojené schránky</h3>{% for b in boxes %}<div class="list-row"><span><strong>{{ b.label }}</strong> · {{ b.address }}</span><div class="ema-card-actions"><span class="status">{{ b.status }}</span><a class="btn" href="{{ url_for('edit_mailbox', org_id=active_org.id, box_id=b.id) }}">Upravit</a><a class="btn" href="{{ url_for('mail_hub', box=b.id) }}">Otevřít</a></div></div>{% else %}<p class="muted">Zatím žádné schránky</p>{% endfor %}</div>{% else %}<div class="card panel">Nemáte oprávnění měnit firemní účty a schránky.</div>{% endif %}
 {% elif section == 'superadmin' %}
 <div class="page-head"><div><span class="eyebrow">Platforma</span><h1>Superadmin konzole</h1><p>Provoz, účty, pracovní prostory a základní diagnostika — bez čtení klientské pošty.</p></div></div>
+<div class="card panel ema-pwa-admin-card">
+  <h3>EMA PWA – instalace a manifest</h3>
+  <p>Kontrola instalovatelnosti v aktuálním prohlížeči. Pokud Chrome nevydá instalační dialog, zkontrolujeme HTTPS, manifest, ikony a Service Worker. Diagnostika neobsahuje poštu ani přístupové údaje.</p>
+  <div class="ema-card-actions">
+    <button type="button" class="btn" data-ema-pwa-diagnose>Otestovat PWA</button>
+    <a class="btn" href="{{ url_for('pwa_manifest') }}" target="_blank" rel="noopener noreferrer">Zobrazit manifest</a>
+    <a class="btn" href="{{ url_for('pwa_worker') }}" target="_blank" rel="noopener noreferrer">Service Worker</a>
+  </div>
+</div>
 <div class="grid metrics"><div class="card metric"><span>Účty</span><strong>{{ users|length }}</strong></div><div class="card metric"><span>Firmy</span><strong>{{ all_orgs|length }}</strong></div><div class="card metric"><span>Schránky</span><strong>{{ total_mailboxes }}</strong></div><div class="card metric"><span>Indexované e-maily</span><strong>{{ total_messages }}</strong></div></div>
 <div class="notice">Fyzická velikost databáze: {{ database_size }}. Pro přesné měření produkční MariaDB bude potřeba samostatný monitorovací modul. Údaje za firmy jsou logické počty, nikoliv fyzická spotřeba.</div>
 <div class="grid two-col"><div class="card panel"><h3>Vytvořit uživatelský účet</h3><form method="post" class="formstack" action="{{ url_for('add_user') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label>Jméno<input name="name" required></label><label>E-mail<input name="email" type="email" required></label><label>Dočasné heslo (min. 12 znaků)<input name="password" type="password" required minlength="12" autocomplete="new-password"></label><button class="btn primary">Vytvořit účet</button></form><p class="small muted">Pilotní účty vytváří superadmin. Pozvánky a reset hesla budou přidány další etapou.</p></div><div class="card panel"><h3>Firmy a provoz</h3>{% for o in all_orgs %}<div class="list-row"><strong>{{ o.name }}</strong><form method="post" action="{{ url_for('toggle_org', org_id=o.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn small-btn">{{ 'Pozastavit' if o.active else 'Aktivovat' }}</button></form></div>{% else %}<p>Bez firem</p>{% endfor %}</div></div>
