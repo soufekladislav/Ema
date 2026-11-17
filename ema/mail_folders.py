@@ -269,3 +269,52 @@ def move_message(db, box, key, msg, action):
             client.logout()
         except Exception:
             pass
+
+
+def move_batch(db, box, key, messages, action):
+    """One UID MOVE for a bounded group in one mailbox/folder/UIDVALIDITY."""
+    if not messages or len(messages) > 30:
+        raise MailError("Jednou dávkou lze přesunout 1–30 zpráv")
+    folder_ids = {m.folder_id for m in messages}
+    validities = {m.uidvalidity for m in messages}
+    if len(folder_ids) != 1 or len(validities) != 1 or any(
+        m.mailbox_id != box.id or m.moved for m in messages
+    ):
+        raise MailError("Dávka obsahuje různé složky nebo přesunuté zprávy")
+    src = db.get(MailFolder, messages[0].folder_id)
+    if not src or src.mailbox_id != box.id or src.uidvalidity != messages[0].uidvalidity:
+        raise MailError("Složka nebo UID zpráv se změnily")
+    target = special_folder(db, box, action)
+    if not target or target.id == src.id:
+        raise MailError("Cílová složka není dostupná nebo již obsahuje zprávy")
+    uidset = ",".join(str(m.uid) for m in messages)
+    client = _connect(box, key)
+    try:
+        caps = {
+            x.upper() if isinstance(x, bytes) else str(x).upper().encode()
+            for x in getattr(client, "capabilities", [])
+        }
+        if b"MOVE" not in caps:
+            raise MailError("Server nepodporuje UID MOVE – dávka nebyla přesunuta")
+        validity, _ = _select(client, src)
+        if validity != src.uidvalidity:
+            raise MailError("Změnilo se UIDVALIDITY, nejdříve obnov zprávy")
+        typ, _ = client.select(quote_mailbox_name(src.name), readonly=False)
+        if typ != "OK":
+            raise MailError("Nelze otevřít složku pro přesun")
+        typ, _ = client.uid("MOVE", uidset, quote_mailbox_name(target.name))
+        if typ != "OK":
+            raise MailError("IMAP přesun dávky není potvrzený; ověř server")
+        for message in messages:
+            message.moved = True
+        db.commit()
+        return target
+    except Exception as ex:
+        db.rollback()
+        raise MailError(str(ex) if isinstance(ex, MailError)
+                        else "Výsledek přesunu není potvrzený; bez automatického opakování") from None
+    finally:
+        try:
+            client.logout()
+        except Exception:
+            pass
