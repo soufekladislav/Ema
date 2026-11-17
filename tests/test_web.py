@@ -172,7 +172,8 @@ def test_assistant_conversation_uses_selected_project_and_persists_personally(cl
     assert "Na čem pracujeme?".encode() in result.data
     assert "Nic jsem nezměnila.".encode() in result.data
     assert "Na čem pracujeme?".encode() not in client.get("/").data
-    with __import__("sqlalchemy").orm.Session(client.application.extensions["ema_engine"]) as db:
+    from sqlalchemy.orm import Session
+    with Session(client.application.extensions["ema_engine"]) as db:
         turns = db.scalars(select(AssistantTurn).order_by(AssistantTurn.id)).all()
         assert [(t.role, t.user_id, t.project_id) for t in turns] == [
             ("user", 1, project_id), ("assistant", 1, project_id)]
@@ -204,8 +205,8 @@ def test_schema_upgrade_restores_mailbox_columns_without_data_loss(tmp_path):
         # Simulate the pre-PR65 mailbox table on an existing SQLite pilot DB.
         conn.execute(text("ALTER TABLE mailboxes DROP COLUMN smtp_username"))
         conn.execute(text("ALTER TABLE mailboxes DROP COLUMN signature_html"))
-        conn.execute(text("INSERT INTO users (id,email,name,password_hash,active,superadmin) "
-                          "VALUES (1,'legacy@example.cz','Legacy','hash',1,0)"))
+        conn.execute(text("INSERT INTO users (id,email,name,password_hash,active,superadmin,created_at) "
+                          "VALUES (1,'legacy@example.cz','Legacy','hash',1,0,'2026-01-01')"))
         conn.execute(text("INSERT INTO organizations (id,name,active) VALUES (1,'Legacy org',1)"))
         conn.execute(text("INSERT INTO mailboxes (id,organization_id,owner_id,label,address,username,"
                           "imap_host,imap_port,smtp_host,smtp_port,credential,status,sync_error) "
