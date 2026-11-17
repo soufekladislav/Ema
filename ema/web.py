@@ -488,6 +488,7 @@ def create_app(test_config=None):
             combined_count=len([b for b in boxes if b.id not in prefs or prefs[b.id].included]),
             initial_has_more=initial_has_more,
             initial_cursor=min((m.uid for m in messages), default=None),
+            can_move_ids=syncable_ids,
         )
 
     @app.post("/mail/<int:box_id>/page")
@@ -533,6 +534,27 @@ def create_app(test_config=None):
             "folders": [{"id": f.id, "name": folder_names[f.id]} for f in available_folders(g.db, box)],
             "server_total": page["server_total"],
         }
+
+    @app.post("/mail/<int:box_id>/refresh-50")
+    @login_required
+    def mail_refresh_50(box_id):
+        """Manual fallback for users with JavaScript disabled."""
+        box = mailbox_or_403(box_id, manage=True)
+        try:
+            organization_access(g.db, g.user.id, box.organization_id)
+        except Forbidden:
+            abort(403)
+        folder_id = positive_id("folder_id")
+        folder = g.db.get(MailFolder, folder_id) if folder_id else None
+        if folder is None or folder.mailbox_id != box.id:
+            abort(403)
+        try:
+            info = fetch_folder_page(g.db, box, app.config["MAIL_ENCRYPTION_KEY"],
+                                     folder, limit=PAGE_SIZE)
+            flash(f"Načteno posledních {len(info['uids'])} zpráv ze složky.", "success")
+        except MailError as ex:
+            flash(str(ex), "error")
+        return redirect(url_for("mail_hub", box=box.id, folder=folder.id))
 
     @app.get("/mail/aggregate/page")
     @login_required
@@ -1220,6 +1242,12 @@ def create_app(test_config=None):
         box = mailbox_or_403(msg.mailbox_id)
         if box.organization_id != org_id:
             abort(403)
+        if msg.moved:
+            flash("Tato zpráva již byla na poštovním serveru přesunuta. Otevři cílovou složku.", "error")
+            return redirect(url_for("mail_hub", box=box.id))
+        folder = g.db.get(MailFolder, msg.folder_id)
+        if folder is None or folder.mailbox_id != box.id:
+            abort(404)
         # Personal read state is local to Ema; IMAP is opened read-only.
         state = get_mail_user_state(g.db, g.user.id, msg.id)
         if state.read_override is not True:
@@ -1228,7 +1256,7 @@ def create_app(test_config=None):
         show_images = request.args.get("images") == "1"
         try:
             preview = preview_message(box, msg, app.config["MAIL_ENCRYPTION_KEY"],
-                                      show_images=show_images)
+                                      show_images=show_images, folder_name=folder.name)
             warning = ("HTML a prostý text jsou čtené přímo z IMAP, maximálně 192 KiB."
                        " Přílohy a obsah zprávy se neukládají do databáze.")
         except MailError as ex:
