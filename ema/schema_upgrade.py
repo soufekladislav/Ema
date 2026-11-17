@@ -31,4 +31,11 @@ def upgrade_schema(engine):
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE contacts ADD COLUMN metadata_json TEXT NULL"))
             applied.append("contacts.metadata_json")
+    inspector = inspect(engine)
+    if inspector.has_table("projects"):
+        project_columns = {col["name"] for col in inspector.get_columns("projects")}
+        if "kind" not in project_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE projects ADD COLUMN kind VARCHAR(20) NOT NULL DEFAULT 'other'"))
+            applied.append("projects.kind")
     return applied
