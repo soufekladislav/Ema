@@ -9,11 +9,17 @@
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="icon" type="image/png" href="https://www.freshcrackers.cz/wp-content/uploads/2023/10/Fresh-Crackers-Logo.png">
   <link rel="apple-touch-icon" href="https://www.freshcrackers.cz/wp-content/uploads/2023/10/Fresh-Crackers-Logo.png">
+  <link rel="manifest" href="{{ url_for('pwa_manifest') }}">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="EMA HUB">
   <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+  <script src="{{ url_for('static', filename='mail-v1.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='pwa.js') }}" defer></script>
   <script src="{{ url_for('static', filename='mail-ui.js') }}" defer></script>
   <script src="{{ url_for('static', filename='mail-pager.js') }}" defer></script>
 </head>
-<body>
+<body class="ema-screen-{{ section|default('other') }}">
 {% if me is defined and me %}
 <div class="layout">
   <aside class="sidebar" aria-label="Hlavní navigace">
@@ -48,6 +54,7 @@
   </aside>
   <div class="workspace">
     <header class="topbar ema-topbar">
+      <button class="ema-mobile-nav-toggle" id="ema-mobile-nav-toggle" type="button" aria-label="Otevřít hlavní menu" aria-expanded="false">☰</button>
       <div class="ema-topbar-brand"><strong>EMA</strong><span class="top-subtitle">{{ selected_project.name if selected_project else 'Obchodní a projektová asistentka' }}</span></div>
       <form method="post" action="{{ url_for('set_firm_scope') }}" class="ema-global-filter">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

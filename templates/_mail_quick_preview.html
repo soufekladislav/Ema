@@ -1,0 +1,25 @@
+<div class="ema-quick-preview-content" aria-label="Rychlý náhled e-mailu">
+  <div class="ema-quick-preview-head">
+    <div><strong>{{ message.subject or '(bez předmětu)' }}</strong>
+      <small>{{ message.sender }} → {{ message.recipients }} · {{ message.sent_at.strftime('%d.%m.%Y %H:%M') if message.sent_at else 'bez data' }}</small></div>
+    <div class="ema-quick-actions">
+      <a href="{{ url_for('compose_mail', reply_id=message.id) }}" class="btn">↩ Odpovědět</a>
+      <a href="{{ url_for('compose_mail', forward_id=message.id) }}" class="btn">↪ Přeposlat</a>
+      <a href="{{ url_for('mail_detail', org_id=box.organization_id, message_id=message.id, folder=message.folder_id) }}" class="btn">Detail</a>
+    </div>
+  </div>
+  {% if preview.truncated %}<div class="ema-quick-warning">Zkrácený náhled zprávy (max. 192 KiB).</div>{% endif %}
+  {% if preview.is_html %}
+    {% if show_images %}
+    <div class="ema-mail-image-warning">Obrázky jsou pro tuto zprávu povolené. Odesílatel může zjistit otevření zprávy.</div>
+    {% else %}
+    <div class="ema-mail-image-warning">
+      <span>Externí obrázky jsou zablokované kvůli soukromí.</span>
+      <button class="btn ema-quick-images" data-image-url="{{ url_for('mail_quick_preview', mail_id=message.id, images=1) }}" type="button">Načíst obrázky</button>
+    </div>
+    {% endif %}
+    <iframe sandbox="allow-popups" referrerpolicy="no-referrer" class="ema-mail-html-frame ema-quick-html-frame" title="Bezpečný HTML náhled" srcdoc="{{ preview.srcdoc }}"></iframe>
+  {% else %}
+    <div class="ema-mail-plain-text">{{ preview.plain }}</div>
+  {% endif %}
+</div>

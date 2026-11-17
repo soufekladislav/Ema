@@ -6,6 +6,8 @@ import re
 import smtplib
 import socket
 import ssl
+from email.utils import getaddresses
+from pathlib import PurePath
 from datetime import timezone
 from email.headerregistry import Address
 from email.message import EmailMessage
@@ -206,6 +208,76 @@ def preview_message(box, row, key, *, show_images=False, folder_name="INBOX"):
             client.logout()
         except Exception:
             pass
+
+
+
+def _parse_addresses(value, *, required=False):
+    """Validate recipients; refuse header injection and large fanout."""
+    if any(c in value for c in "\r\n") or len(value) > 1500:
+        raise MailError("Neplatný seznam příjemců")
+    result = []
+    for _, addr in getaddresses([value.replace(";", ",")]):
+        if not addr or not re.fullmatch(r"[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+", addr) or len(addr) > 254:
+            raise MailError("Zkontrolujte formát adres příjemců")
+        result.append(addr)
+    if (required and not result) or len(result) > 25:
+        raise MailError("Vyberte 1–25 příjemců")
+    return list(dict.fromkeys(result))
+
+
+def send_composed(box, key, to, cc, bcc, subject, body, *, reply_message_id=None, attachments=None):
+    """Only explicit SMTP send. No retry if delivery outcome is uncertain."""
+    primary = _parse_addresses(to, required=True)
+    copy = _parse_addresses(cc)
+    blind = _parse_addresses(bcc)
+    if len(primary) + len(copy) + len(blind) > 25:
+        raise MailError("Příliš mnoho příjemců")
+    if not subject or len(subject) > 500 or any(c in subject for c in "\r\n"):
+        raise MailError("Neplatný předmět")
+    if not body.strip() or len(body) > 100000:
+        raise MailError("Text zprávy chybí nebo překračuje limit")
+    if any(c in box.address for c in "\r\n"):
+        raise MailError("Neplatná adresa odesílatele")
+    validate_mail_host(box.smtp_host)
+    if box.smtp_port not in (465, 587):
+        raise MailError("SMTP vyžaduje TLS na portu 465 nebo 587")
+    msg = EmailMessage()
+    msg["From"], msg["To"], msg["Subject"] = box.address, ", ".join(primary), subject
+    if copy:
+        msg["Cc"] = ", ".join(copy)
+    if reply_message_id:
+        if len(reply_message_id) > 250 or any(c in reply_message_id for c in "\r\n") or not (
+            reply_message_id.startswith("<") and reply_message_id.endswith(">")
+        ):
+            raise MailError("Neplatná reference původního e-mailu")
+        msg["In-Reply-To"] = reply_message_id
+        msg["References"] = reply_message_id
+    msg.set_content(body)
+    total_size = 0
+    for name, data in attachments or []:
+        total_size += len(data)
+        if total_size > 10_000_000 or len(data) > 6_000_000:
+            raise MailError("Přílohy přesahují limit 10 MB / 6 MB na soubor")
+        filename = PurePath(name.replace("\\", "/")).name
+        if not filename or len(filename) > 140 or any(c in filename for c in "\r\n\x00"):
+            raise MailError("Neplatný název přílohy")
+        msg.add_attachment(data, maintype="application", subtype="octet-stream", filename=filename)
+    password = decrypt_password(box.credential, key)
+    recipients = list(dict.fromkeys(primary + copy + blind))
+    try:
+        if box.smtp_port == 465:
+            with smtplib.SMTP_SSL(box.smtp_host, 465, timeout=20, context=ssl.create_default_context()) as smtp:
+                smtp.login(getattr(box, "smtp_username", "") or box.username, password)
+                smtp.send_message(msg, to_addrs=recipients)
+        else:
+            with smtplib.SMTP(box.smtp_host, 587, timeout=20) as smtp:
+                smtp.ehlo()
+                smtp.starttls(context=ssl.create_default_context())
+                smtp.ehlo()
+                smtp.login(getattr(box, "smtp_username", "") or box.username, password)
+                smtp.send_message(msg, to_addrs=recipients)
+    except Exception as ex:
+        raise MailError("SMTP odeslání není potvrzené; ověřte Odeslané před opakováním") from ex
 
 
 def send_plain(box, key, to_addr, subject, text):
