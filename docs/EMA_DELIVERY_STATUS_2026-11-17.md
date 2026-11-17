@@ -1,7 +1,10 @@
 # EMA – aktuální stav vývoje, ověření a třídění GitHub Issues
+
+> **Historické zadání / stav k původnímu datu.** Tento soubor není aktuální seznam hotových funkcí ani nasazovací instrukce. Aktuální revize: [EMA_STATUS_2026-11-18.md](EMA_STATUS_2026-11-18.md).
+
 **Datum:** 17. 11. 2026 · **Zdroj:** kód a PR na GitHubu, CI a uživatelské screenshoty z ostrého `hub.freshcrackers.cz`.
 
-> **Neplést stav kódu se stavem produkce.** `main` obsahuje sloučené základní PR do #77. PR #81 a PR #81 byly uzavřeny jako nahrazené a aktuálně otevřený je jednotný PR #81 a nelze je označit za ověřené na produkčním serveru. V screenshotu může být nasazená i pracovní větev; nelze ověřit commit běžícího Passengeru bez release údaje.
+> **Neplést stav kódu se stavem produkce.** `main` obsahuje sloučené základní PR do #77. PR #79 a PR #80 byly uzavřeny jako nahrazené a aktuálně otevřený je jednotný PR #81 a nelze je označit za ověřené na produkčním serveru. V screenshotu může být nasazená i pracovní větev; nelze ověřit commit běžícího Passengeru bez release údaje.
 
 ## Aktuální zásada řízení Issues
 
