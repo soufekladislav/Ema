@@ -19,8 +19,8 @@
   <script src="{{ url_for('static', filename='mail-v11.js') }}" defer></script>
   <script src="{{ url_for('static', filename='mobile-shell-v2.js') }}" defer></script>
   <script src="{{ url_for('static', filename='pwa.js') }}" defer></script>
-  <link rel="stylesheet" href="{{ url_for('static', filename='pwa-install-v1.css') }}">
-  <script src="{{ url_for('static', filename='pwa-install-v1.js') }}" defer></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='pwa-install-v2.css') }}">
+  <script src="{{ url_for('static', filename='pwa-install-v2.js') }}" defer></script>
   <script src="{{ url_for('static', filename='mail-ui.js') }}" defer></script>
   <script src="{{ url_for('static', filename='mail-pager-v11.js') }}" defer></script>
 </head>
@@ -95,7 +95,17 @@
       <button type="button" class="ema-install-close" id="ema-install-close" aria-label="Zavřít nápovědu">×</button>
     </div>
     <div id="ema-install-instructions" role="status" aria-live="polite"></div>
-    <button type="button" class="ema-install-ok" id="ema-install-ok">Rozumím</button>
+    <div class="ema-install-controls">
+      <button type="button" class="ema-install-ok" id="ema-pwa-retry" hidden>Spustit instalaci</button>
+      <button type="button" class="ema-install-ok ema-install-secondary" id="ema-pwa-check">Zkontrolovat PWA</button>
+      <button type="button" class="ema-install-ok ema-install-secondary" id="ema-pwa-copy">Kopírovat diagnostiku</button>
+    </div>
+    <details class="ema-install-details" open>
+      <summary>Výsledek kontroly instalace</summary>
+      <pre id="ema-pwa-diagnostics-output" class="ema-pwa-diagnostics-output" aria-live="polite">Diagnostiku zatím nemám načtenou.</pre>
+      <a href="{{ url_for('pwa_manifest') }}" target="_blank" rel="noopener">Otevřít manifest</a>
+    </details>
+    <button type="button" class="ema-install-ok" id="ema-install-ok">Zavřít</button>
   </dialog>
 
 {% else %}{% block login %}{% endblock %}{% endif %}
