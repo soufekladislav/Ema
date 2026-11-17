@@ -1,5 +1,8 @@
 # EMA / Fresh HUB — realizační backlog a GitHub Issues
 
+> **Historické zadání / stav k původnímu datu.** Tento soubor není aktuální seznam hotových funkcí ani nasazovací instrukce. Aktuální revize: [EMA_STATUS_2026-11-18.md](EMA_STATUS_2026-11-18.md).
+
+
 > Datum: 16. 11. 2026. Stav: zadání a Issues založené, vývoj neověřen.
 
 **Master specifikace:** [Projektová mapa v1.1](EMA_PROJECT_MAP.md) · **Řídicí Issue:** [#1](https://github.com/soufekladislav/Ema/issues/1) · **GitHub Project:** [#10](https://github.com/users/soufekladislav/projects/10)
