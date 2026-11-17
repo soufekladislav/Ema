@@ -218,6 +218,14 @@
 {% elif section == 'mailbox-edit' %}
 <div class="page-head"><div><span class="eyebrow">NASTAVENÍ SCHRÁNKY</span><h1>Upravit {{ box.label }}</h1><p>{{ box.address }} · {{ active_org.name }}</p></div><a class="btn" href="{{ url_for('settings', org_id=active_org.id) }}">Zpět</a></div>
 <div class="card panel ema-mailbox-edit-card">
+  {% if box.imap_host|lower == 'imap.gmail.com' %}
+  <div class="notice">
+    <strong>Gmail vyžaduje zvláštní přihlášení.</strong>
+    Pro současné připojení IMAP použij heslo aplikace Google účtu s dvoufázovým ověřením, nikoliv běžné heslo Gmailu.
+    <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener noreferrer">Vygenerovat heslo aplikace u Googlu</a>.
+    Přihlášení přes OAuth („Připojit Google účet“) zatím Ema nepodporuje.
+  </div>
+  {% endif %}
   <p class="small muted">Změna hesla je nepovinná. Pokud jej necháš prázdné, původní šifrované heslo zůstane zachované. Nastavení SMTP lze změnit bez zásahu do již načtených zpráv.</p>
   <form method="post" class="formstack" action="{{ url_for('edit_mailbox', org_id=active_org.id, box_id=box.id) }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
