@@ -405,7 +405,7 @@ def test_mail_detail_renders_capped_sanitized_html_and_image_opt_in(web_client, 
         id_box, id_mail = b.id, mail.id
 
     seen = []
-    def fake_preview(box, msg, key, *, show_images=False):
+    def fake_preview(box, msg, key, *, show_images=False, folder_name="INBOX"):
         seen.append(show_images)
         return MailPreview("<p>Read-only HTML</p>", "Plain", True, True, False)
     monkeypatch.setattr("ema.web.preview_message", fake_preview)
