@@ -98,7 +98,7 @@
             <a class="ema-mail-filter {{ 'active' if selected_box and selected_box.id == b.id else '' }}" href="{{ url_for('mail_hub', box=b.id) }}">
               <strong>{{ b.label }}</strong><small>{{ b.address }}</small>
               <small>{{ orgs|selectattr('id', 'equalto', b.organization_id)|map(attribute='name')|first|default('') }}</small>
-              <small><strong>{{ indexed[0] }}</strong> nepřečtených / {{ indexed[1] }} načtených{% if b.server_message_count is not none %} · IMAP celkem {{ b.server_message_count }}{% endif %}</small>
+              <small data-mailbox-count="{{ b.id }}"><strong>{{ indexed[0] }}</strong> nepřečtených / {{ indexed[1] }} načtených{% if b.server_message_count is not none %} · IMAP celkem {{ b.server_message_count }}{% endif %}</small>
               <small>Stav: {{ 'Připojeno' if b.status == 'ok' else 'Chyba připojení' if b.status == 'error' else 'Nesynchronizováno' }}</small>
             </a>
             <form method="post" action="{{ url_for('toggle_mailbox_inclusion', box_id=b.id) }}" class="ema-mailbox-visibility-form">
