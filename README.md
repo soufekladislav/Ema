@@ -2,21 +2,24 @@
 
 AI obchodní a projektová asistentka Fresh Crackers: **chat-first pracovní prostor pro firmy, klienty, e-maily, obchodní příležitosti, nabídky a projekty.**
 
-**Stav:** první implementace **EMA HUB V0.1** je uložena v `main` (sloučený PR #62); GitHub Actions V0.1 testy prošly. **Na serveru zatím nebyla nasazena ani provozně otestována.**
+**Aktuální stav (18. 11. 2026):** EMA běží na `hub.freshcrackers.cz`, uživatel otestoval poštovní rozhraní a potvrdil **úspěšnou instalaci PWA**. Repo `main` je ovšem proti testované společné verzi pozadu: **[PR #81](https://github.com/soufekladislav/Ema/pull/81) je otevřený a nesloučený**, poslední automatické ověření release větve má **86 úspěšných testů**. PWA instalace neznamená automatické potvrzení všech mailových operací, Gmail OAuth, bezpečného vysypání Koše ani kompletní mobilní přejímky. **[Podrobný aktuální stav a plán](docs/EMA_STATUS_2026-11-18.md)**.
 
 ## Zdrojový kód a instalace
 
 - [Aplikace V0.1](ema/)
 - [Funkce a lokální spuštění](README_V0.1.md)
 - [Nasazení na cPanel/Passenger](docs/DEPLOY_V0.1.md)
-- [PR #62 – sloučená V0.1](https://github.com/soufekladislav/Ema/pull/62)
+- [PR #62 – původní sloučená V0.1](https://github.com/soufekladislav/Ema/pull/62)
+- [PR #77 – sloučený poštovní základ](https://github.com/soufekladislav/Ema/pull/77)
+- [PR #81 – jednotné vydání EMA Mail + mobil + PWA, čeká přejímku](https://github.com/soufekladislav/Ema/pull/81)
 - **Potvrzená doména:** `hub.freshcrackers.cz`
 
 ## Dokumentace a řízení
 
-- [Kompletní projektová mapa / PRD v1.1](docs/EMA_PROJECT_MAP.md)
-- [Realizační backlog — všech 61 GitHub Issues](docs/IMPLEMENTATION_BACKLOG.md)
-- [Řídicí Issue a fáze F0–F5](issues/1)
+- **[Aktuální revize – hotové / částečné / neověřené / backlog (18. 11. 2026)](docs/EMA_STATUS_2026-11-18.md)**
+- [Master produktové zadání / mapa v1.3](docs/EMA_PROJECT_MAP.md)
+- [Původní realizační backlog (historický snímek 16. 11.)](docs/IMPLEMENTATION_BACKLOG.md)
+- [Řídicí Issue #1](https://github.com/soufekladislav/Ema/issues/1)
 - [GitHub Project #10](https://github.com/users/soufekladislav/projects/10)
 
 ## Architektura a mantinely
@@ -32,4 +35,4 @@ AI obchodní a projektová asistentka Fresh Crackers: **chat-first pracovní pro
 
 Nikdy neukládat do GitHubu historické produkční konfigurace, hesla, soubory .env, error logy ani klientskou poštu. Doména D-01 je potvrzena: `hub.freshcrackers.cz`. Před nasazením zajistit zálohu původní PHP Emy na stejné doméně.
 
-**GitHub Project #10:** Issues jsou založené a propojené v epikách. Přidání existujících Issues do samotného project boardu vyžaduje hromadné přidání položek v GitHubu (postup v realizačním backlogu).
+**GitHub Project #10:** Issues jsou propojené v epikách, ale skutečný stav položek boardu není v této revizi ověřený. Z aktuálního obsahu repozitáře je ověřeno 47 otevřených a 20 uzavřených Issues; 18 budoucích podúkolů bylo archivováno pro tuto etapu, nikoliv označeno za hotové. Průběžně udržovat stavový dokument a po přejímce PR #81 synchronizovat board.
