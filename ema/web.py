@@ -11,7 +11,7 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 import click
 from flask import Flask, abort, flash, g, redirect, render_template, request, session, url_for
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select, text, or_
 from sqlalchemy.exc import IntegrityError
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -108,9 +108,37 @@ def mailbox_or_403(box_id, *, send=False, manage=False):
 
 
 def base_context():
-    orgs = g.db.scalars(select(Organization).join(Membership).where(Membership.user_id == g.user.id, Organization.active.is_(True)).order_by(Organization.name)).all() if g.user else []
-    grants = g.db.scalars(select(Project).join(ProjectGrant).join(Organization, Project.organization_id == Organization.id).where(ProjectGrant.user_id == g.user.id, Organization.active.is_(True)).order_by(Project.name)).all() if g.user else []
-    return dict(orgs=orgs, grants=grants, active_org=getattr(g, "org", None), me=g.user)
+    """Build project-first navigation from explicit company memberships or project grants."""
+    orgs = g.db.scalars(
+        select(Organization).join(Membership)
+        .where(Membership.user_id == g.user.id, Organization.active.is_(True))
+        .order_by(Organization.name)
+    ).all() if g.user else []
+    grants = g.db.scalars(
+        select(Project).join(ProjectGrant).join(Organization, Project.organization_id == Organization.id)
+        .where(ProjectGrant.user_id == g.user.id, Organization.active.is_(True))
+        .order_by(Project.name)
+    ).all() if g.user else []
+    org_ids = [org.id for org in orgs]
+    grant_ids = [project.id for project in grants]
+    visible_projects = g.db.scalars(
+        select(Project).join(Organization, Project.organization_id == Organization.id)
+        .where(Organization.active.is_(True),
+               or_(Project.organization_id.in_(org_ids), Project.id.in_(grant_ids)))
+        .order_by(Project.name, Project.id).limit(250)
+    ).all() if g.user else []
+    company_ids = {p.organization_id for p in visible_projects}
+    org_names = {
+        org.id: org.name for org in g.db.scalars(
+            select(Organization).where(Organization.id.in_(company_ids))
+        ).all()
+    } if company_ids else {}
+    return dict(
+        orgs=orgs, grants=grants, accessible_projects=visible_projects,
+        project_org_names=org_names,
+        selected_project=getattr(g, "project", None),
+        active_org=getattr(g, "org", None), me=g.user
+    )
 
 
 def render(section, **kwargs):
@@ -169,7 +197,7 @@ def create_app(test_config=None):
         resp.headers["X-Content-Type-Options"] = "nosniff"
         resp.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         resp.headers["X-Frame-Options"] = "DENY"
-        resp.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; object-src 'none'; frame-ancestors 'none'; form-action 'self'; base-uri 'self'"
+        resp.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://www.freshcrackers.cz; object-src 'none'; frame-ancestors 'none'; form-action 'self'; base-uri 'self'"
         resp.headers["Cache-Control"] = "no-store" if request.path != "/static" else "public, max-age=3600"
         return resp
 
@@ -209,7 +237,29 @@ def create_app(test_config=None):
     @app.route("/")
     @login_required
     def home():
-        return render("home")
+        # Company is an optional filter, never a prerequisite to opening a project.
+        firm_id = request.args.get("firm", type=int)
+        accessible = base_context()["accessible_projects"]
+        projects = [p for p in accessible if p.organization_id == firm_id] if firm_id else accessible
+        return render("home", projects=projects, filter_org_id=firm_id)
+
+    @app.post("/projects")
+    @login_required
+    def create_project():
+        # The project belongs to one company for storage, accounting and access controls.
+        org_id = positive_id("organization_id")
+        if not org_id:
+            abort(400, description="Nejdříve vyberte firmu")
+        try:
+            organization_access(g.db, g.user.id, org_id, write=True)
+        except Forbidden:
+            abort(403)
+        item = Project(organization_id=org_id, name=required("name"),
+                       description=field("description", 1500))
+        g.db.add(item)
+        audit("project.create", item.name, org_id)
+        g.db.commit()
+        return redirect(url_for("project_detail", project_id=item.id))
 
     @app.post("/organizations")
     @login_required
@@ -314,6 +364,12 @@ def create_app(test_config=None):
     @login_required
     def project_detail(project_id):
         project = project_or_403(project_id)
+        g.project = project
+        # Project-only guests do not gain company-wide navigation or access.
+        if g.db.scalar(select(Membership.id).where(
+            Membership.organization_id == project.organization_id,
+            Membership.user_id == g.user.id)):
+            g.org = g.db.get(Organization, project.organization_id)
         rows = g.db.scalars(select(Task).where(Task.project_id == project_id, Task.organization_id == project.organization_id).order_by(Task.id.desc()).limit(80)).all()
         role = g.db.scalar(select(Membership.role).where(Membership.organization_id == project.organization_id, Membership.user_id == g.user.id))
         return render("project", project=project, tasks=rows, can_manage=role in ("owner", "admin"))
@@ -401,6 +457,11 @@ def create_app(test_config=None):
     @login_required
     def project_chat(project_id):
         p = project_or_403(project_id, write=request.method == "POST")
+        g.project = p
+        if g.db.scalar(select(Membership.id).where(
+            Membership.organization_id == p.organization_id,
+            Membership.user_id == g.user.id)):
+            g.org = g.db.get(Organization, p.organization_id)
         if request.method == "POST":
             g.db.add(ChatMessage(organization_id=p.organization_id, project_id=p.id, author_id=g.user.id, body=required("body", 6000)))
             audit("chat.post", f"project:{p.id}", p.organization_id)
