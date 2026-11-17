@@ -265,8 +265,9 @@ def test_global_mail_sync_action_is_available_only_to_mailbox_managers(web_clien
     assert result.headers["Location"].endswith(f"/mail?box={box_id}")
     assert captured == {"mailbox_id": box_id, "limit": 10}
     success = client.get(result.headers["Location"])
-    assert "Připojeno".encode() in success.data
     assert "načteno 3 nových zpráv".encode() in success.data
+    with Session(client.application.extensions["ema_engine"]) as db:
+        assert db.get(Mailbox, box_id).status == "ok"
     # Project guests do not acquire access to company mail by being in a project.
     # Use a fresh client to avoid accidental reliance on the owner session.
     another = web_client.application.test_client()
@@ -442,7 +443,7 @@ def test_mail_folder_view_has_50_refresh_and_folder_scroll_api(web_client, monke
     page = client.get(f"/mail?box={box_id}")
     assert page.status_code == 200
     assert b"ema-mail-scrollpanel" in page.data
-    assert "Aktualizovat 50 zpráv".encode() in page.data
+    assert "Obnovit".encode() in page.data
     assert b"ema-mail-folder-tree" in page.data
     captured = {}
     def fake_page(db, box, key, folder, *, before_uid=None, limit=50):
