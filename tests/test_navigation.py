@@ -252,7 +252,7 @@ def test_global_mail_sync_action_is_available_only_to_mailbox_managers(web_clien
     page = client.get(f"/mail?box={box_id}")
     assert page.status_code == 200
     assert "Načíst 10 e-mailů".encode() in page.data
-    assert "Schránka je uložena".encode() in page.data
+    assert "Schránka čeká na první synchronizaci".encode() in page.data
     captured = {}
     def fake_sync(db, box, key, limit):
         captured.update(mailbox_id=box.id, limit=limit)
@@ -274,3 +274,151 @@ def test_global_mail_sync_action_is_available_only_to_mailbox_managers(web_clien
     assert another.get(f"/mail?box={box_id}").status_code == 403
     assert another.post(f"/mail/{box_id}/sync",
                         data={"csrf_token": csrf(another)}).status_code == 403
+
+
+def test_mailbox_order_visibility_and_personal_read_star_state(web_client):
+    from ema.models import MailboxView, MailUserState
+    client = web_client
+    with Session(client.application.extensions["ema_engine"]) as db:
+        owner = client.application.ids["owner"]
+        org = client.application.ids["org"]
+        b1 = Mailbox(organization_id=org, owner_id=owner, label="First Mail",
+                     address="first@example.cz", username="first@example.cz",
+                     imap_host="imap.example.cz", smtp_host="smtp.example.cz", credential="demo")
+        b2 = Mailbox(organization_id=org, owner_id=owner, label="Second Mail",
+                     address="second@example.cz", username="second@example.cz",
+                     imap_host="imap.example.cz", smtp_host="smtp.example.cz", credential="demo")
+        db.add_all([b1, b2])
+        db.flush()
+        folder = MailFolder(mailbox_id=b1.id, name="INBOX", uidvalidity=22)
+        db.add(folder)
+        db.flush()
+        m1 = MailMessage(mailbox_id=b1.id, folder_id=folder.id, uidvalidity=22,
+                         uid=101, sender="contact@example.cz", subject="Unread mail", flags="")
+        m2 = MailMessage(mailbox_id=b1.id, folder_id=folder.id, uidvalidity=22,
+                         uid=102, sender="contact@example.cz", subject="Already read",
+                         flags=r"\Seen")
+        db.add_all([m1, m2])
+        db.commit()
+        id1, id2, mid1, mid2 = b1.id, b2.id, m1.id, m2.id
+
+    login(client, "owner")
+    page = client.get("/mail")
+    assert page.status_code == 200
+    assert b"Unread mail" in page.data
+    assert b"Already read" in page.data
+    assert b"1</strong> nep" in page.data
+    assert b'ema-mail-message-row is-unread' in page.data
+    assert b'ema-mail-message-row is-read' in page.data
+
+    order = client.post("/mail/order", json={"ids": [id2, id1]},
+                        headers={"X-CSRF-Token": csrf(client)})
+    assert order.status_code == 200
+    html = client.get("/mail").data.decode("utf-8")
+    assert html.index("Second Mail") < html.index("First Mail")
+    with Session(client.application.extensions["ema_engine"]) as db:
+        rows = db.scalars(select(MailboxView).where(MailboxView.user_id == client.application.ids["owner"])).all()
+        assert {v.mailbox_id: v.position for v in rows} == {id2: 1, id1: 2}
+    invalid = client.post("/mail/order", json={"ids": [id1, 66666]},
+                          headers={"X-CSRF-Token": csrf(client)})
+    assert invalid.status_code == 400
+
+    hidden = client.post(f"/mail/{id1}/include", data={"csrf_token": csrf(client)})
+    assert hidden.status_code == 302
+    assert b"Unread mail" not in client.get("/mail").data
+    assert b"Unread mail" in client.get(f"/mail?box={id1}").data
+    client.post(f"/mail/{id1}/include", data={"csrf_token": csrf(client)})
+    assert b"Unread mail" in client.get("/mail").data
+
+    client.post(f"/mail/{mid1}/state", data={"csrf_token": csrf(client), "action": "star"})
+    client.post(f"/mail/{mid1}/state", data={"csrf_token": csrf(client), "action": "read"})
+    page = client.get(f"/mail?box={id1}")
+    assert "★".encode() in page.data
+    assert b"0</strong> nep" in page.data
+    client.post(f"/mail/{mid2}/state", data={"csrf_token": csrf(client), "action": "unread"})
+    assert b"1</strong> nep" in client.get("/mail").data
+    with Session(client.application.extensions["ema_engine"]) as db:
+        row = db.scalar(select(MailUserState).where(
+            MailUserState.mail_id == mid1, MailUserState.user_id == client.application.ids["owner"]))
+        assert row.read_override is True and row.starred is True
+
+    guest = web_client.application.test_client()
+    login(guest, "guest")
+    assert guest.post(f"/mail/{id1}/include", data={"csrf_token": csrf(guest)}).status_code == 403
+    assert guest.post(f"/mail/{mid1}/state",
+                      data={"csrf_token": csrf(guest), "action": "star"}).status_code == 403
+
+
+def test_mailbox_edit_preserves_secret_without_password_and_changes_smtp(web_client, monkeypatch):
+    client = web_client
+    with Session(client.application.extensions["ema_engine"]) as db:
+        b = Mailbox(organization_id=client.application.ids["org"],
+                    owner_id=client.application.ids["owner"],
+                    label="Edit me", address="edit@example.cz", username="edit@example.cz",
+                    smtp_username="edit@example.cz", imap_host="imap.example.cz",
+                    smtp_host="smtp.example.cz", smtp_port=465,
+                    credential="encrypted-original")
+        db.add(b)
+        db.commit()
+        box_id = b.id
+
+    login(client, "owner")
+    get_result = client.get(f"/org/{client.application.ids['org']}/mail/{box_id}/edit")
+    assert get_result.status_code == 200
+    assert "Nechat prázdné".encode() in get_result.data
+    monkeypatch.setattr("ema.web.validate_mail_host", lambda host: host)
+    result = client.post(f"/org/{client.application.ids['org']}/mail/{box_id}/edit", data={
+        "csrf_token": csrf(client), "label": "Renamed",
+        "address": "edit@example.cz", "username": "edit@example.cz",
+        "smtp_username": "different@example.cz", "imap_host": "imap.example.cz",
+        "smtp_host": "smtp2.example.cz", "smtp_port": "587", "password": "",
+    })
+    assert result.status_code == 302
+    with Session(client.application.extensions["ema_engine"]) as db:
+        b = db.get(Mailbox, box_id)
+        assert b.label == "Renamed" and b.smtp_port == 587
+        assert b.smtp_username == "different@example.cz"
+        assert b.credential == "encrypted-original"
+    guest = web_client.application.test_client()
+    login(guest, "guest")
+    assert guest.get(f"/org/{client.application.ids['org']}/mail/{box_id}/edit").status_code == 403
+
+
+def test_mail_detail_renders_capped_sanitized_html_and_image_opt_in(web_client, monkeypatch):
+    from ema.mail_render import MailPreview
+    client = web_client
+    with Session(client.application.extensions["ema_engine"]) as db:
+        b = Mailbox(organization_id=client.application.ids["org"],
+                    owner_id=client.application.ids["owner"],
+                    label="HTML Mail", address="html@example.cz", username="html@example.cz",
+                    imap_host="imap.example.cz", smtp_host="smtp.example.cz",
+                    credential="encrypted-original")
+        db.add(b)
+        db.flush()
+        folder = MailFolder(mailbox_id=b.id, name="INBOX", uidvalidity=90)
+        db.add(folder)
+        db.flush()
+        mail = MailMessage(mailbox_id=b.id, folder_id=folder.id, uidvalidity=90,
+                           uid=10, sender="sender@example.cz", subject="HTML content", flags="")
+        db.add(mail)
+        db.commit()
+        id_box, id_mail = b.id, mail.id
+
+    seen = []
+    def fake_preview(box, msg, key, *, show_images=False):
+        seen.append(show_images)
+        return MailPreview("<p>Read-only HTML</p>", "Plain", True, True, False)
+    monkeypatch.setattr("ema.web.preview_message", fake_preview)
+    login(client, "owner")
+    url = f"/org/{client.application.ids['org']}/mail/message/{id_mail}"
+    base = client.get(url)
+    assert base.status_code == 200
+    assert b"srcdoc=" in base.data
+    assert "Načíst obrázky".encode() in base.data
+    assert client.get(url + "?images=1").status_code == 200
+    assert seen == [False, True]
+    with Session(client.application.extensions["ema_engine"]) as db:
+        from ema.models import MailUserState
+        stored = db.scalar(select(MailUserState).where(MailUserState.mail_id == id_mail))
+        assert stored.read_override is True
+    assert "img-src".encode() in client.get(url + "?images=1").headers["Content-Security-Policy"].encode()

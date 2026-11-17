@@ -12,7 +12,7 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 import click
 from flask import Flask, abort, flash, g, redirect, render_template, request, session, url_for
-from sqlalchemy import func, select, text, or_
+from sqlalchemy import func, select, text, or_, and_, case
 from sqlalchemy.exc import IntegrityError
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -21,7 +21,7 @@ from .assistant_service import AssistantError, run_assistant
 from .contact_import import ImportErrorCSV, extract_contacts
 from .schema_upgrade import upgrade_schema
 from .models import (
-    Audit, AssistantTurn, Base, ChatMessage, Company, Contact, MailFolder, Mailbox, MailboxGrant, MailMessage,
+    Audit, AssistantTurn, Base, ChatMessage, Company, Contact, MailFolder, Mailbox, MailboxGrant, MailboxView, MailMessage, MailUserState,
     Membership, Opportunity, Organization, Outbound, Project, ProjectGrant,
     Task, User, make_session, now,
 )
@@ -202,6 +202,50 @@ def visible_mailboxes(db, uid, orgs):
     return out
 
 
+def is_imap_read(message):
+    return r"\seen" in (message.flags or "").lower()
+
+
+def user_mail_preferences(db, uid, boxes):
+    ids = [b.id for b in boxes]
+    if not ids:
+        return {}
+    return {row.mailbox_id: row for row in db.scalars(
+        select(MailboxView).where(MailboxView.user_id == uid, MailboxView.mailbox_id.in_(ids))
+    ).all()}
+
+
+def mailbox_counts(db, uid, boxes):
+    """Only locally indexed valid headers; not all remote IMAP messages."""
+    ids = [b.id for b in boxes]
+    if not ids:
+        return {}
+    read_value = case(
+        (MailUserState.read_override.is_not(None), MailUserState.read_override),
+        else_=func.instr(func.lower(MailMessage.flags), r"\seen") > 0,
+    )
+    rows = db.execute(
+        select(MailMessage.mailbox_id, func.count(MailMessage.id),
+               func.sum(case((read_value, 0), else_=1)))
+        .join(MailFolder, MailFolder.id == MailMessage.folder_id)
+        .outerjoin(MailUserState, and_(
+            MailUserState.mail_id == MailMessage.id, MailUserState.user_id == uid))
+        .where(MailMessage.mailbox_id.in_(ids),
+               MailMessage.uidvalidity == MailFolder.uidvalidity)
+        .group_by(MailMessage.mailbox_id)
+    ).all()
+    return {box_id: (int(unread or 0), int(total or 0)) for box_id, total, unread in rows}
+
+
+def get_mail_user_state(db, uid, mail_id):
+    row = db.scalar(select(MailUserState).where(
+        MailUserState.user_id == uid, MailUserState.mail_id == mail_id))
+    if row is None:
+        row = MailUserState(user_id=uid, mail_id=mail_id)
+        db.add(row)
+    return row
+
+
 def create_app(test_config=None):
     app = Flask(__name__, template_folder="../templates", static_folder="../static")
     config = {
@@ -255,7 +299,18 @@ def create_app(test_config=None):
         resp.headers["X-Content-Type-Options"] = "nosniff"
         resp.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         resp.headers["X-Frame-Options"] = "DENY"
-        resp.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://www.freshcrackers.cz; object-src 'none'; frame-ancestors 'none'; form-action 'self'; base-uri 'self'"
+        # Remote email images are only possible in the isolated HTML preview
+        # after explicit click, never in the default mail display.
+        images = ("'self' data: https:" if request.endpoint == "mail_detail"
+                  and request.args.get("images") == "1" else
+                  "'self' data: https://www.freshcrackers.cz")
+        resp.headers["Content-Security-Policy"] = (
+            "default-src 'self'; script-src 'self'; "
+            "style-src 'self' https://fonts.googleapis.com; "
+            "font-src 'self' https://fonts.gstatic.com; "
+            "img-src " + images + "; frame-src 'self' about:; "
+            "object-src 'none'; frame-ancestors 'none'; form-action 'self'; base-uri 'self'"
+        )
         resp.headers["Cache-Control"] = "no-store" if request.path != "/static" else "public, max-age=3600"
         return resp
 
@@ -353,21 +408,41 @@ def create_app(test_config=None):
     def mail_hub():
         ctx, orgs, projects = current_scope()
         boxes = visible_mailboxes(g.db, g.user.id, orgs)
+        prefs = user_mail_preferences(g.db, g.user.id, boxes)
+        boxes.sort(key=lambda b: (
+            not bool(prefs.get(b.id) and prefs[b.id].position > 0),
+            prefs[b.id].position if b.id in prefs else 0, b.label.lower(), b.id,
+        ))
         ids = [box.id for box in boxes]
-        box_id = request.args.get("box", type=int)
-        if box_id is not None and box_id not in ids:
+        raw_box = request.args.get("box")
+        if raw_box is not None and (not raw_box.isdigit() or int(raw_box) not in ids):
             abort(403)
+        box_id = int(raw_box) if raw_box else None
         selected = next((box for box in boxes if box.id == box_id), None)
-        target = [selected.id] if selected else ids
+        included = [b.id for b in boxes if b.id not in prefs or prefs[b.id].included]
+        target = [selected.id] if selected else included
         if target:
             messages = g.db.scalars(
                 select(MailMessage).join(MailFolder, MailMessage.folder_id == MailFolder.id)
                 .where(MailMessage.mailbox_id.in_(target),
                        MailMessage.uidvalidity == MailFolder.uidvalidity)
-                .order_by(MailMessage.id.desc()).limit(120)
+                .order_by(MailMessage.sent_at.is_(None), MailMessage.sent_at.desc(),
+                          MailMessage.id.desc()).limit(120)
             ).all()
         else:
             messages = []
+        states = {}
+        if messages:
+            states = {row.mail_id: row for row in g.db.scalars(
+                select(MailUserState).where(MailUserState.user_id == g.user.id,
+                    MailUserState.mail_id.in_([m.id for m in messages]))
+            ).all()}
+        mail_state = {
+            m.id: {"read": states[m.id].read_override if m.id in states and
+                   states[m.id].read_override is not None else is_imap_read(m),
+                   "starred": bool(states[m.id].starred) if m.id in states else False}
+            for m in messages
+        }
         syncable_ids = set()
         for box in boxes:
             try:
@@ -375,8 +450,76 @@ def create_app(test_config=None):
                 syncable_ids.add(box.id)
             except Forbidden:
                 continue
-        return render_hub("mail", boxes=boxes, mail_rows=messages, selected_box=selected,
-                          box_lookup={box.id: box for box in boxes}, syncable_ids=syncable_ids)
+        return render_hub(
+            "mail", boxes=boxes, mail_rows=messages, selected_box=selected,
+            box_lookup={box.id: box for box in boxes}, syncable_ids=syncable_ids,
+            view_prefs=prefs, indexed_counts=mailbox_counts(g.db, g.user.id, boxes),
+            mail_state=mail_state, combined_count=len(included),
+        )
+
+    @app.post("/mail/order")
+    @login_required
+    def reorder_mailboxes():
+        ctx, orgs, _ = current_scope()
+        boxes = visible_mailboxes(g.db, g.user.id, orgs)
+        allowed = {box.id for box in boxes}
+        values = request.get_json(silent=True)
+        order = values.get("ids") if isinstance(values, dict) else None
+        if not isinstance(order, list) or len(order) != len(allowed) or any(
+            not isinstance(v, int) or isinstance(v, bool) for v in order
+        ) or set(order) != allowed:
+            abort(400, description="Neplatné pořadí schránek")
+        prefs = user_mail_preferences(g.db, g.user.id, boxes)
+        for pos, box_id in enumerate(order, 1):
+            item = prefs.get(box_id)
+            if item is None:
+                item = MailboxView(user_id=g.user.id, mailbox_id=box_id)
+                g.db.add(item)
+            item.position = pos
+        g.db.commit()
+        return {"ok": True}
+
+    @app.post("/mail/<int:box_id>/include")
+    @login_required
+    def toggle_mailbox_inclusion(box_id):
+        box = mailbox_or_403(box_id)
+        try:
+            organization_access(g.db, g.user.id, box.organization_id)
+        except Forbidden:
+            abort(403)
+        item = g.db.scalar(select(MailboxView).where(
+            MailboxView.user_id == g.user.id, MailboxView.mailbox_id == box_id))
+        if item is None:
+            item = MailboxView(user_id=g.user.id, mailbox_id=box_id, included=False)
+            g.db.add(item)
+        else:
+            item.included = not item.included
+        g.db.commit()
+        return redirect(url_for("mail_hub"))
+
+    @app.post("/mail/<int:mail_id>/state")
+    @login_required
+    def set_mail_state(mail_id):
+        msg = g.db.get(MailMessage, mail_id)
+        if msg is None:
+            abort(404)
+        box = mailbox_or_403(msg.mailbox_id)
+        try:
+            organization_access(g.db, g.user.id, box.organization_id)
+        except Forbidden:
+            abort(403)
+        action = field("action", 20)
+        if action not in ("read", "unread", "star", "unstar"):
+            abort(400)
+        state = get_mail_user_state(g.db, g.user.id, mail_id)
+        if action in ("read", "unread"):
+            state.read_override = action == "read"
+        else:
+            state.starred = action == "star"
+        g.db.commit()
+        if field("return_to", 20) == "detail" and action != "unread":
+            return redirect(url_for("mail_detail", org_id=box.organization_id, message_id=mail_id))
+        return redirect(url_for("mail_hub", box=box.id) if field("box", 20) else url_for("mail_hub"))
 
     @app.post("/mail/<int:box_id>/sync")
     @login_required
@@ -539,7 +682,14 @@ def create_app(test_config=None):
     @login_required
     def account_hub():
         ctx, orgs, projects = current_scope()
-        return render_hub("account", eligible_orgs=ctx["orgs"], all_projects=ctx["accessible_projects"])
+        boxes = visible_mailboxes(g.db, g.user.id, ctx["orgs"])
+        admin_org_ids = set(g.db.scalars(select(Membership.organization_id).where(
+            Membership.user_id == g.user.id, Membership.role.in_(("owner", "admin"))
+        )).all())
+        return render_hub("account", eligible_orgs=ctx["orgs"],
+                          all_projects=ctx["accessible_projects"],
+                          account_mailboxes=sorted(boxes, key=lambda b: b.address.lower()),
+                          editable_mailbox_ids={b.id for b in boxes if b.organization_id in admin_org_ids})
 
     @app.post("/assistant")
     @login_required
@@ -901,14 +1051,24 @@ def create_app(test_config=None):
         box = mailbox_or_403(msg.mailbox_id)
         if box.organization_id != org_id:
             abort(403)
+        # Personal read state is local to Ema; IMAP is opened read-only.
+        state = get_mail_user_state(g.db, g.user.id, msg.id)
+        if state.read_override is not True:
+            state.read_override = True
+            g.db.commit()
+        show_images = request.args.get("images") == "1"
         try:
-            preview = preview_message(box, msg, app.config["MAIL_ENCRYPTION_KEY"])
-            warning = "Ukázka je limitovaná na 32 KiB; přílohy se neukládají. HTML/MIME může vyžadovat pozdější parser."
+            preview = preview_message(box, msg, app.config["MAIL_ENCRYPTION_KEY"],
+                                      show_images=show_images)
+            warning = ("HTML a prostý text jsou čtené přímo z IMAP, maximálně 192 KiB."
+                       " Přílohy a obsah zprávy se neukládají do databáze.")
         except MailError as ex:
-            preview, warning = "", str(ex)
+            preview, warning = None, str(ex)
         companies = g.db.scalars(select(Company).where(Company.organization_id == org_id)).all()
         projs = g.db.scalars(select(Project).where(Project.organization_id == org_id)).all()
-        return render("mail-detail", message=msg, selected_box=box, preview=preview, warning=warning, companies=companies, projects=projs)
+        return render("mail-detail", message=msg, selected_box=box, preview=preview,
+                      warning=warning, show_images=show_images, starred=state.starred,
+                      companies=companies, projects=projs)
 
     @app.post("/org/<int:org_id>/mail/message/<int:message_id>/link")
     @org_required
@@ -968,6 +1128,54 @@ def create_app(test_config=None):
         members = g.db.execute(select(Membership, User).join(User, Membership.user_id == User.id).where(Membership.organization_id == org_id)).all() if is_admin else []
         boxes = g.db.scalars(select(Mailbox).where(Mailbox.organization_id == org_id)).all() if is_admin else []
         return render("settings", membership=m, is_admin=is_admin, members=members, boxes=boxes)
+
+    @app.route("/org/<int:org_id>/mail/<int:box_id>/edit", methods=["GET", "POST"])
+    @org_admin
+    def edit_mailbox(org_id, box_id):
+        box = mailbox_or_403(box_id, manage=True)
+        if box.organization_id != org_id:
+            abort(403)
+        if request.method == "GET":
+            return render("mailbox-edit", box=box)
+        password = request.form.get("password", "")
+        if len(password) > 512:
+            abort(400, description="Příliš dlouhé heslo")
+        address = required("address")
+        username = required("username")
+        imap_host, smtp_host = required("imap_host"), required("smtp_host")
+        try:
+            validate_mail_host(imap_host)
+            validate_mail_host(smtp_host)
+            encrypted = encrypt_password(password, app.config["MAIL_ENCRYPTION_KEY"]) if password else None
+        except (MailError, ValueError) as ex:
+            flash(str(ex), "error")
+            return redirect(url_for("edit_mailbox", org_id=org_id, box_id=box_id))
+        smtp_port = positive_id("smtp_port") or 465
+        if smtp_port not in (465, 587):
+            abort(400, description="SMTP pouze 465 nebo 587")
+        changed_identity = (address.lower() != box.address.lower() or
+                            username != box.username or imap_host != box.imap_host)
+        if changed_identity and g.db.scalar(select(MailMessage.id).where(
+            MailMessage.mailbox_id == box.id).limit(1)):
+            flash("Schránka již obsahuje indexované zprávy. Kvůli ochraně jejich vazeb nelze měnit adresu, IMAP server ani IMAP login. Lze změnit SMTP a heslo.", "error")
+            return redirect(url_for("edit_mailbox", org_id=org_id, box_id=box_id))
+        box.label = required("label", 120)
+        box.address = address
+        box.username = username
+        box.smtp_username = field("smtp_username") or username
+        box.imap_host = imap_host
+        box.smtp_host = smtp_host
+        box.smtp_port = smtp_port
+        if encrypted is not None:
+            box.credential = encrypted
+        if changed_identity or encrypted is not None:
+            box.status, box.sync_error = "not_synced", ""
+            box.last_sync = None
+            box.server_message_count = None
+        audit("mailbox.update", str(box.id), org_id)
+        g.db.commit()
+        flash("Nastavení schránky uloženo. Heslo bylo změněno jen při jeho zadání.", "success")
+        return redirect(url_for("settings", org_id=org_id))
 
     @app.post("/org/<int:org_id>/members")
     @org_admin

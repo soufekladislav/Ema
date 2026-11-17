@@ -1,6 +1,6 @@
 """Idempotent, additive schema upgrade for Ema pilot. Backup DB before running."""
 from sqlalchemy import inspect, text
-from .models import AssistantTurn, Base
+from .models import AssistantTurn, MailboxView, MailUserState, Base
 
 
 def upgrade_schema(engine):
@@ -9,7 +9,7 @@ def upgrade_schema(engine):
     if not inspector.has_table("users"):
         raise RuntimeError("Database is not initialized; run init-db first.")
     # New tables are created separately, never drop or rebuild existing tables.
-    Base.metadata.create_all(engine, tables=[AssistantTurn.__table__], checkfirst=True)
+    Base.metadata.create_all(engine, tables=[AssistantTurn.__table__, MailboxView.__table__, MailUserState.__table__], checkfirst=True)
     inspector = inspect(engine)
     if not inspector.has_table("mailboxes"):
         raise RuntimeError("The mailboxes table is missing.")
@@ -24,6 +24,9 @@ def upgrade_schema(engine):
             conn.execute(text("ALTER TABLE mailboxes ADD COLUMN signature_html TEXT"))
             conn.execute(text("UPDATE mailboxes SET signature_html = '' WHERE signature_html IS NULL"))
             applied.append("mailboxes.signature_html")
+        if "server_message_count" not in existing:
+            conn.execute(text("ALTER TABLE mailboxes ADD COLUMN server_message_count INTEGER NULL"))
+            applied.append("mailboxes.server_message_count")
     inspector = inspect(engine)
     if inspector.has_table("contacts"):
         contact_columns = {col["name"] for col in inspector.get_columns("contacts")}

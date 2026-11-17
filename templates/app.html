@@ -154,14 +154,67 @@
 <div class="mail-layout"><div class="card panel mailbox-list"><h3>Schránky</h3>{% for b in boxes %}<a class="mailbox-option {{ 'selected' if selected_box and b.id==selected_box.id else '' }}" href="{{ url_for('mail', org_id=active_org.id, box=b.id) }}"><strong>{{ b.label }}</strong><small>{{ b.address }}</small><span class="status">{{ b.status }}</span></a>{% else %}<p class="muted">Připojte schránku v nastavení.</p>{% endfor %}</div><div class="card panel mail-main">{% if selected_box %}<div class="inline-form spread"><div><h3>{{ selected_box.label }}</h3><p class="small muted">Poslední sync: {{ selected_box.last_sync or 'Nikdy' }}</p></div><form method="post" action="{{ url_for('sync_mail', org_id=active_org.id, box_id=selected_box.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn small-btn" type="submit">Načíst 10 hlaviček</button></form></div><div class="message-list">{% for m in mail_rows %}<a class="message-row" href="{{ url_for('mail_detail', org_id=active_org.id, message_id=m.id) }}"><strong>{{ m.subject or '(bez předmětu)' }}</strong><span>{{ m.sender }}</span><small>{{ m.sent_at or '—' }} · {{ m.size_bytes }} B</small></a>{% else %}<p class="muted">Schránka zatím nemá synchronizované hlavičky.</p>{% endfor %}</div>{% endif %}</div></div>
 {% if selected_box %}<div class="card panel"><h3>Nový e-mail</h3><p class="small muted">Odeslání proběhne výhradně po potvrzení tlačítkem. Pokud není potvrzené, nesmí se automaticky opakovat.</p><form class="formstack" method="post" action="{{ url_for('mail_send', org_id=active_org.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="box_id" value="{{ selected_box.id }}"><input type="hidden" name="nonce" value="{{ new_nonce() }}"><label>Komu<input name="to" type="email" required></label><label>Předmět<input name="subject" maxlength="500" required></label><label>Text zprávy<textarea name="body" rows="5" maxlength="100000" required></textarea></label><button class="btn primary">Odeslat přes SMTP</button></form></div>{% endif %}
 {% elif section == 'mail-detail' %}
-<div class="page-head"><div><span class="eyebrow">E-mail #{{ message.id }}</span><h1>{{ message.subject or '(bez předmětu)' }}</h1><p>Od: {{ message.sender }}<br>Komu: {{ message.recipients }}<br>Datum: {{ message.sent_at or '—' }}</p></div><a href="{{ url_for('mail', org_id=active_org.id, box=selected_box.id) }}" class="btn">Zpět</a></div>
-<div class="card panel"><h3>Náhled těla zprávy – jen na vyžádání</h3><div class="notice">{{ warning }}</div><pre class="mail-preview">{{ preview }}</pre></div>
-<div class="card panel"><h3>Vazba na klienta / projekt</h3><form class="inline-form" method="post" action="{{ url_for('link_mail', org_id=active_org.id, message_id=message.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><select name="company_id"><option value="">Nepřiřazeno klientovi</option>{% for c in companies %}<option value="{{ c.id }}" {{ 'selected' if message.company_id==c.id else '' }}>{{ c.name }}</option>{% endfor %}</select><select name="project_id"><option value="">Nepřiřazeno projektu</option>{% for p in projects %}<option value="{{ p.id }}" {{ 'selected' if message.project_id==p.id else '' }}>{{ p.name }}</option>{% endfor %}</select><button class="btn primary">Uložit vazbu</button></form><p class="small muted">Projektový host tím nezískává přístup do zdrojové e-mailové schránky.</p></div>
+<div class="page-head"><div><span class="eyebrow">E-mail #{{ message.id }}</span><h1>{{ message.subject or '(bez předmětu)' }}</h1>
+<p>Od: {{ message.sender }}<br>Komu: {{ message.recipients }}<br>Datum: {{ message.sent_at.strftime('%d.%m.%Y %H:%M') if message.sent_at else '—' }}</p></div>
+<a href="{{ url_for('mail_hub', box=selected_box.id) }}" class="btn">Zpět do schránky</a></div>
+<div class="card panel ema-message-content">
+  <div class="ema-card-head">
+    <h3>Obsah zprávy</h3>
+    <form method="post" action="{{ url_for('set_mail_state', mail_id=message.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="action" value="{{ 'unstar' if starred else 'star' }}">
+      <input type="hidden" name="return_to" value="detail">
+      <button class="btn" type="submit">{{ '★ Odebrat hvězdičku' if starred else '☆ Označit příznakem' }}</button>
+    </form>
+  </div>
+  <div class="notice">{{ warning }}</div>
+  {% if preview %}
+    {% if preview.truncated %}<p class="small muted">Zpráva je větší než limit náhledu. Obsah může být zkrácený; celá zpráva zůstává na poštovním serveru.</p>{% endif %}
+    {% if preview.is_html %}
+      {% if not show_images %}
+        <div class="ema-mail-image-warning">
+          <span>Externí obrázky jsou ve výchozím stavu zablokované kvůli soukromí.</span>
+          <a class="btn" href="{{ url_for('mail_detail', org_id=active_org.id, message_id=message.id, images=1) }}">Načíst obrázky</a>
+        </div>
+      {% else %}
+        <div class="ema-mail-image-warning"><span>Obrázky povoleny pouze pro toto zobrazení. Vzdálený odesílatel může zjistit otevření zprávy.</span><a class="btn" href="{{ url_for('mail_detail', org_id=active_org.id, message_id=message.id) }}">Skrýt obrázky</a></div>
+      {% endif %}
+      <iframe class="ema-mail-html-frame" sandbox="allow-popups" referrerpolicy="no-referrer" title="Bezpečný HTML náhled e-mailu" srcdoc="{{ preview.srcdoc }}"></iframe>
+    {% else %}
+      <div class="ema-mail-plain-text">{{ preview.plain }}</div>
+    {% endif %}
+  {% endif %}
+</div>
+<div class="card panel"><h3>Vazba na klienta / projekt</h3>
+<form class="inline-form" method="post" action="{{ url_for('link_mail', org_id=active_org.id, message_id=message.id) }}">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<select name="company_id"><option value="">Nepřiřazeno klientovi</option>{% for c in companies %}<option value="{{ c.id }}" {{ 'selected' if message.company_id==c.id else '' }}>{{ c.name }}</option>{% endfor %}</select>
+<select name="project_id"><option value="">Nepřiřazeno projektu</option>{% for p in projects %}<option value="{{ p.id }}" {{ 'selected' if message.project_id==p.id else '' }}>{{ p.name }}</option>{% endfor %}</select>
+<button class="btn primary">Uložit vazbu</button></form>
+<p class="small muted">Vazba na projekt neuděluje přístup k samotné poštovní schránce.</p></div>
+{% elif section == 'mailbox-edit' %}
+<div class="page-head"><div><span class="eyebrow">NASTAVENÍ SCHRÁNKY</span><h1>Upravit {{ box.label }}</h1><p>{{ box.address }} · {{ active_org.name }}</p></div><a class="btn" href="{{ url_for('settings', org_id=active_org.id) }}">Zpět</a></div>
+<div class="card panel ema-mailbox-edit-card">
+  <p class="small muted">Změna hesla je nepovinná. Pokud jej necháš prázdné, původní šifrované heslo zůstane zachované. Nastavení SMTP lze změnit bez zásahu do již načtených zpráv.</p>
+  <form method="post" class="formstack" action="{{ url_for('edit_mailbox', org_id=active_org.id, box_id=box.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>Označení schránky<input name="label" maxlength="120" required value="{{ box.label }}"></label>
+    <label>E-mailová adresa<input name="address" type="email" required value="{{ box.address }}"></label>
+    <label>Login IMAP<input name="username" required value="{{ box.username }}"></label>
+    <label>Login SMTP<input name="smtp_username" value="{{ box.smtp_username or '' }}" placeholder="Pokud se liší od IMAP"></label>
+    <label>Server IMAP (TLS 993)<input name="imap_host" required value="{{ box.imap_host }}"></label>
+    <label>Server SMTP<input name="smtp_host" required value="{{ box.smtp_host }}"></label>
+    <label>Port SMTP<select name="smtp_port"><option value="465" {{ 'selected' if box.smtp_port == 465 else '' }}>465 – SSL</option><option value="587" {{ 'selected' if box.smtp_port == 587 else '' }}>587 – STARTTLS</option></select></label>
+    <label>Nové heslo / aplikační heslo (nepovinné)<input type="password" name="password" autocomplete="new-password" maxlength="512" placeholder="Nechat prázdné = zachovat heslo"></label>
+    <button class="btn primary" type="submit">Uložit změny</button>
+  </form>
+  <p class="small muted">Po importu zpráv nelze měnit identitu schránky (adresu, IMAP server a login), aby nedošlo ke smíchání údajů ze dvou různých schránek. Změnu poskytovatele vyřešíme samostatnou migrací.</p>
+</div>
 {% elif section == 'settings' %}
 <div class="page-head"><div><span class="eyebrow">Organizace</span><h1>Nastavení firmy</h1><p>Přístupy k firmě, projektům a schránkám jsou oddělené.</p></div></div>
 {% if is_admin %}<div class="grid two-col"><div class="card panel"><h3>Přidat existujícího uživatele k firmě</h3><form class="formstack" method="post" action="{{ url_for('add_member', org_id=active_org.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label>E-mail<input type="email" name="email" required></label><label>Role<select name="role"><option value="member">Člen firmy</option><option value="admin">Administrátor firmy</option></select></label><button class="btn">Přidat / změnit</button></form><h4>Aktuální členové</h4>{% for membership, user in members %}<div class="list-row">{{ user.email }} <span class="status">{{ membership.role }}</span></div>{% endfor %}</div>
 <div class="card panel"><h3>Připojit poštovní schránku</h3><p class="small muted">Heslo/token se ukládá výhradně šifrovaně (Fernet). Poštovní server musí mít platný TLS certifikát.</p><form class="formstack" method="post" action="{{ url_for('add_mailbox', org_id=active_org.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label>Označení schránky<input name="label" required maxlength="120" placeholder="Obchod / info@..."></label><label>E-mail<input type="email" name="address" required></label><label>Login IMAP<input name="username" required></label><label>Login SMTP (pokud se liší)<input name="smtp_username" placeholder="Jinak použijeme IMAP login"></label><label>IMAP server (TLS 993)<input name="imap_host" required placeholder="imap.example.cz"></label><label>SMTP server<input name="smtp_host" required placeholder="smtp.example.cz"></label><label>SMTP port<select name="smtp_port"><option value="465">465 – SSL</option><option value="587">587 – STARTTLS</option></select></label><label>Heslo / aplikační heslo<input name="password" type="password" required autocomplete="new-password"></label><button class="btn primary">Uložit schránku</button></form></div></div>
-<div class="card panel"><h3>Připojené schránky</h3>{% for b in boxes %}<div class="list-row"><span><strong>{{ b.label }}</strong> · {{ b.address }}</span><span class="status">{{ b.status }}</span></div>{% else %}<p class="muted">Zatím žádné schránky</p>{% endfor %}</div>{% else %}<div class="card panel">Nemáte oprávnění měnit firemní účty a schránky.</div>{% endif %}
+<div class="card panel"><h3>Připojené schránky</h3>{% for b in boxes %}<div class="list-row"><span><strong>{{ b.label }}</strong> · {{ b.address }}</span><div class="ema-card-actions"><span class="status">{{ b.status }}</span><a class="btn" href="{{ url_for('edit_mailbox', org_id=active_org.id, box_id=b.id) }}">Upravit</a><a class="btn" href="{{ url_for('mail_hub', box=b.id) }}">Otevřít</a></div></div>{% else %}<p class="muted">Zatím žádné schránky</p>{% endfor %}</div>{% else %}<div class="card panel">Nemáte oprávnění měnit firemní účty a schránky.</div>{% endif %}
 {% elif section == 'superadmin' %}
 <div class="page-head"><div><span class="eyebrow">Platforma</span><h1>Superadmin konzole</h1><p>Provoz, účty, pracovní prostory a základní diagnostika — bez čtení klientské pošty.</p></div></div>
 <div class="grid metrics"><div class="card metric"><span>Účty</span><strong>{{ users|length }}</strong></div><div class="card metric"><span>Firmy</span><strong>{{ all_orgs|length }}</strong></div><div class="card metric"><span>Schránky</span><strong>{{ total_mailboxes }}</strong></div><div class="card metric"><span>Indexované e-maily</span><strong>{{ total_messages }}</strong></div></div>
