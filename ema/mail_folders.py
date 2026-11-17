@@ -126,6 +126,7 @@ def fetch_folder_page(db, box, key, folder, *, before_uid=None, limit=PAGE_SIZE)
     if before_uid is not None and (not isinstance(before_uid, int) or before_uid <= 0):
         raise MailError("Neplatná stránkovací pozice")
     client = _connect(box, key)
+    stage = "LIST"
     try:
         # On first visit to a mailbox enumerate real server folders, once.
         if not db.scalar(select(MailFolder.id).where(
@@ -135,12 +136,14 @@ def fetch_folder_page(db, box, key, folder, *, before_uid=None, limit=PAGE_SIZE)
             except MailError:
                 # Do not prevent INBOX reading on a server with broken LIST.
                 pass
+        stage = "SELECT"
         validity, total = _select(client, folder)
         if folder.name == "INBOX":
             box.server_message_count = total
         if folder.uidvalidity != validity:
             folder.uidvalidity = validity
             folder.last_uid = 0
+        stage = "SEARCH"
         typ, data = client.uid("SEARCH", None, "UNDELETED")
         if typ != "OK" or not data:
             raise MailError("IMAP server odmítl vyhledání UID")
@@ -151,6 +154,7 @@ def fetch_folder_page(db, box, key, folder, *, before_uid=None, limit=PAGE_SIZE)
         has_more = len(eligible) > len(selected)
         cursor = min(selected) if selected else None
         if selected:
+            stage = "FETCH"
             typ, response = client.uid("FETCH", ",".join(str(uid) for uid in selected), HEADER_REQUEST)
             if typ != "OK":
                 raise MailError("IMAP server odmítl načtení hlaviček")
@@ -192,13 +196,16 @@ def fetch_folder_page(db, box, key, folder, *, before_uid=None, limit=PAGE_SIZE)
                 saved_uids.add(uid)
             # A message can disappear between SEARCH and FETCH; no extra UID fetch.
             folder.last_uid = max(folder.last_uid, max(selected))
+        stage = "DATABASE"
         box.status, box.sync_error, box.last_sync = "ok", "", now()
         db.commit()
         return {"uids": selected, "has_more": has_more, "cursor": cursor,
                 "uidvalidity": validity, "server_total": total}
     except Exception as ex:
         db.rollback()
-        message = str(ex) if isinstance(ex, MailError) else "Načtení zpráv z IMAP složky selhalo"
+        message = (str(ex) if isinstance(ex, MailError) else
+                   f"Načtení IMAP selhalo ve fázi {stage} ({type(ex).__name__}). "
+                   "Ověřte stav serveru a čerstvý diagnostický log.")
         box.status, box.sync_error = "error", message[:380]
         db.commit()
         raise MailError(message) from None
