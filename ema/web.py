@@ -20,7 +20,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from .mail_service import MailError, encrypt_password, preview_message, send_plain, send_composed, sync_inbox, validate_mail_host
 from .mail_folders import (
     PAGE_SIZE, discover_folders, available_folders, decode_modified_utf7,
-    fetch_folder_page, special_folder, move_message,
+    fetch_folder_page, special_folder, move_message, move_batch,
 )
 from .assistant_service import AssistantError, run_assistant
 from .contact_import import ImportErrorCSV, extract_contacts
@@ -746,20 +746,23 @@ def create_app(test_config=None):
             g.db.commit()
             flash(f"Upraveno {len(messages)} zpráv v Emě.", "success")
         else:
-            done = 0
-            failed = 0
+            groups = {}
             for msg in messages:
-                box = authorized[msg.id]
+                key = (msg.mailbox_id, msg.folder_id, msg.uidvalidity)
+                groups.setdefault(key, []).append(msg)
+            done = failed = 0
+            for (mailbox_id, _, _), batch in groups.items():
+                box = authorized[batch[0].id]
                 try:
-                    target = move_message(g.db, box, app.config["MAIL_ENCRYPTION_KEY"], msg, action)
-                    audit("mail.bulk_move", f"mail={msg.id},target={target.id}", box.organization_id)
+                    target = move_batch(g.db, box, app.config["MAIL_ENCRYPTION_KEY"], batch, action)
+                    audit("mail.bulk_move", f"count={len(batch)},target={target.id}", box.organization_id)
                     g.db.commit()
-                    done += 1
+                    done += len(batch)
                 except MailError:
-                    failed += 1
-                    # The remote result may be uncertain; do not retry automatically.
+                    failed += len(batch)
+                    # The remote outcome can be uncertain; never retry a failed MOVE blindly.
                     continue
-            flash(f"Přesunuto {done} zpráv, {failed} nepřesunuto. Při chybě zkontroluj server.", "success" if not failed else "error")
+            flash(f"Přesunuto {done} zpráv, {failed} nepotvrzeno. Při chybě zkontroluj server.", "success" if not failed else "error")
         return redirect(url_for("mail_hub"))
 
     @app.get("/mail/compose")
