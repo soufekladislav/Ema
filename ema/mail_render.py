@@ -9,7 +9,12 @@ from email.parser import BytesParser
 from urllib.parse import urlsplit
 
 import bleach
-from bleach.css_sanitizer import CSSSanitizer
+# Missing optional CSS parser must not take down the entire mail service.
+# When tinycss2 is absent, HTML still renders safely but inline styles are removed.
+try:
+    from bleach.css_sanitizer import CSSSanitizer
+except ImportError:
+    CSSSanitizer = None
 
 
 MAX_PREVIEW_BYTES = 196608
@@ -29,7 +34,7 @@ EMAIL_CSS = CSSSanitizer(allowed_css_properties={
     "border-color", "border-style", "border-width", "border-collapse", "border-radius",
     "width", "max-width", "min-width", "height", "max-height", "vertical-align",
     "display", "white-space", "word-break", "overflow-wrap",
-})
+}) if CSSSanitizer else None
 
 
 
@@ -101,7 +106,7 @@ def make_preview(data, *, show_images=False, truncated=False):
     if rich:
         def allowed(tag, name, value):
             if name == "style":
-                return len(value) <= 10000
+                return EMAIL_CSS is not None and len(value) <= 10000
             if tag == "a" and name in ("href", "title"):
                 if name == "title":
                     return len(value) <= 300
