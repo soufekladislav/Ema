@@ -8,44 +8,7 @@
   {% elif section == 'mail' %}
     <span class="eyebrow">KOMUNIKACE</span><h1>E-maily</h1>
     <p>Souhrnný inbox všech schránek, ke kterým máš oprávnění. Zprávy zůstávají uložené u svých poštovních účtů a firem.</p>
-  {% elif section == 'compose' %}
-  <div class="ema-compose-screen">
-    <div class="ema-compose-header"><h2>{{ 'Odpovědět' if reply_id else 'Přeposlat zprávu' if source_message else 'Nový e-mail' }}</h2><a class="btn" href="{{ url_for('mail_hub', box=active_box.id) if active_box else url_for('mail_hub') }}">Zavřít</a></div>
-    {% if send_boxes %}
-    <form method="post" action="{{ url_for('mail_compose_send') }}" enctype="multipart/form-data" class="ema-compose-form" autocomplete="off">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <input type="hidden" name="nonce" value="{{ csrf_nonce }}">
-      {% if reply_id %}<input type="hidden" name="reply_id" value="{{ reply_id }}">{% endif %}
-      <label class="ema-compose-line">Od
-        <select id="ema-from-box" name="box_id" required data-suggest-url="{{ url_for('mail_contact_suggest') }}">
-          {% for b in send_boxes %}<option value="{{ b.id }}" {{ 'selected' if active_box and active_box.id == b.id else '' }}>{{ b.label }} · {{ b.address }}</option>{% endfor %}
-        </select>
-      </label>
-      <label class="ema-compose-line">Komu
-        <input name="to" id="ema-compose-to" type="text" maxlength="1500" required value="{{ recipient }}" placeholder="Příjemce@example.cz" list="ema-contact-datalist" spellcheck="false">
-      </label>
-      <datalist id="ema-contact-datalist"></datalist>
-      <details class="ema-compose-extra"><summary>Kopie / Skrytá kopie</summary>
-        <label class="ema-compose-line">Kopie<input name="cc" type="text" maxlength="1500" list="ema-contact-datalist"></label>
-        <label class="ema-compose-line">Skrytá kopie<input name="bcc" type="text" maxlength="1500" list="ema-contact-datalist"></label>
-      </details>
-      <label class="ema-compose-line">Předmět<input type="text" name="subject" maxlength="500" required value="{{ subject }}"></label>
-      <label class="ema-compose-body-label">Text zprávy
-        <textarea name="body" rows="16" maxlength="100000" required placeholder="Napiš zprávu…">{{ draft_content }}</textarea>
-      </label>
-      <label class="ema-compose-attachments">📎 Přílohy (nejvýše 4 soubory, 6 MB na soubor)
-        <input type="file" name="attachments" multiple>
-      </label>
-      <div class="ema-compose-footer"><span>Odeslání proběhne pouze po potvrzení. Při nejistém výsledku se neopakuje automaticky.</span>
-        <button class="btn primary ema-compose-send" type="submit">Odeslat e-mail</button>
-      </div>
-    </form>
-    {% else %}
-      <div class="notice">Nemáš žádnou schránku s oprávněním odesílat. Nejdříve ji připoj nebo si vyžádej přístup.</div>
-      <a class="btn" href="{{ url_for('account_hub') }}">Nastavení účtu</a>
-    {% endif %}
-  </div>
-{% elif section == 'database' %}
+  {% elif section == 'database' %}
     <span class="eyebrow">KLIENTSKÁ DATA</span><h1>Databáze / CRM</h1>
     <p>Společné vyhledávání a přehled. Každý klient a kontakt zůstává ve své firmě a řídí se jejími oprávněními.</p>
   {% elif section == 'tasks' %}
@@ -210,6 +173,43 @@
         </div>
       </section>
     </div>
+  </div>
+{% elif section == 'compose' %}
+  <div class="ema-compose-screen">
+    <div class="ema-compose-header"><h2>{{ 'Odpovědět' if reply_id else 'Přeposlat zprávu' if source_message else 'Nový e-mail' }}</h2><a class="btn" href="{{ url_for('mail_hub', box=active_box.id) if active_box else url_for('mail_hub') }}">Zavřít</a></div>
+    {% if send_boxes %}
+    <form method="post" action="{{ url_for('mail_compose_send') }}" enctype="multipart/form-data" class="ema-compose-form" autocomplete="off">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="nonce" value="{{ csrf_nonce }}">
+      {% if reply_id %}<input type="hidden" name="reply_id" value="{{ reply_id }}">{% endif %}
+      <label class="ema-compose-line">Od
+        <select id="ema-from-box" name="box_id" required data-suggest-url="{{ url_for('mail_contact_suggest') }}">
+          {% for b in send_boxes %}<option value="{{ b.id }}" {{ 'selected' if active_box and active_box.id == b.id else '' }}>{{ b.label }} · {{ b.address }}</option>{% endfor %}
+        </select>
+      </label>
+      <label class="ema-compose-line">Komu
+        <input name="to" id="ema-compose-to" type="text" maxlength="1500" required value="{{ recipient }}" placeholder="Příjemce@example.cz" list="ema-contact-datalist" spellcheck="false">
+      </label>
+      <datalist id="ema-contact-datalist"></datalist>
+      <details class="ema-compose-extra"><summary>Kopie / Skrytá kopie</summary>
+        <label class="ema-compose-line">Kopie<input name="cc" type="text" maxlength="1500" list="ema-contact-datalist"></label>
+        <label class="ema-compose-line">Skrytá kopie<input name="bcc" type="text" maxlength="1500" list="ema-contact-datalist"></label>
+      </details>
+      <label class="ema-compose-line">Předmět<input type="text" name="subject" maxlength="500" required value="{{ subject }}"></label>
+      <label class="ema-compose-body-label">Text zprávy
+        <textarea name="body" rows="16" maxlength="100000" required placeholder="Napiš zprávu…">{{ draft_content }}</textarea>
+      </label>
+      <label class="ema-compose-attachments">📎 Přílohy (nejvýše 4 soubory, 6 MB na soubor)
+        <input type="file" name="attachments" multiple>
+      </label>
+      <div class="ema-compose-footer"><span>Odeslání proběhne pouze po potvrzení. Při nejistém výsledku se neopakuje automaticky.</span>
+        <button class="btn primary ema-compose-send" type="submit">Odeslat e-mail</button>
+      </div>
+    </form>
+    {% else %}
+      <div class="notice">Nemáš žádnou schránku s oprávněním odesílat. Nejdříve ji připoj nebo si vyžádej přístup.</div>
+      <a class="btn" href="{{ url_for('account_hub') }}">Nastavení účtu</a>
+    {% endif %}
   </div>
 {% elif section == 'database' %}
   <div class="ema-hub-inline-actions">
