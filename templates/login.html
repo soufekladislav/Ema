@@ -1,17 +1,36 @@
 {% extends 'base.html' %}
-{% block title %}Přihlášení • Ema{% endblock %}
+{% block title %}Přihlášení • EMA / Fresh HUB{% endblock %}
 {% block login %}
-<div class="auth-page"><div class="auth-card">
-  <div class="auth-mark">E</div>
-  <h1>Vítejte v Emě</h1><p>Klienti, projekty, komunikace a obchod na jednom místě.</p>
-  {% with messages = get_flashed_messages(with_categories=true) %}
-    {% for category, msg in messages %}<div class="flash {{ category }}">{{ msg }}</div>{% endfor %}
-  {% endwith %}
-  <form method="post" action="{{ url_for('login') }}" class="formstack">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <label>E-mail<input name="email" type="email" required autofocus autocomplete="username" maxlength="190"></label>
-    <label>Heslo<input name="password" type="password" required autocomplete="current-password"></label>
-    <button class="btn primary" type="submit">Přihlásit</button>
-  </form><p class="small muted">Účet vytváří správce platformy. Data klientů nejsou veřejná.</p>
-</div></div>
+<main class="auth-page auth-page-legacy">
+  <div class="login-shell">
+    <section class="login-hero" aria-labelledby="login-intro-title">
+      <img class="login-logo" src="https://www.freshcrackers.cz/wp-content/uploads/2023/10/Oficialni-logo-Fresh-Crackers.png" alt="Fresh Crackers" referrerpolicy="no-referrer">
+      <img class="login-hero-img" src="https://www.freshcrackers.cz/wp-content/uploads/2026/06/fresh-hub.png" alt="Ilustrace Fresh HUB z původní Emy" referrerpolicy="no-referrer">
+      <span class="intro-label">EMA · Fresh HUB</span>
+      <h1 id="login-intro-title">Projekty, klienti a komunikace. Na jednom místě.</h1>
+      <p>Ema propojuje obchodní projekty, e-maily, klientské informace a úkoly. Hlavní pracovní prostor tvoří projekt, firma poskytuje zázemí pro data a fakturaci.</p>
+      <ul>
+        <li>Každý projekt má vlastní kontext a historii</li>
+        <li>E-maily, klienti a obchodní agenda na jednom místě</li>
+        <li>AI asistentka bude postupně pomáhat s běžnou prací</li>
+      </ul>
+      <p class="pilot-note">V0.1 je testovací základ aplikace. Inteligentní AI funkce teprve připravujeme.</p>
+    </section>
+    <section class="login-card login-card-ema" aria-labelledby="login-form-title">
+      <div class="login-brand"><span class="auth-mark">E</span><span><strong>EMA HUB</strong><small>Fresh Crackers · projektová asistentka</small></span></div>
+      <h2 id="login-form-title">Přihlášení</h2>
+      <p class="muted">Bezpečný vstup do tvých projektů a pracovní komunikace.</p>
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, msg in messages %}<div class="flash {{ category }}" role="alert">{{ msg }}</div>{% endfor %}
+      {% endwith %}
+      <form method="post" action="{{ url_for('login') }}" class="formstack">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label>E-mail<input name="email" type="email" required autofocus autocomplete="username" maxlength="190"></label>
+        <label>Heslo<input name="password" type="password" required autocomplete="current-password"></label>
+        <button class="btn primary login-submit" type="submit">Přihlásit se</button>
+      </form>
+      <p class="small muted">Přístupové účty v této testovací verzi spravuje administrátor.</p>
+    </section>
+  </div>
+</main>
 {% endblock %}
