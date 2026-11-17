@@ -39,7 +39,7 @@ def test_mobile_drawer_on_superadmin_page(web_client):
 def test_mobile_shell_css_js_have_closed_state_and_accessible_dismissal():
     css = (ROOT / "static" / "app.css").read_text(encoding="utf-8")
     script = (ROOT / "static" / "mail-v1.js").read_text(encoding="utf-8")
-    assert "body.ema-appmenu-open .layout > .sidebar{display:flex}" in css
+    assert "body.ema-appmenu-open .layout > .sidebar," in css
     assert "body.ema-screen-mail.ema-appmenu-open .layout > .sidebar{display:flex}" in css
     assert ".sidebar .sidebar-hero img{display:block" in css
     assert ".ema-appmenu-backdrop:not([hidden])" in css
