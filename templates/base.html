@@ -6,13 +6,16 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="icon" type="image/png" href="https://www.freshcrackers.cz/wp-content/uploads/2023/10/Fresh-Crackers-Logo.png">
+  <link rel="apple-touch-icon" href="https://www.freshcrackers.cz/wp-content/uploads/2023/10/Fresh-Crackers-Logo.png">
   <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
 </head>
 <body>
 {% if me is defined and me %}
 <div class="layout">
   <aside class="sidebar" aria-label="Hlavní navigace">
-    <a class="brand" href="{{ url_for('home') }}"><span class="brand-mark">E</span><span><strong>EMA HUB</strong><small>Fresh Crackers • pilot</small></span></a>
+    <a class="brand" href="{{ url_for('home') }}"><img class="sidebar-logo" src="https://www.freshcrackers.cz/wp-content/uploads/2023/10/Fresh-Crackers-Logo.png" alt="Fresh Crackers" referrerpolicy="no-referrer"><span><strong>EMA HUB</strong><small>Fresh Crackers • pilot</small></span></a>
+    <a class="sidebar-hero" href="{{ url_for('home') }}" aria-label="EMA – přejít na projekty"><img src="https://www.freshcrackers.cz/wp-content/uploads/2026/10/fresh-hub.png" alt="Ilustrace Emy" loading="lazy" referrerpolicy="no-referrer"><span>Moje projekty</span></a>
     <span class="label">PRACOVNÍ PROSTOR</span>
     <a class="navitem {{ 'active' if request.path == '/' else '' }}" href="{{ url_for('home') }}">▦ &nbsp; Přehled projektů</a>
     <span class="label">MOJE PROJEKTY</span>
