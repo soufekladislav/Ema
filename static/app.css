@@ -345,3 +345,146 @@
 .ema-mail-scrollpanel{height:65dvh;min-height:310px}
 .ema-message-actions{min-width:0}
 }
+
+/* === EMA Mail V1 P0: desktop client fills the available browser viewport === */
+.ema-mobile-nav-toggle,.ema-folder-drawer-toggle{display:none}
+.ema-screen-mail{height:100dvh;overflow:hidden}
+.ema-screen-mail .layout{height:100dvh;min-height:0;overflow:hidden}
+.ema-screen-mail .sidebar{height:100dvh;min-height:0;overflow-y:auto;scrollbar-width:thin}
+.ema-screen-mail .workspace{height:100dvh;display:flex;flex-direction:column;min-height:0;min-width:0}
+.ema-screen-mail .topbar{position:relative;flex-shrink:0;z-index:7;min-height:58px;padding-block:8px}
+.ema-screen-mail .content{max-width:none;min-height:0;flex:1;width:100%;padding:0;margin:0;display:flex;flex-direction:column;overflow:hidden}
+.ema-screen-mail .content>.flash{flex-shrink:0;margin:5px 14px}
+.ema-mail-v1{flex:1;display:flex;flex-direction:column;min-height:0;width:100%}
+.ema-mail-v1-topbar{display:flex;align-items:center;gap:10px;min-height:55px;padding:6px 15px;background:#fff;border-bottom:1px solid var(--line);flex:0 0 auto}
+.ema-mail-current-label{font-size:13px;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ema-mail-selection-summary{font-size:11px;color:#5f7b28}
+.ema-compose-big{background:#141a14;color:#fff;min-height:39px}
+.ema-toolbar-button{display:inline-flex;align-items:center;justify-content:center;gap:4px;padding:7px 9px;background:#fff;color:#344632;border:1px solid #e0e8da;border-radius:7px;min-height:35px;font-size:11px;font-weight:650;white-space:nowrap}
+.ema-toolbar-button:hover{background:#eff5e6}
+.ema-toolbar-button:disabled{opacity:.35;cursor:default}
+.ema-screen-mail .ema-mail-hub{flex:1;min-height:0;min-width:0;margin:0;display:grid;grid-template-columns:255px minmax(0,1fr);gap:0;overflow:hidden}
+.ema-screen-mail .ema-mail-hub-sidebar{background:#fff;border-right:1px solid var(--line);border-radius:0;padding:10px 8px 14px;min-width:0;max-height:none;height:100%;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;scrollbar-width:thin}
+.ema-screen-mail .ema-mail-hub-messages{display:flex;flex-direction:column;max-height:none;height:100%;min-height:0;overflow:hidden;padding:0;border-radius:0;border:0;background:#fff}
+.ema-screen-mail .ema-mail-scrollpanel{flex:1;max-height:none;min-height:0;height:auto;overflow-y:auto;overflow-x:hidden;padding:0;scrollbar-gutter:stable}
+.ema-mail-action-bar{display:flex;align-items:center;gap:10px;padding:7px 11px;border-bottom:1px solid var(--line);min-height:47px;flex-shrink:0;background:#fff}
+.ema-mail-bulk-actions{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+.ema-mail-toolbar-hint{color:#9baba0;font-size:11px;margin-left:auto}
+.ema-select-all-label{display:flex;align-items:center;justify-content:center;min-width:25px}
+.ema-mail-select,.ema-select-all-label input{width:17px;height:17px;accent-color:#7d9d27;cursor:pointer}
+.ema-mail-all-inbox{display:flex;align-items:center;justify-content:space-between;gap:5px;border-radius:8px;padding:11px 9px;font-size:12px;font-weight:750}
+.ema-mail-all-inbox small{font-size:10px;color:#64813c;font-weight:500}
+.ema-mail-all-inbox.active{background:#edf6df}
+.ema-mail-hub-sidebar-header{font-weight:800;font-size:10px;color:#73816f;letter-spacing:.06em;margin:15px 10px 4px;display:flex;justify-content:space-between;gap:5px}
+.ema-mail-hub-sidebar-header small{font-size:9px;letter-spacing:normal;font-weight:500}
+.ema-mailbox-sort-row{gap:1px;padding:1px 0}
+.ema-mail-draghandle{padding:9px 2px;font-size:15px}
+.ema-mailbox-content .ema-mail-filter{gap:2px;padding:7px 5px}
+.ema-mailbox-content .ema-mail-filter strong{font-size:12px;line-height:1.25}
+.ema-mailbox-content .ema-mail-filter small{font-size:9px;line-height:1.3}
+.ema-mailbox-visibility-form{padding:0 4px 5px}
+.ema-mailbox-visibility-form button{font-size:9px}
+.ema-mail-folder-tree{margin:1px 0 8px;border-left:1px solid #e1ead8;padding-left:9px;display:grid;gap:2px}
+.ema-mail-folder{padding:6px 6px;border-radius:6px;font-size:11px;white-space:normal;overflow-wrap:anywhere;line-height:1.3}
+.ema-mail-folder.active,.ema-mail-folder:hover{background:#eef7df;color:#48661e}
+.ema-mail-folders-refresh{background:none;border:none;color:#607b38;font-size:10px;padding:7px 3px}
+.ema-sync-error,.ema-mail-sync-errorbar{color:#b84a3b;font-size:11px}
+.ema-mail-sync-errorbar{padding:8px 13px;background:#fff2ee;border-bottom:1px solid #f5d0c9}
+.ema-screen-mail .ema-mail-message-row{display:grid;grid-template-columns:24px 30px minmax(0,1fr) auto;align-items:center;gap:2px;min-height:48px;padding:4px 7px;border-bottom:1px solid #e8ede5;border-top:0;border-left:0;background:#fff}
+.ema-screen-mail .ema-mail-message-row.is-unread{background:#f4f9ec;box-shadow:inset 3px 0 #9fc646}
+.ema-screen-mail .ema-mail-message-row.is-read{background:#fff}
+.ema-screen-mail .ema-mail-message-row.ema-mail-expanded{background:#f8fbf4}
+.ema-screen-mail .ema-mail-message-row .ema-mail-item{display:grid;grid-template-columns:minmax(95px,27%) minmax(140px,1fr) minmax(65px,11%) 98px;gap:8px;align-items:center;min-width:0;padding:5px 3px;line-height:1.35}
+.ema-mail-from,.ema-mail-subject,.ema-mail-origin,.ema-mail-time{display:block;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12px}
+.ema-mail-from{font-weight:650}
+.ema-mail-origin{color:#849080}
+.ema-mail-time{font-size:10px;text-align:right;color:#74816e}
+.ema-screen-mail .is-unread .ema-mail-subject{font-weight:850}
+.ema-screen-mail .is-read .ema-mail-from,.ema-screen-mail .is-read .ema-mail-subject{font-weight:450;color:#59685e}
+.ema-message-actions{min-width:68px;gap:3px;flex-wrap:nowrap}
+.ema-message-actions form{display:flex}
+.ema-message-actions .ema-mail-icon{min-width:30px;min-height:32px;font-size:14px}
+.ema-screen-mail .ema-mail-inline-slot{grid-column:1/-1;padding:9px 8px 14px 43px}
+.ema-screen-mail .ema-mail-inline-slot[hidden]{display:none}
+.ema-quick-preview-content{background:#fff;border:1px solid #dce8cf;border-radius:10px;padding:12px}
+.ema-quick-preview-head{display:flex;justify-content:space-between;align-items:start;gap:9px;flex-wrap:wrap;padding-bottom:9px;border-bottom:1px solid #e4ebe0}
+.ema-quick-preview-head strong{display:block;font-size:13px}
+.ema-quick-preview-head small{display:block;font-size:10px;color:#788575;overflow-wrap:anywhere}
+.ema-quick-actions{display:flex;gap:6px;flex-wrap:wrap}
+.ema-quick-actions .btn{min-height:32px;font-size:10px;padding:5px 9px}
+.ema-quick-html-frame{height:48dvh;min-height:280px;max-height:740px}
+.ema-quick-warning{font-size:11px;color:#9b6d2a}
+.ema-mail-loader{padding:12px;min-height:38px}
+.ema-screen-compose .content{max-width:1100px;padding-top:14px}
+.ema-compose-screen{background:#fff;border:1px solid var(--line);border-radius:14px;overflow:hidden;box-shadow:var(--shadow)}
+.ema-compose-header{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);padding:12px 18px}
+.ema-compose-header h2{margin:0;font-size:20px}
+.ema-compose-form{display:flex;flex-direction:column;gap:0}
+.ema-compose-line{display:flex;gap:12px;align-items:center;font-size:12px;font-weight:750;padding:6px 17px;border-bottom:1px solid #e7ede4}
+.ema-compose-line input,.ema-compose-line select{width:100%;flex:1;border:0;background:transparent;outline:none;padding:7px;min-height:34px}
+.ema-compose-line:focus-within{background:#f7fbf2}
+.ema-compose-extra{padding:8px 18px;border-bottom:1px solid var(--line)}
+.ema-compose-extra summary{font-size:12px;color:#52742d;cursor:pointer}
+.ema-compose-extra .ema-compose-line{padding:6px 0}
+.ema-compose-body-label{display:grid;gap:6px;padding:12px 17px;font-size:12px;font-weight:700}
+.ema-compose-body-label textarea{height:min(42dvh,520px);min-height:200px;width:100%;resize:vertical;border:1px solid #e7ede3;line-height:1.65}
+.ema-compose-attachments{display:flex;align-items:center;flex-wrap:wrap;gap:12px;padding:8px 17px;font-size:11px;color:#74816d}
+.ema-compose-footer{display:flex;align-items:center;justify-content:space-between;gap:15px;padding:12px 17px;border-top:1px solid var(--line)}
+.ema-compose-footer span{font-size:11px;color:#74816c;max-width:580px}
+.ema-compose-send{min-width:140px}
+@media(max-width:1050px){
+.ema-screen-mail .ema-mail-hub{grid-template-columns:215px minmax(0,1fr)}
+.ema-screen-mail .ema-mail-message-row .ema-mail-item{grid-template-columns:minmax(90px,30%) minmax(120px,1fr) 72px}
+.ema-mail-origin{display:none}
+.ema-mail-toolbar-hint{display:none}
+}
+@media(max-width:760px){
+.ema-mobile-nav-toggle,.ema-folder-drawer-toggle{display:inline-flex;align-items:center;justify-content:center}
+.ema-mobile-nav-toggle{background:transparent;border:1px solid #dae4d3;border-radius:8px;font-size:19px;width:41px;height:41px;flex-shrink:0}
+.ema-screen-mail .layout{display:flex;flex-direction:column;height:100dvh;min-height:0}
+.ema-screen-mail .sidebar{display:none;position:fixed;z-index:40;left:0;top:0;bottom:0;max-height:100dvh;width:min(290px,88vw);box-shadow:12px 0 35px #0004;overflow-y:auto}
+.ema-screen-mail.ema-appmenu-open .sidebar{display:flex}
+.ema-screen-mail .sidebar .label,.ema-screen-mail .sidebar-bottom{display:flex}
+.ema-screen-mail .sidebar .main-nav{display:grid;overflow:visible}
+.ema-screen-mail .workspace{height:100dvh;flex:1;min-height:0;width:100%}
+.ema-screen-mail .topbar{min-height:54px;gap:7px;padding:5px 9px;flex-wrap:nowrap}
+.ema-screen-mail .ema-topbar-brand{width:auto;flex:1}
+.ema-screen-mail .ema-global-filter{width:auto;margin:0;gap:3px}
+.ema-screen-mail .ema-global-filter label,.ema-screen-mail .ema-global-filter .btn{display:none}
+.ema-screen-mail .ema-global-filter select{max-width:115px;min-width:85px;font-size:10px;padding:6px}
+.ema-screen-mail .ema-mail-v1-topbar{padding:7px 8px;gap:5px}
+.ema-screen-mail .ema-compose-big{padding:7px 10px;font-size:11px}
+.ema-mail-current-label{font-size:11px}
+.ema-screen-mail .ema-mail-hub{display:flex;flex-direction:column;position:relative}
+.ema-screen-mail .ema-mail-hub-sidebar{display:none;position:absolute;z-index:20;left:0;top:0;bottom:0;width:min(300px,88vw);height:100%;box-shadow:12px 0 30px #0003}
+.ema-screen-mail.ema-folder-pane-open .ema-mail-hub-sidebar{display:block}
+.ema-screen-mail .ema-mail-hub-messages{flex:1;width:100%;min-height:0}
+.ema-screen-mail .ema-mail-action-bar{padding:6px 7px;gap:5px;overflow-x:auto}
+.ema-mail-bulk-actions{flex-wrap:nowrap}
+.ema-mail-bulk-actions button{font-size:10px;padding:7px 6px}
+.ema-screen-mail .ema-mail-message-row{grid-template-columns:21px 25px minmax(0,1fr) auto;gap:0;padding:5px 4px;min-height:58px}
+.ema-screen-mail .ema-mail-message-row .ema-mail-item{display:grid;grid-template-columns:1fr auto;gap:2px;padding:3px 1px}
+.ema-mail-from{grid-column:1;grid-row:1;font-size:12px}
+.ema-mail-subject{grid-column:1/-1;grid-row:2;font-size:11px}
+.ema-mail-time{grid-column:2;grid-row:1;font-size:10px}
+.ema-screen-mail .ema-mail-inline-slot{padding:8px 0;grid-column:1/-1}
+.ema-message-actions{gap:0;min-width:27px}
+.ema-message-actions form:first-child{display:none}
+.ema-message-actions .ema-mail-icon{min-width:32px;min-height:38px}
+.ema-quick-html-frame{height:58dvh}
+.ema-quick-actions{width:100%}
+.ema-compose-screen{border:0;border-radius:0}
+.ema-screen-compose .content{padding:0;max-width:100%}
+.ema-compose-line{padding:6px 10px;gap:8px}
+.ema-compose-body-label{padding:10px}
+.ema-compose-body-label textarea{min-height:240px;height:40dvh}
+.ema-compose-footer{flex-wrap:wrap;padding:10px}
+.ema-compose-footer .btn{width:100%}
+}
+@media(max-width:375px){
+.ema-screen-mail .ema-mail-v1-topbar{gap:3px}
+.ema-screen-mail .ema-compose-big{font-size:0}
+.ema-screen-mail .ema-compose-big::before{content:"✎";font-size:20px}
+.ema-mail-current-label{font-size:10px}
+.ema-screen-mail .ema-mail-hub .ema-mail-action-bar .ema-toolbar-button{font-size:10px}
+}
