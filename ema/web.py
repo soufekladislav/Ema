@@ -533,6 +533,7 @@ def create_app(test_config=None):
             "has_more": page["has_more"], "next_cursor": page["cursor"],
             "folders": [{"id": f.id, "name": folder_names[f.id]} for f in available_folders(g.db, box)],
             "server_total": page["server_total"],
+            "indexed_count": list(mailbox_counts(g.db, g.user.id, [box]).get(box.id, (0, 0))),
         }
 
     @app.post("/mail/<int:box_id>/refresh-50")
