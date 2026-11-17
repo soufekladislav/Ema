@@ -165,9 +165,9 @@ def test_single_uil_move_batch_and_folder_name_with_dot_separator(state, monkeyp
     engine, box_id, inbox_id = state
     fake = FakeImap(count=3)
     fake.list = lambda: ("OK", [
-        b'(\HasNoChildren) "." "INBOX"',
-        b'(\HasNoChildren) "." "INBOX.Trash"',
-        b'(\HasNoChildren) "." "INBOX.Sent"',
+        rb'(\HasNoChildren) "." "INBOX"',
+        rb'(\HasNoChildren) "." "INBOX.Trash"',
+        rb'(\HasNoChildren) "." "INBOX.Sent"',
     ])
     monkeypatch.setattr("ema.mail_folders._connect", lambda box, key: fake)
     with Session(engine) as db:
@@ -205,8 +205,8 @@ def test_sent_append_uses_discovered_real_folder(state, monkeypatch):
     engine, box_id, inbox_id = state
     fake = FakeImap(count=2)
     fake.list = lambda: ("OK", [
-        b'(\HasNoChildren) "/" "INBOX"',
-        b'(\HasNoChildren \Sent) "/" "Sent"',
+        rb'(\HasNoChildren) "/" "INBOX"',
+        rb'(\HasNoChildren \Sent) "/" "Sent"',
     ])
     monkeypatch.setattr("ema.mail_folders._connect", lambda box, key: fake)
     with Session(engine) as db:
