@@ -216,6 +216,26 @@ def fetch_folder_page(db, box, key, folder, *, before_uid=None, limit=PAGE_SIZE)
             pass
 
 
+def is_trash_folder(folder):
+    """Identify a real user-visible Trash leaf, regardless of stale LIST flags.
+
+    This is deliberately narrower than substring matching ('Trash drafts'
+    cannot be a Trash); full operations still revalidate mailbox and folder.
+    """
+    if folder is None:
+        return False
+    flags = (folder.special_use or "").lower().split()
+    if r"\trash" in flags:
+        return True
+    name = decode_modified_utf7(folder.name).casefold()
+    delimiter = folder.delimiter or "/"
+    leaf = name.rsplit(delimiter, 1)[-1]
+    if delimiter != "." and "." in leaf:
+        leaf = leaf.rsplit(".", 1)[-1]
+    return leaf in {"trash", "deleted messages", "deleted items",
+                    "deleted", "koš", "kos", "bin"}
+
+
 def special_folder(db, box, action):
     """Resolve a real IMAP destination; favor SPECIAL-USE, then known folder leaves.
 
@@ -492,9 +512,10 @@ def _trash_selected_state(client, folder, *, readonly):
 def _verify_trash_scope(db, box, folder):
     if folder.mailbox_id != box.id:
         raise MailError("Koš nepatří vybrané schránce")
-    detected = special_folder(db, box, "trash")
-    if not detected or detected.id != folder.id:
+    if not is_trash_folder(folder):
         raise MailError("Tato složka není ověřeným IMAP Košem dané schránky")
+    # Explicitly selected Trash is allowed even when a stale SPECIAL-USE LIST
+    # cache points at another folder. The real server must still SELECT it.
 
 
 def preview_trash_all(db, box, key, folder):
