@@ -94,6 +94,16 @@
         <button class="ema-toolbar-button" type="submit" title="Obnovit zprávy">↻ <span>Obnovit</span></button>
       </form>
       {% endif %}
+      {% if selected_box and selected_folder and is_trash_folder and selected_box.id in syncable_ids %}
+      <form method="post" action="{{ url_for('mail_empty_trash', box_id=selected_box.id) }}"
+            class="ema-mail-refresh-form"
+            onsubmit="return confirm('Trvale smazat nejvýše 100 zpráv ze serverového Koše této schránky? Tento krok nelze vrátit.');">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="folder_id" value="{{ selected_folder.id }}">
+        <input type="hidden" name="confirmation" value="permanently-delete">
+        <button class="ema-toolbar-button ema-mail-trash" type="submit">🗑 Vysypat Koš</button>
+      </form>
+      {% endif %}
       <a class="ema-toolbar-button" href="{{ url_for('account_hub') }}" title="Nastavení schránek">⚙</a>
     </div>
     <div class="ema-mail-hub">
@@ -124,8 +134,13 @@
               </form>
               {% if selected_box and selected_box.id == b.id %}
               <nav class="ema-mail-folder-tree" aria-label="Složky schránky {{ b.label }}">
+                <details class="ema-mail-folders-root" data-mail-folder-root="{{ me.id }}:{{ b.id }}" open>
+                  <summary>Složky schránky</summary>
+                  <div class="ema-mail-folder-entries">
                 {% for f in imap_folders %}
-                  <a class="ema-mail-folder {{ 'active' if selected_folder and selected_folder.id == f.id else '' }}" href="{{ url_for('mail_hub', box=b.id, folder=f.id) }}">
+                  <a class="ema-mail-folder {{ 'active' if selected_folder and selected_folder.id == f.id else '' }}"
+                     data-folder-fullname="{{ folder_names[f.id] }}" data-folder-delimiter="{{ f.delimiter }}"
+                     href="{{ url_for('mail_hub', box=b.id, folder=f.id) }}">
                     <span>▸ {{ folder_names[f.id] }}</span>
                   </a>
                 {% endfor %}
@@ -133,6 +148,8 @@
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                   <button class="ema-mail-folders-refresh" type="submit">↻ Aktualizovat složky</button>
                 </form>
+                  </div>
+                </details>
               </nav>
               {% endif %}
             </div>
@@ -161,6 +178,8 @@
              data-folder-id="{{ selected_folder.id if selected_folder else '' }}"
              data-page-url="{{ url_for('mail_folder_page', box_id=selected_box.id) if selected_box else '' }}"
              data-aggregate-url="{{ url_for('mail_aggregate_page') }}"
+             data-aggregate-sync-url="{{ url_for('mail_aggregate_sync_one') }}"
+             data-included-box-ids="{% for b in boxes if not view_prefs.get(b.id) or view_prefs[b.id].included %}{{ b.id }}{% if not loop.last %},{% endif %}{% endfor %}"
              data-csrf="{{ csrf_token() }}"
              data-next-cursor="{{ initial_cursor or '' }}"
              data-has-more="{{ 'true' if initial_has_more else 'false' }}">
