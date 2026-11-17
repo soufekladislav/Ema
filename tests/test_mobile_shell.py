@@ -46,3 +46,25 @@ def test_mobile_shell_css_js_have_closed_state_and_accessible_dismissal():
     assert "closeAppMenu" in script and 'event.key === "Escape"' in script
     assert "window.innerWidth > 760" in script
     assert "appSidebar.querySelectorAll" in script
+
+
+
+def test_mobile_shell_is_shared_by_secondary_company_and_project_pages(web_client):
+    client = web_client
+    login(client, "owner")
+    org = client.application.ids["org"]
+    project = client.application.ids["project"]
+    paths = (
+        f"/org/{org}", f"/org/{org}/clients", f"/org/{org}/pipeline",
+        f"/org/{org}/projects", f"/org/{org}/tasks", f"/org/{org}/chat",
+        f"/org/{org}/mail", f"/org/{org}/settings",
+        f"/project/{project}", f"/project/{project}/chat",
+        "/mail/compose",
+    )
+    for path in paths:
+        result = client.get(path)
+        assert result.status_code == 200, (path, result.status_code)
+        assert b'id="ema-app-main-nav"' in result.data, path
+        assert b'id="ema-mobile-nav-toggle"' in result.data, path
+        assert b'id="ema-appmenu-backdrop"' in result.data, path
+        assert b"2026/10/fresh-hub.png" in result.data, path
