@@ -24,4 +24,18 @@ def upgrade_schema(engine):
             conn.execute(text("ALTER TABLE mailboxes ADD COLUMN signature_html TEXT"))
             conn.execute(text("UPDATE mailboxes SET signature_html = '' WHERE signature_html IS NULL"))
             applied.append("mailboxes.signature_html")
+    inspector = inspect(engine)
+    if inspector.has_table("contacts"):
+        contact_columns = {col["name"] for col in inspector.get_columns("contacts")}
+        if "metadata_json" not in contact_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE contacts ADD COLUMN metadata_json TEXT NULL"))
+            applied.append("contacts.metadata_json")
+    inspector = inspect(engine)
+    if inspector.has_table("projects"):
+        project_columns = {col["name"] for col in inspector.get_columns("projects")}
+        if "kind" not in project_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE projects ADD COLUMN kind VARCHAR(20) NOT NULL DEFAULT 'other'"))
+            applied.append("projects.kind")
     return applied

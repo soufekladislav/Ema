@@ -1,6 +1,7 @@
 """EMA V0.1 — Flask application. Server-side authorization for every data path."""
 import os
 import re
+import json
 import secrets
 from datetime import datetime, timedelta
 from functools import wraps
@@ -17,6 +18,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from .mail_service import MailError, encrypt_password, preview_message, send_plain, sync_inbox, validate_mail_host
 from .assistant_service import AssistantError, run_assistant
+from .contact_import import ImportErrorCSV, extract_contacts
 from .schema_upgrade import upgrade_schema
 from .models import (
     Audit, AssistantTurn, Base, ChatMessage, Company, Contact, MailFolder, Mailbox, MailboxGrant, MailMessage,
@@ -27,6 +29,7 @@ from .security import Forbidden, mailbox_access, organization_access, project_ac
 
 STAGES = ("lead", "qualified", "proposal", "negotiation", "won", "lost")
 PROJ_STATES = ("planning", "active", "paused", "completed")
+PROJECT_KINDS = ("shop", "campaign", "development", "other")
 ORG_ROLES = ("owner", "admin", "member")
 PROJECT_ROLES = ("manager", "editor", "viewer")
 
@@ -135,8 +138,13 @@ def base_context():
             select(Organization).where(Organization.id.in_(company_ids))
         ).all()
     } if company_ids else {}
+    scope_id = session.get("ema_firm_scope")
+    if not isinstance(scope_id, int) or scope_id not in org_ids:
+        scope_id = None
+    scoped_projects = [p for p in visible_projects if scope_id is None or p.organization_id == scope_id]
     return dict(
         orgs=orgs, grants=grants, accessible_projects=visible_projects,
+        scoped_projects=scoped_projects, scope_org_id=scope_id,
         project_org_names=org_names,
         selected_project=getattr(g, "project", None),
         active_org=getattr(g, "org", None), me=g.user
@@ -147,6 +155,51 @@ def render(section, **kwargs):
     context = base_context()
     context.update(section=section, stages=STAGES, project_states=PROJ_STATES, **kwargs)
     return render_template("app.html", **context)
+
+
+def current_scope():
+    """A header filter can narrow, never widen, an authorized user's company access."""
+    ctx = base_context()
+    scope = ctx["scope_org_id"]
+    orgs = [o for o in ctx["orgs"] if scope is None or o.id == scope]
+    projects = ctx["scoped_projects"]
+    return ctx, orgs, projects
+
+
+def render_hub(section, **kwargs):
+    ctx = base_context()
+    ctx.update(section=section, **kwargs)
+    return render_template("overview.html", **ctx)
+
+
+def visible_tasks(db, orgs, projects):
+    """Company-wide tasks require membership; invited project guests see only their projects."""
+    org_ids = [o.id for o in orgs]
+    project_ids = [p.id for p in projects]
+    if not org_ids and not project_ids:
+        return []
+    clauses = []
+    if org_ids:
+        clauses.append(Task.organization_id.in_(org_ids))
+    if project_ids:
+        clauses.append(Task.project_id.in_(project_ids))
+    return db.scalars(select(Task).where(or_(*clauses))
+        .order_by(Task.done, Task.due_at.is_(None), Task.due_at.asc(), Task.id.desc()).limit(200)).all()
+
+
+def visible_mailboxes(db, uid, orgs):
+    """Only mailbox permissions, never merely access to the underlying project."""
+    org_ids = [o.id for o in orgs]
+    if not org_ids:
+        return []
+    out = []
+    for box in db.scalars(select(Mailbox).where(Mailbox.organization_id.in_(org_ids)).order_by(Mailbox.address)).all():
+        try:
+            mailbox_access(db, uid, box.id)
+            out.append(box)
+        except Forbidden:
+            continue
+    return out
 
 
 def create_app(test_config=None):
@@ -264,9 +317,201 @@ def create_app(test_config=None):
         selected_tasks = g.db.scalars(select(Task).where(
             Task.project_id == selected.id, Task.organization_id == selected.organization_id
         ).order_by(Task.id.desc()).limit(20)).all() if selected else []
-        return render("home", projects=visible, selected_project=selected,
+        ctx, scope_orgs, scoped_projects = current_scope()
+        reminders = [t for t in visible_tasks(g.db, scope_orgs, scoped_projects) if not t.done][:8]
+        return render("home", projects=scoped_projects, selected_project=selected,
                       assistant_turns=list(reversed(turns)),
-                      ai_ready=ai_ready, selected_tasks=selected_tasks)
+                      ai_ready=ai_ready, selected_tasks=selected_tasks,
+                      reminders=reminders, reminder_projects={p.id: p.name for p in visible},
+                      today=now().date(), is_first_setup=not bool(ctx["orgs"]))
+
+    @app.post("/account/scope")
+    @login_required
+    def set_firm_scope():
+        firm = positive_id("firm")
+        if firm:
+            try:
+                organization_access(g.db, g.user.id, firm)
+            except Forbidden:
+                abort(403)
+            session["ema_firm_scope"] = firm
+        else:
+            session.pop("ema_firm_scope", None)
+        destination = field("next", 200)
+        if not destination.startswith("/") or destination.startswith("//") or "\\" in destination:
+            destination = "/"
+        return redirect(destination)
+
+    @app.get("/projects")
+    @login_required
+    def project_hub():
+        ctx, orgs, projects = current_scope()
+        return render_hub("projects", projects=projects, eligible_orgs=orgs)
+
+    @app.get("/mail")
+    @login_required
+    def mail_hub():
+        ctx, orgs, projects = current_scope()
+        boxes = visible_mailboxes(g.db, g.user.id, orgs)
+        ids = [box.id for box in boxes]
+        box_id = request.args.get("box", type=int)
+        if box_id is not None and box_id not in ids:
+            abort(403)
+        selected = next((box for box in boxes if box.id == box_id), None)
+        target = [selected.id] if selected else ids
+        if target:
+            messages = g.db.scalars(
+                select(MailMessage).join(MailFolder, MailMessage.folder_id == MailFolder.id)
+                .where(MailMessage.mailbox_id.in_(target),
+                       MailMessage.uidvalidity == MailFolder.uidvalidity)
+                .order_by(MailMessage.id.desc()).limit(120)
+            ).all()
+        else:
+            messages = []
+        return render_hub("mail", boxes=boxes, mail_rows=messages, selected_box=selected,
+                          box_lookup={box.id: box for box in boxes})
+
+    @app.get("/database")
+    @login_required
+    def database_hub():
+        ctx, orgs, projects = current_scope()
+        ids = [org.id for org in orgs]
+        companies = g.db.scalars(select(Company).where(Company.organization_id.in_(ids))
+            .order_by(Company.name).limit(250)).all() if ids else []
+        contacts = g.db.scalars(select(Contact).where(Contact.organization_id.in_(ids))
+            .order_by(Contact.name).limit(250)).all() if ids else []
+        return render_hub("database", companies=companies, contacts=contacts,
+                          eligible_orgs=orgs)
+
+    @app.post("/database/import")
+    @login_required
+    def import_contacts_csv():
+        org_id = positive_id("organization_id")
+        if not org_id:
+            abort(400, description="Vyber firmu pro import")
+        try:
+            organization_access(g.db, g.user.id, org_id, write=True)
+        except Forbidden:
+            abort(403)
+        uploaded = request.files.get("file")
+        if not uploaded or not uploaded.filename.lower().endswith(".csv"):
+            flash("Vyber soubor CSV.", "error")
+            return redirect(url_for("database_hub"))
+        try:
+            entries = extract_contacts(uploaded.stream.read(950001))
+        except ImportErrorCSV as ex:
+            flash(str(ex), "error")
+            return redirect(url_for("database_hub"))
+        emails = {row["email"] for row in entries if row["email"]}
+        seen = set(g.db.scalars(select(Contact.email).where(
+            Contact.organization_id == org_id, Contact.email.in_(emails)
+        )).all()) if emails else set()
+        duplicates = sum(1 for item in entries if item["email"] and item["email"] in seen)
+        if field("mode", 16) == "preview":
+            flash(f"Kontrola CSV: {len(entries)} řádků, {duplicates} již existujících e-mailů. Nic nebylo zapsáno. Import potvrď dalším nahráním souboru.", "success")
+            return redirect(url_for("database_hub"))
+        if field("mode", 16) != "import":
+            abort(400, description="Neplatný režim importu")
+        company_names = {row["company_name"].casefold() for row in entries if row["company_name"]}
+        existing_companies = g.db.scalars(select(Company).where(
+            Company.organization_id == org_id
+        )).all() if company_names else []
+        mapped = {company.name.casefold(): company.id for company in existing_companies
+                  if company.name.casefold() in company_names}
+        added = 0
+        skipped = 0
+        for item in entries:
+            if item["email"] and item["email"] in seen:
+                skipped += 1
+                continue
+            metadata = {
+                "import_source": "csv", "imported_at": now().isoformat(),
+                "fields": item["attributes"],
+            }
+            if item["company_name"] and item["company_name"].casefold() not in mapped:
+                metadata["company_name_from_csv"] = item["company_name"]
+            g.db.add(Contact(organization_id=org_id, company_id=mapped.get(item["company_name"].casefold()),
+                             name=item["name"], email=item["email"], phone=item["phone"],
+                             metadata_json=json.dumps(metadata, ensure_ascii=False)))
+            if item["email"]:
+                seen.add(item["email"])
+            added += 1
+        audit("contacts.csv_import", f"added={added}, skipped={skipped}", org_id)
+        g.db.commit()
+        flash(f"Import dokončen: {added} kontaktů, {skipped} duplicit přeskočeno. Marketingové souhlasy se automaticky nepřidělují.", "success")
+        return redirect(url_for("database_hub"))
+
+    @app.get("/tasks")
+    @login_required
+    def task_hub():
+        ctx, orgs, projects = current_scope()
+        tasks = visible_tasks(g.db, orgs, projects)
+        editable = set()
+        for task in tasks:
+            try:
+                if task.project_id:
+                    project_access(g.db, g.user.id, task.project_id, write=True)
+                else:
+                    organization_access(g.db, g.user.id, task.organization_id, write=True)
+                editable.add(task.id)
+            except Forbidden:
+                continue
+        return render_hub("tasks", tasks=tasks, eligible_orgs=orgs, projects=projects,
+                          editable_task_ids=editable,
+                          project_lookup={p.id:p for p in ctx["accessible_projects"]},
+                          today=now().date())
+
+    @app.post("/tasks")
+    @login_required
+    def create_task_hub():
+        org_id = positive_id("organization_id")
+        project_id = positive_id("project_id")
+        if not org_id:
+            abort(400, description="Vyberte firmu")
+        try:
+            organization_access(g.db, g.user.id, org_id, write=True)
+        except Forbidden:
+            abort(403)
+        if project_id:
+            proj = g.db.get(Project, project_id)
+            if not proj or proj.organization_id != org_id:
+                abort(400, description="Projekt nepatří vybrané firmě")
+        raw_due = field("due", 10)
+        try:
+            due = datetime.strptime(raw_due, "%Y-%m-%d") if raw_due else None
+        except ValueError:
+            abort(400)
+        task = Task(organization_id=org_id, project_id=project_id,
+                    title=required("title", 240), due_at=due)
+        g.db.add(task)
+        audit("task.create", task.title, org_id)
+        g.db.commit()
+        flash("Úkol uložen", "success")
+        return redirect(url_for("task_hub"))
+
+    @app.post("/tasks/<int:task_id>/toggle")
+    @login_required
+    def toggle_task_hub(task_id):
+        task = g.db.get(Task, task_id)
+        if not task:
+            abort(404)
+        try:
+            if task.project_id:
+                project_or_403(task.project_id, write=True)
+            else:
+                organization_access(g.db, g.user.id, task.organization_id, write=True)
+        except Forbidden:
+            abort(403)
+        task.done = not task.done
+        audit("task.toggle", task_id, task.organization_id)
+        g.db.commit()
+        return redirect(url_for("task_hub"))
+
+    @app.get("/account")
+    @login_required
+    def account_hub():
+        ctx, orgs, projects = current_scope()
+        return render_hub("account", eligible_orgs=ctx["orgs"], all_projects=ctx["accessible_projects"])
 
     @app.post("/assistant")
     @login_required
@@ -284,7 +529,7 @@ def create_app(test_config=None):
         recent = g.db.scalars(select(AssistantTurn).where(
             AssistantTurn.user_id == g.user.id, scope
         ).order_by(AssistantTurn.id.desc()).limit(8)).all()
-        visible = base_context()["accessible_projects"]
+        visible = base_context()["scoped_projects"]
         tasks_for_context = g.db.scalars(select(Task).where(
             Task.project_id == pid, Task.organization_id == selected.organization_id
         ).order_by(Task.id.desc()).limit(30)).all() if selected else []
@@ -317,8 +562,11 @@ def create_app(test_config=None):
             organization_access(g.db, g.user.id, org_id, write=True)
         except Forbidden:
             abort(403)
+        kind = field("kind", 20) or "other"
+        if kind not in PROJECT_KINDS:
+            abort(400, description="Neplatný typ projektu")
         item = Project(organization_id=org_id, name=required("name"),
-                       description=field("description", 1500))
+                       kind=kind, description=field("description", 1500))
         g.db.add(item)
         audit("project.create", item.name, org_id)
         g.db.commit()
@@ -334,7 +582,8 @@ def create_app(test_config=None):
         g.db.add(Membership(organization_id=org.id, user_id=g.user.id, role="owner"))
         audit("org.create", org.id, org.id)
         g.db.commit()
-        return redirect(url_for("organization_home", org_id=org.id))
+        flash("Firma byla založena. Nyní jí můžeš přiřadit první projekt.", "success")
+        return redirect(url_for("account_hub"))
 
     @app.route("/org/<int:org_id>")
     @org_required
@@ -378,9 +627,20 @@ def create_app(test_config=None):
     @app.route("/org/<int:org_id>/pipeline")
     @org_required
     def pipeline(org_id):
-        opps = g.db.scalars(select(Opportunity).where(Opportunity.organization_id == org_id).order_by(Opportunity.id.desc()).limit(150)).all()
-        companies = g.db.scalars(select(Company).where(Company.organization_id == org_id).order_by(Company.name)).all()
-        return render("pipeline", opportunities=opps, companies=companies)
+        projects_in_org = g.db.scalars(select(Project).where(Project.organization_id == org_id)
+            .order_by(Project.name)).all()
+        selected_id = request.args.get("project", type=int)
+        if selected_id and selected_id not in {p.id for p in projects_in_org}:
+            abort(403)
+        conditions = [Opportunity.organization_id == org_id]
+        if selected_id:
+            conditions.append(Opportunity.project_id == selected_id)
+        opps = g.db.scalars(select(Opportunity).where(*conditions)
+            .order_by(Opportunity.id.desc()).limit(150)).all()
+        companies = g.db.scalars(select(Company).where(Company.organization_id == org_id)
+            .order_by(Company.name)).all()
+        return render("pipeline", opportunities=opps, companies=companies,
+                      pipeline_projects=projects_in_org, pipeline_project_id=selected_id)
 
     @app.post("/org/<int:org_id>/pipeline")
     @org_required
@@ -388,11 +648,16 @@ def create_app(test_config=None):
         company_id = positive_id("company_id")
         if company_id and (not (c := g.db.get(Company, company_id)) or c.organization_id != org_id):
             abort(400)
-        opp = Opportunity(organization_id=org_id, company_id=company_id, title=required("title"))
+        pid = positive_id("project_id")
+        if pid and (not (project := g.db.get(Project, pid)) or project.organization_id != org_id):
+            abort(400, description="Projekt nepatří této firmě")
+        opp = Opportunity(organization_id=org_id, company_id=company_id, project_id=pid,
+                          title=required("title"))
         g.db.add(opp)
         audit("opportunity.create", opp.title, org_id)
         g.db.commit()
-        return redirect(url_for("pipeline", org_id=org_id))
+        return redirect(url_for("pipeline", org_id=org_id, project=pid) if pid
+                        else url_for("pipeline", org_id=org_id))
 
     @app.post("/org/<int:org_id>/pipeline/<int:opportunity_id>/stage")
     @org_required
@@ -417,7 +682,11 @@ def create_app(test_config=None):
     @app.post("/org/<int:org_id>/projects")
     @org_required
     def add_project(org_id):
-        item = Project(organization_id=org_id, name=required("name"), description=field("description", 1500))
+        kind = field("kind", 20) or "other"
+        if kind not in PROJECT_KINDS:
+            abort(400)
+        item = Project(organization_id=org_id, name=required("name"),
+                       kind=kind, description=field("description", 1500))
         g.db.add(item)
         audit("project.create", item.name, org_id)
         g.db.commit()
@@ -435,7 +704,12 @@ def create_app(test_config=None):
             g.org = g.db.get(Organization, project.organization_id)
         rows = g.db.scalars(select(Task).where(Task.project_id == project_id, Task.organization_id == project.organization_id).order_by(Task.id.desc()).limit(80)).all()
         role = g.db.scalar(select(Membership.role).where(Membership.organization_id == project.organization_id, Membership.user_id == g.user.id))
-        return render("project", project=project, tasks=rows, can_manage=role in ("owner", "admin"))
+        opps = g.db.scalars(select(Opportunity).where(
+            Opportunity.organization_id == project.organization_id,
+            Opportunity.project_id == project.id
+        ).order_by(Opportunity.id.desc()).limit(30)).all()
+        return render("project", project=project, tasks=rows, project_opportunities=opps,
+                      can_manage=role in ("owner", "admin"))
 
     @app.post("/project/<int:project_id>/status")
     @login_required

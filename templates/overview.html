@@ -1,0 +1,153 @@
+{% extends 'base.html' %}
+{% block title %}{{ {'mail':'E-maily','projects':'Projekty','database':'Databáze klientů','tasks':'Úkoly','account':'Nastavení účtu'}.get(section, 'EMA') }} • Ema{% endblock %}
+{% block content %}
+<div class="ema-hub-head">
+  {% if section == 'projects' %}
+    <span class="eyebrow">PROJEKTY</span><h1>Moje projekty</h1>
+    <p>Všechny dostupné projekty bez ohledu na firmu. Projekt určuje kontext chatu, komunikace a obchodních úkolů.</p>
+  {% elif section == 'mail' %}
+    <span class="eyebrow">KOMUNIKACE</span><h1>E-maily</h1>
+    <p>Souhrnný inbox všech schránek, ke kterým máš oprávnění. Zprávy zůstávají uložené u svých poštovních účtů a firem.</p>
+  {% elif section == 'database' %}
+    <span class="eyebrow">KLIENTSKÁ DATA</span><h1>Databáze / CRM</h1>
+    <p>Společné vyhledávání a přehled. Každý klient a kontakt zůstává ve své firmě a řídí se jejími oprávněními.</p>
+  {% elif section == 'tasks' %}
+    <span class="eyebrow">PLÁNOVÁNÍ</span><h1>Úkoly a termíny</h1>
+    <p>Otevřené závazky a termíny napříč přístupnými firmami a projekty. Nejdřív nejbližší termíny.</p>
+  {% elif section == 'account' %}
+    <span class="eyebrow">PRACOVNÍ ÚČET</span><h1>Firmy a nastavení</h1>
+    <p>Firmy slouží k oddělení klientských dat, poštovních účtů, práv a fakturace. Zde je založíš a přiřadíš k nim projekty.</p>
+  {% endif %}
+</div>
+
+{% if section == 'account' %}
+  {% if not eligible_orgs %}
+  <div class="ema-onboarding card panel"><span class="eyebrow">PRVNÍ KROK</span><h2>Založ první firmu</h2><p>Tvůj účet je aktivní, ale zatím není přiřazen k žádné firmě. Založením firmy získáš pracovní prostor pro projekty a poštovní schránky.</p></div>
+  {% endif %}
+  <div class="card panel ema-setup-create">
+    <h3>{{ 'Založit první firmu' if not eligible_orgs else 'Přidat další firmu' }}</h3>
+    <form action="{{ url_for('create_organization') }}" method="post" class="inline-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label class="ema-form-grow">Název firmy / organizace<input name="name" maxlength="160" required placeholder="Například Fresh Online s.r.o."></label>
+      <button class="btn primary" type="submit">Založit firmu</button>
+    </form>
+  </div>
+  <div class="ema-global-cards">
+    {% for o in eligible_orgs %}
+    <div class="card panel">
+      <div class="ema-card-head"><div><span class="eyebrow">FIREMNÍ DATA</span><h3>{{ o.name }}</h3></div><span class="status">Připojeno</span></div>
+      <p class="small muted">Klienti, přístupy, poštovní účty, fakturační identita a projekty firmy.</p>
+      <div class="ema-card-actions"><a class="btn" href="{{ url_for('settings', org_id=o.id) }}">Správa firmy a e-mailů</a><a class="btn" href="{{ url_for('clients', org_id=o.id) }}">Klienti firmy</a></div>
+      {% set ns = namespace(count=0) %}{% for p in all_projects if p.organization_id == o.id %}{% set ns.count = ns.count + 1 %}{% endfor %}
+      <p class="small muted">Počet projektů: {{ ns.count }}</p>
+    </div>
+    {% else %}
+    <div class="card panel"><h3>Bez firem</h3><p>Nejdříve založ první firmu pomocí formuláře výše.</p></div>
+    {% endfor %}
+  </div>
+  {% if eligible_orgs %}<a class="btn primary" href="{{ url_for('project_hub') }}">Přejít k projektům</a>{% endif %}
+{% elif section == 'projects' %}
+  {% if eligible_orgs %}
+  <details class="card panel ema-new-inline"><summary>+ Nový projekt</summary>
+    <form class="formstack" method="post" action="{{ url_for('create_project') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label>Název projektu<input name="name" maxlength="190" required></label>
+      <label>Firma / vlastník dat<select name="organization_id">{% for o in eligible_orgs %}<option value="{{ o.id }}">{{ o.name }}</option>{% endfor %}</select></label>
+      <label>Typ projektu<select name="kind"><option value="other">Ostatní projekt</option><option value="shop">E-shop / WooCommerce</option><option value="campaign">Kampaň / oslovení</option><option value="development">Vývoj aplikace</option></select></label>
+      <label>Popis<input name="description" maxlength="1500" placeholder="Například: Oslovovací kampaň CajnaCars"></label>
+      <button class="btn primary">Založit projekt</button>
+    </form>
+  </details>
+  {% else %}<div class="card panel"><h3>Nejdřív založ firmu</h3><p>Projekty patří firmám kvůli správě přístupů a účetnictví.</p><a class="btn primary" href="{{ url_for('account_hub') }}">Založit první firmu</a></div>{% endif %}
+  <div class="ema-global-cards">
+    {% for p in projects %}
+    <a class="card panel ema-project-hub-card" href="{{ url_for('home', project=p.id) }}">
+      <span class="status">{{ p.status }}</span><h3>{{ p.name }}</h3><small>{{ {'shop':'E-shop','campaign':'Kampaň','development':'Vývoj','other':'Projekt'}.get(p.kind, 'Projekt') }}</small><p>{{ p.description[:180] if p.description else 'Projekt bez popisu.' }}</p>
+      <small>{{ project_org_names.get(p.organization_id, '') }}</small><span class="link">Chat s Emou nad projektem →</span>
+    </a>
+    {% else %}<div class="card panel"><h3>Zatím žádné projekty</h3><p>Jakmile založíš první projekt nebo dostaneš pozvánku, zobrazí se tady.</p></div>{% endfor %}
+  </div>
+{% elif section == 'mail' %}
+  <div class="ema-mail-hub">
+    <aside class="card panel ema-mail-hub-sidebar">
+      <h3>Moje schránky ({{ boxes|length }})</h3>
+      <a class="ema-mail-filter {{ 'active' if not selected_box else '' }}" href="{{ url_for('mail_hub') }}">Všechny schránky</a>
+      {% for b in boxes %}
+      <a class="ema-mail-filter {{ 'active' if selected_box and selected_box.id == b.id else '' }}" href="{{ url_for('mail_hub', box=b.id) }}">
+        <strong>{{ b.label }}</strong><small>{{ b.address }}</small><small>{{ project_org_names.get(b.organization_id, '') if false else (orgs|selectattr('id', 'equalto', b.organization_id)|map(attribute='name')|first|default('')) }}</small>
+      </a>
+      {% else %}<p class="small muted">Nemáš zatím připojené žádné poštovní účty.</p>{% endfor %}
+      <a class="btn" href="{{ url_for('account_hub') }}">Nastavit schránky</a>
+    </aside>
+    <section class="card panel ema-mail-hub-messages">
+      <div class="ema-card-head"><h3>{{ selected_box.address if selected_box else 'Souhrnný inbox' }}</h3><span class="status">{{ mail_rows|length }} zpráv v přehledu</span></div>
+      <p class="small muted">Ema zatím zobrazuje synchronizované hlavičky zpráv. Automatické třídění podle projektů a objednávek bude následovat po ověření integrací.</p>
+      {% for m in mail_rows %}
+        {% set mb = box_lookup[m.mailbox_id] %}
+        <a class="ema-mail-item" href="{{ url_for('mail_detail', org_id=mb.organization_id, message_id=m.id) }}">
+          <strong>{{ m.subject or '(bez předmětu)' }}</strong>
+          <span>{{ m.sender }}</span>
+          <small>{{ mb.address }} · {{ m.sent_at.strftime('%d.%m.%Y %H:%M') if m.sent_at else 'Bez data' }}</small>
+        </a>
+      {% else %}<div class="empty-state">Zatím nejsou načtené zprávy. Pro synchronizaci otevři nastavení nebo firemní schránku.</div>{% endfor %}
+    </section>
+  </div>
+{% elif section == 'database' %}
+  <div class="ema-hub-inline-actions">
+    {% for o in eligible_orgs %}<a class="btn" href="{{ url_for('clients', org_id=o.id) }}">Spravovat klienty · {{ o.name }}</a>{% endfor %}
+    {% if not eligible_orgs %}<a class="btn primary" href="{{ url_for('account_hub') }}">Založit firmu</a>{% endif %}
+  </div>
+  <div class="card panel"><h3>Klientské firmy ({{ companies|length }})</h3>
+    <div class="table-wrap"><table><thead><tr><th>Název</th><th>IČO</th><th>E-mail</th><th>Firma / vlastník dat</th></tr></thead><tbody>
+    {% for c in companies %}<tr><td>{{ c.name }}</td><td>{{ c.ico or '—' }}</td><td>{{ c.email or '—' }}</td><td>{{ orgs|selectattr('id','equalto',c.organization_id)|map(attribute='name')|first|default('—') }}</td></tr>
+    {% else %}<tr><td colspan="4" class="muted">Bez klientů v dostupných firmách.</td></tr>{% endfor %}
+    </tbody></table></div></div>
+  <div class="card panel"><h3>Kontakty ({{ contacts|length }})</h3>
+    <div class="table-wrap"><table><thead><tr><th>Jméno</th><th>E-mail</th><th>Telefon</th><th>Firma / vlastník dat</th></tr></thead><tbody>
+    {% for c in contacts %}<tr><td>{{ c.name }}</td><td>{{ c.email or '—' }}</td><td>{{ c.phone or '—' }}</td><td>{{ orgs|selectattr('id','equalto',c.organization_id)|map(attribute='name')|first|default('—') }}</td></tr>
+    {% else %}<tr><td colspan="4" class="muted">Bez kontaktů v dostupných firmách.</td></tr>{% endfor %}
+    </tbody></table></div></div>
+  <div class="card panel"><h3>Import kontaktů z CSV</h3>
+    <p>Hromadné nahrání až 1 000 kontaktů. Podporované sloupce: jméno, příjmení, e-mail, telefon, firma; další sloupce se uloží jako metadata kontaktu.</p>
+    <p class="small muted">Každá dávka se ukládá pouze do vybrané firmy, duplicitní e-maily této firmy se přeskočí. Import sám o sobě nevytváří souhlas s marketingovým oslovováním.</p>
+    {% if eligible_orgs %}
+    <form method="post" action="{{ url_for('import_contacts_csv') }}" enctype="multipart/form-data" class="formstack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label>Vlastník klientské databáze<select name="organization_id" required>{% for o in eligible_orgs %}<option value="{{ o.id }}">{{ o.name }}</option>{% endfor %}</select></label>
+      <label>Soubor CSV (UTF-8 nebo Windows-1250, max. 950 kB)<input type="file" name="file" accept=".csv,text/csv" required></label>
+      <div class="ema-card-actions"><button class="btn" type="submit" name="mode" value="preview">Zkontrolovat bez importu</button>
+      <button class="btn primary" type="submit" name="mode" value="import">Importovat kontakty</button></div>
+    </form>
+    {% else %}<p>Pro import potřebuješ přiřazenou firmu.</p>{% endif %}
+    <p class="small muted">Propojení s WooCommerce přes Fresh Core: připravujeme řízenou synchronizaci, nikoliv přímé přepisování databáze.</p>
+  </div>
+{% elif section == 'tasks' %}
+  {% if eligible_orgs %}
+  <details class="card panel ema-new-inline"><summary>+ Nový úkol</summary>
+    <form method="post" action="{{ url_for('create_task_hub') }}" class="formstack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label>Úkol<input name="title" maxlength="240" required></label>
+      <label>Firma / vlastník dat<select name="organization_id" required>{% for o in eligible_orgs %}<option value="{{ o.id }}">{{ o.name }}</option>{% endfor %}</select></label>
+      <label>Projekt (volitelné)<select name="project_id"><option value="">Firemní úkol bez projektu</option>{% for p in projects %}<option value="{{ p.id }}">{{ p.name }} ({{ project_org_names.get(p.organization_id, '') }})</option>{% endfor %}</select></label>
+      <p class="small muted">Pokud vybereš projekt, musí patřit firmě uvedené ve formuláři.</p>
+      <label>Deadline<input name="due" type="date"></label><button class="btn primary">Vytvořit úkol</button>
+    </form>
+  </details>
+  {% endif %}
+  <div class="card panel"><h3>Seznam úkolů</h3>
+    {% for t in tasks %}
+      <div class="list-row ema-task-row">
+        <div><strong class="{{ 'strike' if t.done else '' }}">{{ t.title }}</strong>
+          <div class="small muted">{{ project_lookup[t.project_id].name if t.project_id and t.project_id in project_lookup else 'Firemní úkol' }} · {{ orgs|selectattr('id','equalto',t.organization_id)|map(attribute='name')|first|default('Projekt') }}</div>
+        </div>
+        <div class="ema-task-right">
+          <span class="status {{ 'ema-overdue' if t.due_at and t.due_at.date() < today and not t.done else '' }}">{{ t.due_at.strftime('%d.%m.%Y') if t.due_at else 'Bez termínu' }}</span>
+          {% if t.id in editable_task_ids %}
+          <form method="post" action="{{ url_for('toggle_task_hub', task_id=t.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn small-btn">{{ 'Otevřít' if t.done else 'Dokončit' }}</button></form>
+          {% endif %}
+        </div>
+      </div>
+    {% else %}<div class="empty-state">Žádné úkoly v dostupných projektech.</div>{% endfor %}
+  </div>
+{% endif %}
+{% endblock %}

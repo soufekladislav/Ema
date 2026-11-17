@@ -211,3 +211,59 @@
   .ema-assistant-context .ema-context-card{margin-bottom:12px}
   .ema-assistant-chat{min-height:525px}
 }
+
+/* EMA: fixed primary navigation and cross-company work hubs. */
+.ema-fixed-nav{display:grid;gap:6px}
+.ema-fixed-nav a{font-size:13px;padding:12px 14px}
+.ema-topbar{min-height:72px;height:auto;flex-wrap:wrap;gap:12px}
+.ema-global-filter{display:flex;align-items:center;flex-wrap:wrap;gap:9px;margin-left:auto}
+.ema-global-filter label{font-size:11px;font-weight:800;color:#657164}
+.ema-global-filter select{min-width:210px;max-width:320px;height:38px;background:#fff}
+.ema-global-filter .btn{height:38px;padding:7px 12px}
+.ema-topbar-brand{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.ema-hub-head{margin-bottom:26px}
+.ema-hub-head h1{font-size:36px;margin:5px 0 10px}
+.ema-hub-head p{font-size:13px;color:var(--muted);max-width:780px}
+.ema-global-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin:18px 0}
+.ema-global-cards>.card{min-width:0}
+.ema-card-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.ema-card-head h3{margin:5px 0}
+.ema-card-actions{display:flex;gap:7px;flex-wrap:wrap;margin:16px 0}
+.ema-card-actions .btn{font-size:11px}
+.ema-form-grow{flex:1;min-width:240px}
+.ema-setup-create{margin:18px 0}
+.ema-onboarding{background:#f2fae9;border-color:#d7e9af}
+.ema-onboarding h2{margin:8px 0;font-size:22px}
+.ema-new-inline{margin:15px 0}
+.ema-new-inline summary{font-weight:800;cursor:pointer}
+.ema-new-inline form{max-width:640px;margin-top:14px}
+.ema-project-hub-card{display:flex;flex-direction:column;gap:8px}
+.ema-project-hub-card h3{font-size:18px;margin:0}
+.ema-project-hub-card .status{align-self:flex-start}
+.ema-project-hub-card .link{font-size:12px;color:#6d8c16;font-weight:700}
+.ema-project-hub-card small{font-size:11px;color:#748071}
+.ema-hub-inline-actions{display:flex;gap:9px;flex-wrap:wrap;margin-bottom:20px}
+.ema-mail-hub{display:grid;grid-template-columns:280px minmax(0,1fr);gap:16px}
+.ema-mail-hub-sidebar,.ema-mail-hub-messages{min-width:0}
+.ema-mail-filter{display:flex;flex-direction:column;gap:3px;border-radius:10px;padding:11px 13px;border:1px solid transparent}
+.ema-mail-filter.active,.ema-mail-filter:hover{background:#f3f9e9;border-color:#d8eabb}
+.ema-mail-filter strong{font-size:12px}
+.ema-mail-filter small{font-size:10px;color:#657564}
+.ema-mail-hub-sidebar .btn{display:block;text-align:center;margin-top:15px}
+.ema-mail-item{display:flex;flex-direction:column;padding:13px 12px;gap:3px;border-top:1px solid var(--line);background:#fff}
+.ema-mail-item:hover{background:#f7faef}
+.ema-mail-item strong{font-size:13px}
+.ema-mail-item span{font-size:12px}
+.ema-mail-item small{font-size:10px;color:var(--muted)}
+.ema-task-right{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-left:auto}
+.ema-task-right .btn{font-size:10px}
+.ema-overdue{color:#b13731;border-color:#edc0bb;background:#fff1f0}
+.ema-reminders-list{display:grid;gap:7px}
+.ema-reminder-item{display:flex;gap:8px;align-items:flex-start;justify-content:space-between;border-bottom:1px solid var(--line);padding:8px 0;font-size:12px}
+.ema-reminder-item strong{display:block}
+.ema-reminder-item small{font-size:10px;color:#788078}
+.ema-reminder-date{flex:0 0 auto;border-radius:99px;padding:4px 7px;background:#eef6e3;color:#5c771d;font-size:10px;font-weight:700}
+.ema-reminder-date.overdue{background:#fff1f0;color:#b53f39}
+@media(max-width:1170px){.ema-global-cards{grid-template-columns:repeat(2,minmax(0,1fr))}.ema-topbar{padding:12px 20px}}
+@media(max-width:800px){.ema-mail-hub{grid-template-columns:1fr}.ema-mail-hub-sidebar{max-height:250px;overflow-y:auto}.ema-global-cards{grid-template-columns:1fr}}
+@media(max-width:550px){.ema-global-filter{margin-left:0;width:100%}.ema-global-filter select{flex:1;min-width:140px}.ema-topbar-brand{width:100%}.ema-hub-head h1{font-size:28px}.ema-task-right{margin:8px 0 0}}

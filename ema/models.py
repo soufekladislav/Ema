@@ -49,6 +49,7 @@ class Project(Base):
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
     name: Mapped[str] = mapped_column(String(190), nullable=False)
     status: Mapped[str] = mapped_column(String(40), default="planning", nullable=False)
+    kind: Mapped[str] = mapped_column(String(20), default="other", nullable=False)
     description: Mapped[str] = mapped_column(Text, default="", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
     __table_args__ = (Index("ix_project_org", "organization_id"),)
@@ -84,6 +85,8 @@ class Contact(Base):
     name: Mapped[str] = mapped_column(String(190), nullable=False)
     email: Mapped[str] = mapped_column(String(190), default="", nullable=False)
     phone: Mapped[str] = mapped_column(String(60), default="", nullable=False)
+    # Source and extra CSV fields are preserved within the same organization boundary.
+    metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     __table_args__ = (Index("ix_contact_org", "organization_id"),)
 
 
