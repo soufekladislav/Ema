@@ -779,14 +779,56 @@ def create_app(test_config=None):
         try:
             preview = preview_message(box, msg, app.config["MAIL_ENCRYPTION_KEY"],
                                       folder_name=folder.name, show_images=show_images)
-            state = get_mail_user_state(g.db, g.user.id, msg.id)
-            state.read_override = True
-            g.db.commit()
+            # Opening marks \Seen on IMAP; read-only mailbox grants do not
+            # silently mutate someone else's mailbox.
+            confirmed_read = is_imap_read(msg)
+            flag_warning = ""
+            try:
+                mailbox_or_403(box.id, manage=True)
+                if not confirmed_read:
+                    set_server_flags(g.db, box, app.config["MAIL_ENCRYPTION_KEY"], [msg], "read")
+                confirmed_read = is_imap_read(msg)
+            except Forbidden:
+                flag_warning = "Pouze čtení: příznak zůstal beze změny."
+            except MailError as ex:
+                flag_warning = str(ex)
             content = render_template("_mail_quick_preview.html", message=msg, box=box,
-                                      preview=preview, show_images=show_images)
-            return {"html": content, "read": True}
+                                      preview=preview, show_images=show_images,
+                                      flag_warning=flag_warning)
+            return {"html": content, "read": confirmed_read, "warning": flag_warning}
         except MailError as ex:
             return {"error": str(ex)}, 422
+
+    @app.get("/mail/<int:mail_id>/attachment/<int:part_index>")
+    @login_required
+    def mail_attachment_download(mail_id, part_index):
+        """Download exactly one attachment; no SQL, disk or cache persistence."""
+        msg = g.db.get(MailMessage, mail_id)
+        if not msg or msg.moved:
+            abort(404)
+        box = mailbox_or_403(msg.mailbox_id)
+        try:
+            organization_access(g.db, g.user.id, box.organization_id)
+        except Forbidden:
+            abort(403)
+        folder = g.db.get(MailFolder, msg.folder_id)
+        if not folder or folder.mailbox_id != box.id or folder.uidvalidity != msg.uidvalidity:
+            abort(404)
+        try:
+            filename, content_type, data = download_message_attachment(
+                box, msg, app.config["MAIL_ENCRYPTION_KEY"], part_index,
+                folder_name=folder.name)
+        except (IndexError, ValueError):
+            abort(404)
+        except MailError as ex:
+            abort(422, description=str(ex))
+        response = send_file(BytesIO(data), mimetype="application/octet-stream",
+                             as_attachment=True, download_name=filename,
+                             max_age=0)
+        response.headers["Cache-Control"] = "private, no-store, max-age=0"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        return response
+
 
     @app.post("/mail/<int:mail_id>/quick-move")
     @login_required
@@ -1633,23 +1675,26 @@ def create_app(test_config=None):
         folder = g.db.get(MailFolder, msg.folder_id)
         if folder is None or folder.mailbox_id != box.id:
             abort(404)
-        # Personal read state is local to Ema; IMAP is opened read-only.
-        state = get_mail_user_state(g.db, g.user.id, msg.id)
-        if state.read_override is not True:
-            state.read_override = True
-            g.db.commit()
         show_images = request.args.get("images") == "1"
+        warning = ("HTML a přílohy se načítají přímo z IMAP pouze po otevření."
+                   " Přílohy ani těla e-mailů se neukládají do databáze; soubory až do 25 MB.")
         try:
             preview = preview_message(box, msg, app.config["MAIL_ENCRYPTION_KEY"],
                                       show_images=show_images, folder_name=folder.name)
-            warning = ("HTML a prostý text jsou čtené přímo z IMAP, maximálně 192 KiB."
-                       " Přílohy a obsah zprávy se neukládají do databáze.")
+            try:
+                mailbox_or_403(box.id, manage=True)
+                if not is_imap_read(msg):
+                    set_server_flags(g.db, box, app.config["MAIL_ENCRYPTION_KEY"], [msg], "read")
+            except Forbidden:
+                warning += " Jen pro čtení: IMAP příznak není měněn."
+            except MailError as ex:
+                warning += " Změna \Seen selhala: " + str(ex)
         except MailError as ex:
             preview, warning = None, str(ex)
         companies = g.db.scalars(select(Company).where(Company.organization_id == org_id)).all()
         projs = g.db.scalars(select(Project).where(Project.organization_id == org_id)).all()
         return render("mail-detail", message=msg, selected_box=box, preview=preview,
-                      warning=warning, show_images=show_images, starred=state.starred,
+                      warning=warning, show_images=show_images, starred=r"\flagged" in (msg.flags or "").lower().split(),
                       mail_folder_id=folder.id, companies=companies, projects=projs)
 
     @app.post("/org/<int:org_id>/mail/message/<int:message_id>/link")
