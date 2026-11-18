@@ -56,14 +56,21 @@ def test_compact_inbox_and_inline_mime_preview(seeded, monkeypatch):
     def fake_preview(*args, **kwargs):
         return MailPreview("<p>Safe HTML</p>","Safe plain",True,False,False)
     monkeypatch.setattr("ema.web.preview_message",fake_preview)
+    def fake_server_flags(db, box, key, messages, action):
+        for message in messages:
+            message.flags = r"\Seen"
+        db.commit()
+        return len(messages)
+    monkeypatch.setattr("ema.web.set_server_flags", fake_server_flags)
     quick=client.get(f"/mail/{client.ids_v1['message']}/quick")
     assert quick.status_code==200
     assert b"Safe HTML" in quick.json["html"].encode()
     assert b"Odpov" in quick.json["html"].encode()
     with Session(client.application.extensions["ema_engine"]) as db:
-        state=db.scalar(select(MailUserState).where(
-            MailUserState.mail_id==client.ids_v1["message"]))
-        assert state.read_override is True
+        message=db.get(MailMessage,client.ids_v1["message"])
+        assert r"\Seen" in message.flags
+        assert db.scalar(select(MailUserState).where(
+            MailUserState.mail_id==client.ids_v1["message"])) is None
     guest=client.application.test_client()
     login(guest,"guest")
     assert guest.get(f"/mail/{client.ids_v1['message']}/quick").status_code==403
