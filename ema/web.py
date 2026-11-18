@@ -15,11 +15,11 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 import click
 from flask import Flask, abort, flash, g, redirect, render_template, request, session, url_for, send_from_directory, send_file
-from sqlalchemy import func, select, text, or_, and_, case
+from sqlalchemy import func, select, text, or_, and_, case, inspect
 from sqlalchemy.exc import IntegrityError
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from .mail_compose import clean_signature, original_reply_quote
+from .mail_compose import clean_signature, original_reply_quote, outgoing_parts
 from .mail_service import MailError, encrypt_password, preview_message, download_message_attachment, send_plain, send_composed, validate_recipients, sync_inbox, validate_mail_host, verify_imap_connection, verify_smtp_connection
 from .mail_folders import (
     PAGE_SIZE, discover_folders, available_folders, decode_modified_utf7,
@@ -1105,6 +1105,20 @@ def create_app(test_config=None):
                               signature_preview=clean_signature(box.signature_html or ""),
                               reply_quote_preview=original_quote,
                               csrf_nonce=secrets.token_urlsafe(24)), 422
+        # Validate final MIME text BEFORE the Outbound idempotency row or SMTP.
+        # A too-long automatic signature/quote must not become a false
+        # "uncertain send" requiring investigation of a message never sent.
+        try:
+            outgoing_parts(body, box.signature_html or "", original_quote)
+        except (MailError, ValueError) as ex:
+            flash("Zpráva nebyla odeslána: " + str(ex), "error")
+            return render_hub("compose", send_boxes=[box], active_box=box,
+                              recipient=to, subject=subject, draft_content=body,
+                              cc_prefill=cc, bcc_prefill=bcc,
+                              source_message=src if reply_id else None, reply_id=reply_id,
+                              signature_preview=clean_signature(box.signature_html or ""),
+                              reply_quote_preview=original_quote,
+                              csrf_nonce=secrets.token_urlsafe(24)), 422
         if request.content_length and request.content_length > 11_000_000:
             abort(413)
         attached = []
@@ -1848,6 +1862,13 @@ def create_app(test_config=None):
         boxes = g.db.scalars(select(Mailbox).where(Mailbox.organization_id == org_id)).all() if is_admin else []
         return render("settings", membership=m, is_admin=is_admin, members=members, boxes=boxes)
 
+    def connection_check_schema_ready():
+        """Allow account settings to survive a code-first deploy until upgrade-db."""
+        try:
+            return inspect(g.db.get_bind()).has_table("mailbox_connection_checks")
+        except Exception:
+            return False
+
     @app.route("/org/<int:org_id>/mail/<int:box_id>/edit", methods=["GET", "POST"])
     @org_admin
     def edit_mailbox(org_id, box_id):
@@ -1855,9 +1876,11 @@ def create_app(test_config=None):
         if box.organization_id != org_id:
             abort(403)
         if request.method == "GET":
+            ready = connection_check_schema_ready()
             connection = g.db.scalar(select(MailboxConnectionCheck).where(
-                MailboxConnectionCheck.mailbox_id == box.id))
+                MailboxConnectionCheck.mailbox_id == box.id)) if ready else None
             return render("mailbox-edit", box=box, connection_check=connection,
+                          connection_ready=ready,
                           signature_preview=clean_signature(box.signature_html or ""))
         password = request.form.get("password", "")
         try:
@@ -1904,7 +1927,7 @@ def create_app(test_config=None):
             box.status, box.sync_error = "not_synced", ""
             box.last_sync = None
             box.server_message_count = None
-        if changed_identity or encrypted is not None or smtp_changed:
+        if (changed_identity or encrypted is not None or smtp_changed) and connection_check_schema_ready():
             checked = g.db.scalar(select(MailboxConnectionCheck).where(
                 MailboxConnectionCheck.mailbox_id == box.id))
             if checked:
@@ -1920,6 +1943,10 @@ def create_app(test_config=None):
         box = mailbox_or_403(box_id, manage=True)
         if box.organization_id != org_id:
             abort(403)
+        if not connection_check_schema_ready():
+            flash("Nejdříve spusťte databázovou migraci upgrade-db. "
+                  "Ověření spojení nebylo spuštěno.", "error")
+            return redirect(url_for("edit_mailbox",org_id=org_id,box_id=box_id))
         # An explicit user action, not background polling or a sent test email.
         imap_ok, imap_detail = verify_imap_connection(
             box, app.config["MAIL_ENCRYPTION_KEY"])
