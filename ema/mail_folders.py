@@ -216,6 +216,93 @@ def fetch_folder_page(db, box, key, folder, *, before_uid=None, limit=PAGE_SIZE)
             pass
 
 
+
+def set_server_flags(db, box, key, messages, action):
+    """Propagate Seen/Flagged to IMAP; do not pretend local state is authoritative.
+
+    One source folder per batch. Never auto-retry after an uncertain STORE.
+    The row flags are updated only after server confirms UID+FLAGS.
+    """
+    if action not in ("read", "unread", "star", "unstar"):
+        raise MailError("Neplatná akce se zprávou")
+    if not messages or len(messages) > 50:
+        raise MailError("V jedné dávce lze změnit 1 až 50 zpráv")
+    folder_ids = {msg.folder_id for msg in messages}
+    if len(folder_ids) != 1 or any(msg.mailbox_id != box.id or msg.moved for msg in messages):
+        raise MailError("Zprávy musí být v jedné schránce a složce")
+    folder = db.get(MailFolder, messages[0].folder_id)
+    if not folder or folder.mailbox_id != box.id or any(
+            msg.uidvalidity != folder.uidvalidity for msg in messages):
+        raise MailError("UIDVALIDITY zpráv není aktuální")
+    flag = r"\Seen" if action in ("read", "unread") else r"\Flagged"
+    operation = "+FLAGS.SILENT" if action in ("read", "star") else "-FLAGS.SILENT"
+    uids = sorted({msg.uid for msg in messages})
+    uid_set = ",".join(str(uid) for uid in uids)
+    client = _connect(box, key)
+    try:
+        typ, _ = client.select(quote_mailbox_name(folder.name), readonly=False)
+        if typ != "OK":
+            raise MailError("IMAP neumožňuje změnu příznaků v této složce")
+        validity = client.response("UIDVALIDITY")[1]
+        if not validity or int(validity[0]) != folder.uidvalidity:
+            raise MailError("UIDVALIDITY se změnilo. Nejdříve obnovte schránku")
+        typ, data = client.uid("FETCH", uid_set, "(UID FLAGS)")
+        if typ != "OK":
+            raise MailError("IMAP odmítl ověření UID")
+        present = {int(m.group(1)) for item in (data or []) if isinstance(item, tuple)
+                   for m in [re.search(rb"\bUID\s+(\d+)\b", item[0], re.I)] if m}
+        if present != set(uids):
+            raise MailError("Zprávy již na serveru nejsou dostupné. Obnovte složku")
+        typ, _ = client.uid("STORE", uid_set, operation, f"({flag})")
+        if typ != "OK":
+            raise MailError("IMAP nepotvrdil změnu příznaku. Před opakováním ověřte webmail")
+        typ, data = client.uid("FETCH", uid_set, "(UID FLAGS)")
+        if typ != "OK":
+            raise MailError("Příznak byl odeslán, ale ověření selhalo; obnovte složku")
+        remote = {}
+        for item in (data or []):
+            if not isinstance(item, tuple):
+                continue
+            head = item[0] if isinstance(item[0], bytes) else b""
+            uid = re.search(rb"\bUID\s+(\d+)\b", head, re.I)
+            flags = re.search(rb"\bFLAGS\s+\(([^)]*)\)", head, re.I)
+            if uid and flags:
+                remote[int(uid.group(1))] = flags.group(1).decode("ascii", "replace")
+        expected = action in ("read", "star")
+        if set(remote) != set(uids) or any(
+                (flag.lower() in remote[uid].lower().split()) != expected for uid in uids):
+            raise MailError("IMAP nepotvrdil konečný stav příznaků. Obnovte složku")
+        for msg in messages:
+            msg.flags = remote[msg.uid]
+        db.commit()
+        return len(uids)
+    except MailError:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise MailError("Změna IMAP příznaků je nejistá. Zkontrolujte stav na serveru") from None
+    finally:
+        try:
+            client.logout()
+        except Exception:
+            pass
+
+
+def _move_destination(db, box, action, target_folder_id=None):
+    if action == "move":
+        folder = db.get(MailFolder, target_folder_id) if isinstance(target_folder_id, int) else None
+        if not folder or folder.mailbox_id != box.id:
+            raise MailError("Vybraná cílová složka nepatří ke schránce")
+        if r"\noselect" in (folder.special_use or "").lower():
+            raise MailError("Do této IMAP složky nelze zprávy přesunout")
+        return folder
+    if action not in ("trash", "archive"):
+        raise MailError("Neplatný cíl přesunu")
+    return special_folder(db, box, action)
+
+
+
 def is_trash_folder(folder):
     """Identify a real user-visible Trash leaf, regardless of stale LIST flags.
 
@@ -325,20 +412,20 @@ def _previously_moved_uids(db, box, source):
     ).limit(5000)).all())
 
 
-def move_message(db, box, key, msg, action):
+def move_message(db, box, key, msg, action, *, target_folder_id=None):
     """Explicit server-side MOVE only. Trash never implies EXPUNGE or permanent deletion."""
     if msg.mailbox_id != box.id or msg.moved:
         raise MailError("Tato zpráva již byla přesunuta nebo není ve schránce")
     src = db.get(MailFolder, msg.folder_id)
     if src is None or src.mailbox_id != box.id or src.uidvalidity != msg.uidvalidity:
         raise MailError("Složka nebo UID zprávy se změnily. Nejdříve obnovte přehled")
-    target = special_folder(db, box, action)
+    target = _move_destination(db, box, action, target_folder_id)
     client = _connect(box, key)
     try:
         # Folder LIST may not have run yet (especially on imported mailboxes).
         if target is None:
             _discover_on_client(db, box, client)
-            target = special_folder(db, box, action)
+            target = _move_destination(db, box, action, target_folder_id)
         if target is None:
             raise MailError("Cílová složka Koš/Archiv nebyla na IMAP serveru nalezena; zkontrolujte názvy složek.")
         if target.id == src.id:
@@ -402,7 +489,7 @@ def append_sent_copy(db, box, key, raw_message):
 
 
 
-def move_many_messages(db, box, key, messages, action):
+def move_many_messages(db, box, key, messages, action, *, target_folder_id=None):
     """One remote UID MOVE per mailbox/source-folder batch (up to 50 UIDs)."""
     if not messages or len(messages) > 50:
         raise MailError("Dávka přesunu musí obsahovat 1–50 zpráv")
@@ -412,12 +499,12 @@ def move_many_messages(db, box, key, messages, action):
     src = db.get(MailFolder, messages[0].folder_id)
     if src is None or src.mailbox_id != box.id or any(m.uidvalidity != src.uidvalidity for m in messages):
         raise MailError("UIDVALIDITY se změnilo; nejprve obnov zprávy")
-    target = special_folder(db, box, action)
+    target = _move_destination(db, box, action, target_folder_id)
     client = _connect(box, key)
     try:
         if target is None:
             _discover_on_client(db, box, client)
-            target = special_folder(db, box, action)
+            target = _move_destination(db, box, action, target_folder_id)
         if target is None:
             raise MailError("Cílová složka Koš/Archiv nebyla na IMAP serveru nalezena")
         if target.id == src.id:
