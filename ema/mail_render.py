@@ -165,9 +165,6 @@ def _safe_newsletter_styles(html_body):
                 used += len(candidate)
                 result.append(candidate)
     return "\n".join(result)
-            used += len(candidate)
-            result.append(candidate)
-    return "\n".join(result)
 
 
 def make_preview(data, *, show_images=False, truncated=False):
