@@ -104,6 +104,9 @@
     }
     if (move) {
       inform(result.message || "Zpráva byla přesunuta.");
+      if (result.pending_cleanup) {
+        window.alert(result.message || "Server ponechal originál označený ke smazání.");
+      }
       window.location.reload();return;
     }
     row.dataset.isRead = String(result.read);
