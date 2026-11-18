@@ -35,7 +35,9 @@ EMAIL_CSS = CSSSanitizer(allowed_css_properties={
     "padding-top", "padding-bottom", "padding-left", "padding-right", "border",
     "border-color", "border-style", "border-width", "border-collapse", "border-radius",
     "width", "max-width", "min-width", "height", "max-height", "vertical-align",
-    "display", "white-space", "word-break", "overflow-wrap",
+    "display", "white-space", "word-break", "overflow-wrap", "word-wrap",
+    "border-spacing", "box-sizing", "direction", "background-position",
+    "background-repeat", "background-size",
 }) if CSSSanitizer else None
 
 
@@ -238,6 +240,8 @@ def make_preview(data, *, show_images=False, truncated=False):
                 if value.startswith("data:"):
                     return value in cid_images.values()
                 return show_images and safe_image_url(value)
+            if tag in ("table", "td", "th") and name in ("width", "height"):
+                return bool(re.fullmatch(r"\d{1,4}%?", value))
             if tag in ("td", "th") and name in ("colspan", "rowspan"):
                 return bool(re.fullmatch(r"\d{1,2}", value))
             return False
@@ -266,10 +270,10 @@ def make_preview(data, *, show_images=False, truncated=False):
             "<base target='_blank'>"
             "<link rel='stylesheet' href='https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap'>"
             "<style>"
-            "body{font-family:Poppins,Arial,sans-serif;font-size:14px;line-height:1.65;color:#172019;margin:16px;"
-            "overflow-wrap:anywhere;}table{max-width:100%;border-collapse:collapse}"
-            "td,th{padding:4px;}img{max-width:100%;height:auto}"
-            "a{color:#436c08}blockquote{border-left:3px solid #b9d98e;padding-left:10px}"
+            "body{font-family:Poppins,Arial,sans-serif;font-size:14px;line-height:1.55;"
+            "color:#172019;margin:0;padding:12px;overflow-wrap:anywhere;}"
+            "table{max-width:100%;}img{max-width:100%;height:auto}"
+            "blockquote{border-left:3px solid #b9d98e;padding-left:10px}"
             "</style><style>" + safe_style_rules + "</style></head><body>" + sanitized + "</body></html>"
         )
         return MailPreview(envelope, plain, True, has_remote_images, truncated, attachments)
