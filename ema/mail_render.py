@@ -3,7 +3,7 @@ import base64
 import html
 import ipaddress
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field as dataclass_field
 from email import policy
 from email.parser import BytesParser
 from urllib.parse import urlsplit
@@ -47,6 +47,52 @@ class MailPreview:
     is_html: bool
     remote_images: bool
     truncated: bool
+    attachments: tuple = dataclass_field(default_factory=tuple)
+
+
+@dataclass(frozen=True)
+class AttachmentInfo:
+    index: int
+    filename: str
+    content_type: str
+    size_bytes: int
+
+
+def _safe_filename(name, index):
+    fallback = f"priloha-{index + 1}"
+    clean = re.sub(r"[/\\\x00-\x1f\x7f]+", "_", str(name or fallback))
+    return clean.strip(" .")[:160] or fallback
+
+
+def _attachment_parts(message):
+    index = 0
+    for part in message.walk():
+        if part.is_multipart():
+            continue
+        filename = part.get_filename()
+        if part.get_content_disposition() != "attachment" and not filename:
+            continue
+        payload = part.get_payload(decode=True) or b""
+        yield index, part, payload
+        index += 1
+
+
+def list_attachments(message):
+    return tuple(AttachmentInfo(index, _safe_filename(part.get_filename(), index),
+                                part.get_content_type(), len(payload))
+                 for index, part, payload in _attachment_parts(message))
+
+
+def extract_attachment(raw, index):
+    if not isinstance(index, int) or not (0 <= index < 100):
+        raise IndexError("Invalid part")
+    message = BytesParser(policy=policy.default).parsebytes(raw or b"")
+    for number, part, payload in _attachment_parts(message):
+        if number == index:
+            if len(payload) > 25 * 1024 * 1024:
+                raise ValueError("Příloha překračuje limit 25 MB")
+            return _safe_filename(part.get_filename(), number), part.get_content_type(), payload
+    raise IndexError("Attachment not found")
 
 
 def safe_image_url(value):
