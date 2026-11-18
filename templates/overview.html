@@ -239,6 +239,26 @@
       <label class="ema-compose-body-label">Text zprávy
         <textarea name="body" rows="16" maxlength="100000" required placeholder="Napiš zprávu…">{{ draft_content }}</textarea>
       </label>
+      {% if signature_preview|default('') %}
+      <div class="ema-compose-signature-info">
+        <strong>Automatický podpis schránky</strong>
+        <div class="ema-compose-signature-preview">{{ signature_preview|safe }}</div>
+        <small>Podpis se připojí automaticky při odeslání; není třeba jej psát do zprávy.</small>
+      </div>
+      {% endif %}
+      {% if reply_id %}
+      <details class="ema-compose-quoted" open>
+        <summary>Původní e-mail bude připojen na konec odpovědi</summary>
+        {% if reply_quote_error|default('') %}
+        <p role="alert" class="flash error">Původní zprávu nyní nelze načíst: {{ reply_quote_error }}.
+           Odpověď bez původní zprávy nebude odeslána.</p>
+        {% else %}
+        <pre>{{ reply_quote_preview|default('')|truncate(8000, true, '…') }}</pre>
+        <small>Jde o náhled; při odeslání se kompletní citace načte z IMAP znovu.
+          Přílohy původní zprávy se nepřikládají.</small>
+        {% endif %}
+      </details>
+      {% endif %}
       <label class="ema-compose-attachments">📎 Přílohy (nejvýše 4 soubory, 6 MB na soubor)
         <input type="file" name="attachments" multiple>
       </label>
