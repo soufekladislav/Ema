@@ -2,10 +2,12 @@
 {% block title %}Potvrdit vysypání Koše • Ema{% endblock %}
 {% block content %}
 <section class="card panel ema-trash-confirm" style="max-width:760px;margin:24px auto;">
-  <h1>Opravdu vysypat celý Koš?</h1>
+  <h1>Trvale odstranit zprávy pouze z vybraného Koše?</h1>
+  <p><strong>Neprovádí se výmaz celé poštovní schránky.</strong> EMA na IMAP serveru
+  otevře výhradně níže uvedenou složku a před mazáním její identitu znovu ověří.</p>
   <p>Vybraná schránka: <strong>{{ box.label }} ({{ box.address }})</strong></p>
   <p>Serverová složka: <strong>{{ folder.name }}</strong></p>
-  <p class="ema-trash-confirm-count">Celkem zpráv na IMAP serveru (včetně již označených ke smazání):
+  <p class="ema-trash-confirm-count">Zprávy ve vybrané složce Koš (včetně již označených ke smazání):
     <strong>{{ '{:,}'.format(snapshot.count).replace(',', ' ') }}</strong></p>
   <p>Viditelné zprávy v Koši: <strong>{{ '{:,}'.format(snapshot.visible_count).replace(',', ' ') }}</strong>
      · Nepřečtené: <strong>{{ '{:,}'.format(snapshot.unread_count).replace(',', ' ') }}</strong>
@@ -28,6 +30,11 @@
       <input type="checkbox" name="acknowledge" value="yes" required>
       Rozumím, že trvale odstraním všech {{ '{:,}'.format(snapshot.count).replace(',', ' ') }}
       zpráv z uvedeného Koše.
+    </label>
+    <label>Pro potvrzení napiš přesně <strong>SMAZAT KOŠ</strong>:
+      <input name="trash_phrase" type="text" autocomplete="off" required
+             pattern="SMAZAT KOŠ" placeholder="SMAZAT KOŠ"
+             aria-label="Potvrzení smazání pouze z Koše">
     </label>
     <div class="ema-card-actions">
       <button type="submit" class="btn primary ema-trash-danger">
