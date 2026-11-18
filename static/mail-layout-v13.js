@@ -20,6 +20,7 @@
         queued = false;
         const snapshot = ids();
         say("Ukládám pořadí schránek…");
+        let succeeded = false;
         try {
           const response = await fetch(list.dataset.orderUrl, {
             method: "POST", credentials: "same-origin", cache: "no-store",
@@ -34,13 +35,14 @@
             throw Error("Server nepotvrdil pořadí schránek.");
           }
           latest = snapshot.join(",");
+          succeeded = true;
           say(queued ? "Ukládám další změnu…" : "Pořadí schránek uloženo na serveru.");
         } catch (error) {
           say((error.message || "Uložení selhalo") +
               " Pořadí není potvrzené, po obnovení se může změnit.");
           // Do not issue concurrent retries; user can deliberately reorder again.
         }
-        if (!queued && ids().join(",") !== latest) queued = true;
+        if (succeeded && !queued && ids().join(",") !== latest) queued = true;
       }
       sending = false;
     }
