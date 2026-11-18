@@ -1,0 +1,32 @@
+/* EMA Mail V1.3 final details: settings, signature and immutable quote. */
+.ema-mailbox-edit-layout{display:grid;grid-template-columns:minmax(0,740px) minmax(260px,1fr);
+ gap:18px;align-items:start;max-width:1380px;margin:auto}
+.ema-mailbox-edit-layout .ema-mailbox-edit-card{min-width:0;margin:0;width:100%;max-width:none}
+.ema-mailbox-connection-panel{min-width:0;margin:0;position:sticky;top:88px}
+.ema-mail-connection-result{padding:12px;border-radius:10px;border:1px solid #dce8d3;
+ display:grid;gap:4px;margin:10px 0;background:#f6faf1;font-size:12px}
+.ema-mail-connection-result.success{border-left:4px solid #84ad31}
+.ema-mail-connection-result.error{background:#fff5f2;border-color:#e7c9c4;border-left:4px solid #d85143}
+.ema-mail-connection-result small{color:#59695b;overflow-wrap:anywhere}
+.ema-signature-settings-preview{margin:4px 0 12px;padding:12px;border-radius:9px;
+ background:#fff;border:1px solid #e2e9dd;font-size:12px}
+.ema-signature-settings-preview>div{margin-top:9px;overflow-wrap:anywhere}
+.ema-signature-settings-preview img{max-width:100%;height:auto}
+.ema-compose-signature-info,.ema-compose-quoted{margin:8px 17px 14px;padding:12px 14px;
+ border:1px solid #e1ead7;background:#fafdf7;border-radius:10px;font-size:12px}
+.ema-compose-signature-preview{padding:9px 0;overflow-wrap:anywhere}
+.ema-compose-signature-preview img{max-width:100%;height:auto}
+.ema-compose-signature-info small,.ema-compose-quoted small{color:#61715f}
+.ema-compose-quoted summary{font-weight:700;cursor:pointer}
+.ema-compose-quoted pre{font:12px/1.6 Poppins,system-ui,sans-serif;
+ max-height:250px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;
+ padding:12px;background:#fff;border:1px solid #e4eadf;border-radius:8px}
+@media(max-width:1000px){
+ .ema-mailbox-edit-layout{grid-template-columns:minmax(0,1fr)}
+ .ema-mailbox-connection-panel{position:static}
+}
+@media(max-width:760px){
+ .ema-compose-signature-info,.ema-compose-quoted{margin:8px 10px}
+ .ema-mailbox-edit-layout{display:block}
+ .ema-mailbox-connection-panel{margin-top:14px}
+}
