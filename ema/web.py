@@ -3,6 +3,7 @@ import os
 import re
 import json
 import secrets
+from io import BytesIO
 from datetime import datetime, timedelta
 from time import time
 from functools import wraps
@@ -13,16 +14,16 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 import click
-from flask import Flask, abort, flash, g, redirect, render_template, request, session, url_for, send_from_directory
+from flask import Flask, abort, flash, g, redirect, render_template, request, session, url_for, send_from_directory, send_file
 from sqlalchemy import func, select, text, or_, and_, case
 from sqlalchemy.exc import IntegrityError
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from .mail_service import MailError, encrypt_password, preview_message, send_plain, send_composed, validate_recipients, sync_inbox, validate_mail_host
+from .mail_service import MailError, encrypt_password, preview_message, download_message_attachment, send_plain, send_composed, validate_recipients, sync_inbox, validate_mail_host
 from .mail_folders import (
     PAGE_SIZE, discover_folders, available_folders, decode_modified_utf7,
     fetch_folder_page, special_folder, move_message, move_many_messages,
-    append_sent_copy, empty_trash_batch, preview_trash_all, empty_trash_all, is_trash_folder,
+    append_sent_copy, empty_trash_batch, preview_trash_all, empty_trash_all, is_trash_folder, set_server_flags,
 )
 from .assistant_service import AssistantError, run_assistant
 from .contact_import import ImportErrorCSV, extract_contacts
@@ -227,16 +228,13 @@ def mailbox_counts(db, uid, boxes):
     ids = [b.id for b in boxes]
     if not ids:
         return {}
-    read_value = case(
-        (MailUserState.read_override.is_not(None), MailUserState.read_override),
-        else_=func.instr(func.lower(MailMessage.flags), r"\seen") > 0,
-    )
+    # IMAP is the sole source of truth for Seen/Flagged. Do not let historic
+    # personal MailUserState overrides affect unread counters.
+    read_value = func.instr(func.lower(MailMessage.flags), r"\seen") > 0
     rows = db.execute(
         select(MailMessage.mailbox_id, func.count(MailMessage.id),
                func.sum(case((read_value, 0), else_=1)))
         .join(MailFolder, MailFolder.id == MailMessage.folder_id)
-        .outerjoin(MailUserState, and_(
-            MailUserState.mail_id == MailMessage.id, MailUserState.user_id == uid))
         .where(MailMessage.mailbox_id.in_(ids), MailFolder.name == "INBOX",
                MailMessage.moved.is_(False),
                MailMessage.uidvalidity == MailFolder.uidvalidity)
@@ -246,18 +244,12 @@ def mailbox_counts(db, uid, boxes):
 
 
 def mail_rows_state(db, uid, messages):
-    ids = [m.id for m in messages]
-    states = {row.mail_id: row for row in db.scalars(
-        select(MailUserState).where(
-            MailUserState.user_id == uid,
-            MailUserState.mail_id.in_(ids)
-        )).all()} if ids else {}
+    """IMAP FLAGS are authoritative across EMA, Roundcube and other clients."""
     return {
-        m.id: {
-            "read": states[m.id].read_override if m.id in states and
-                    states[m.id].read_override is not None else is_imap_read(m),
-            "starred": bool(states[m.id].starred) if m.id in states else False,
-        } for m in messages
+        msg.id: {
+            "read": is_imap_read(msg),
+            "starred": r"\flagged" in (msg.flags or "").lower().split(),
+        } for msg in messages
     }
 
 
@@ -1077,9 +1069,9 @@ def create_app(test_config=None):
     @login_required
     def set_mail_state(mail_id):
         msg = g.db.get(MailMessage, mail_id)
-        if msg is None:
+        if msg is None or msg.moved:
             abort(404)
-        box = mailbox_or_403(msg.mailbox_id)
+        box = mailbox_or_403(msg.mailbox_id, manage=True)
         try:
             organization_access(g.db, g.user.id, box.organization_id)
         except Forbidden:
@@ -1087,12 +1079,13 @@ def create_app(test_config=None):
         action = field("action", 20)
         if action not in ("read", "unread", "star", "unstar"):
             abort(400)
-        state = get_mail_user_state(g.db, g.user.id, mail_id)
-        if action in ("read", "unread"):
-            state.read_override = action == "read"
-        else:
-            state.starred = action == "star"
-        g.db.commit()
+        try:
+            set_server_flags(g.db, box, app.config["MAIL_ENCRYPTION_KEY"], [msg], action)
+            audit("mail.flags", f"mail={mail_id},action={action}", box.organization_id)
+            g.db.commit()
+            flash("Změna příznaku potvrzena na IMAP serveru.", "success")
+        except MailError as ex:
+            flash(str(ex), "error")
         if field("return_to", 20) == "detail" and action != "unread":
             return redirect(url_for("mail_detail", org_id=box.organization_id, message_id=mail_id))
         folder_id = positive_id("folder")
