@@ -1,3 +1,5 @@
+> **Aktualizace vydání 18. 11. 2026:** Jediný [PR #81](https://github.com/soufekladislav/Ema/pull/81) je **sloučený do main** v jednom squash commitu `1531f7e`. Obsahuje EMA Mail V1.2, HTML/Poppins, stažení MIME příloh, IMAP synchronizované příznaky a přesuny, kontextovou nabídku, mobilní PWA a skutečné ikony Emy. **95 automatických testů úspěšných**. Uživatelské nasazení a ostrá IMAP/SMTP přejímka ještě nebyly potvrzeny. [Nasazovací kontrolní postup](EMA_MAIL_V12_DEPLOY.md). Zbývající text níže je původní revize *před* sloučením, ponechaná pro historii.
+
 # EMA – aktuální stav realizace a přejímky
 **Revize:** 18. 11. 2026 · **Základ:** skutečný obsah repozitáře `soufekladislav/Ema`, GitHub Issues/PR, Actions a uživatelské provozní testy z 17. 11.
 
