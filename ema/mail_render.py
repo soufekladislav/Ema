@@ -19,7 +19,7 @@ except ImportError:
     tinycss2 = None
 
 
-MAX_PREVIEW_BYTES = 393216
+MAX_PREVIEW_BYTES = 2 * 1024 * 1024
 ALLOWED_TAGS = {
     "a", "b", "blockquote", "br", "caption", "center", "code", "dd", "del",
     "div", "dl", "dt", "em", "h1", "h2", "h3", "h4", "h5", "h6",
@@ -186,6 +186,8 @@ def make_preview(data, *, show_images=False, truncated=False):
             except (LookupError, UnicodeError, ValueError, TypeError):
                 payload = part.get_payload(decode=True) or b""
                 body = payload.decode("utf-8", "replace")
+            if len(body) > MAX_PREVIEW_BYTES:
+                truncated = True
             if content_type == "text/html" and not rich:
                 rich = body[:MAX_PREVIEW_BYTES]
             if content_type == "text/plain" and not plain:
