@@ -249,8 +249,10 @@ def set_server_flags(db, box, key, messages, action):
         typ, data = client.uid("FETCH", uid_set, "(UID FLAGS)")
         if typ != "OK":
             raise MailError("IMAP odmítl ověření UID")
-        present = {int(m.group(1)) for item in (data or []) if isinstance(item, tuple)
-                   for m in [re.search(rb"\bUID\s+(\d+)\b", item[0], re.I)] if m}
+        headers = [item[0] if isinstance(item, tuple) else item
+                   for item in (data or [])]
+        present = {int(m.group(1)) for head in headers if isinstance(head, bytes)
+                   for m in [re.search(rb"\bUID\s+(\d+)\b", head, re.I)] if m}
         if present != set(uids):
             raise MailError("Zprávy již na serveru nejsou dostupné. Obnovte složku")
         typ, _ = client.uid("STORE", uid_set, operation, f"({flag})")
@@ -261,9 +263,9 @@ def set_server_flags(db, box, key, messages, action):
             raise MailError("Příznak byl odeslán, ale ověření selhalo; obnovte složku")
         remote = {}
         for item in (data or []):
-            if not isinstance(item, tuple):
+            head = item[0] if isinstance(item, tuple) else item
+            if not isinstance(head, bytes):
                 continue
-            head = item[0] if isinstance(item[0], bytes) else b""
             uid = re.search(rb"\bUID\s+(\d+)\b", head, re.I)
             flags = re.search(rb"\bFLAGS\s+\(([^)]*)\)", head, re.I)
             if uid and flags:
