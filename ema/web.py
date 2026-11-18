@@ -443,9 +443,12 @@ def create_app(test_config=None):
         ctx, orgs, projects = current_scope()
         boxes = visible_mailboxes(g.db, g.user.id, orgs)
         prefs = user_mail_preferences(g.db, g.user.id, boxes)
+        # Saved per-user order is authoritative, including the first position.
+        # Unpositioned/newly granted mailboxes come after all saved positions.
         boxes.sort(key=lambda b: (
-            not bool(prefs.get(b.id) and prefs[b.id].position > 0),
-            prefs[b.id].position if b.id in prefs else 0, b.label.lower(), b.id,
+            0 if b.id in prefs and prefs[b.id].position > 0 else 1,
+            prefs[b.id].position if b.id in prefs and prefs[b.id].position > 0 else 0,
+            b.label.casefold(), b.id,
         ))
         ids = [box.id for box in boxes]
         raw_box = request.args.get("box")
@@ -1131,7 +1134,7 @@ def create_app(test_config=None):
                 g.db.add(item)
             item.position = pos
         g.db.commit()
-        return {"ok": True}
+        return {"ok": True, "ids": order}
 
     @app.post("/mail/<int:box_id>/include")
     @login_required
