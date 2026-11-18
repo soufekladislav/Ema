@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass, field as dataclass_field
 from email import policy
 from email.parser import BytesParser
+from html.parser import HTMLParser
 from urllib.parse import urlsplit
 
 import bleach
@@ -169,6 +170,34 @@ def _safe_newsletter_styles(html_body):
     return "\n".join(result)
 
 
+class _EmailBodyStyle(HTMLParser):
+    """Read original body attributes without trusting executable HTML."""
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.css = ""
+
+    def handle_starttag(self, tag, attrs):
+        if tag.lower() != "body" or self.css:
+            return
+        data = dict(attrs)
+        style = data.get("style") or ""
+        if EMAIL_CSS and len(style) <= 4000 and not re.search(
+                r"(?i)url\s*\(|expression\s*\(|@|\\", style):
+            self.css = EMAIL_CSS.sanitize_css(style)
+        bgcolor = data.get("bgcolor") or ""
+        if re.fullmatch(r"#[0-9a-fA-F]{3,8}", bgcolor):
+            self.css += ";background-color:" + bgcolor
+
+
+def _body_style(raw_html):
+    parser = _EmailBodyStyle()
+    try:
+        parser.feed(raw_html[:50000])
+        return parser.css[:4000]
+    except Exception:
+        return ""
+
+
 def make_preview(data, *, show_images=False, truncated=False):
     """Parse a capped raw RFC822 MIME slice; untrusted HTML is bleached and sandboxed."""
     msg = BytesParser(policy=policy.default).parsebytes(data or b"")
@@ -208,6 +237,7 @@ def make_preview(data, *, show_images=False, truncated=False):
     # Remove executable/style blocks WITH their content before bleach. Otherwise
     # email newsletter CSS is displayed as raw text at the top of the preview.
     safe_style_rules = _safe_newsletter_styles(rich)
+    original_body_style = _body_style(rich)
     rich = re.sub(r"<(script|style|head|iframe|object|svg)\b[^>]*>[\s\S]*?</\1\s*>",
                   "", rich, flags=re.I)
     has_remote_images = bool(re.search(r"<img\b[^>]*\bsrc\s*=\s*['\"]?https?://", rich, re.I))
@@ -274,7 +304,8 @@ def make_preview(data, *, show_images=False, truncated=False):
             "color:#172019;margin:0;padding:12px;overflow-wrap:anywhere;}"
             "table{max-width:100%;}img{max-width:100%;height:auto}"
             "blockquote{border-left:3px solid #b9d98e;padding-left:10px}"
-            "</style><style>" + safe_style_rules + "</style></head><body>" + sanitized + "</body></html>"
+            "</style><style>" + safe_style_rules + "</style></head><body style='" +
+            html.escape(original_body_style, quote=True) + "'>" + sanitized + "</body></html>"
         )
         return MailPreview(envelope, plain, True, has_remote_images, truncated, attachments)
 
