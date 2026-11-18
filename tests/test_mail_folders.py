@@ -490,6 +490,8 @@ def test_server_flags_refuse_missing_uid_and_do_not_issue_store(state,monkeypatc
     from ema.mail_folders import set_server_flags
     engine, box_id, folder_id = state
     class Missing(FakeImap):
+        def __init__(self):
+            super().__init__(count=4)
         def uid(self,action,*args):
             if action == "FETCH" and args[-1] == "(UID FLAGS)":
                 return "OK",[b"1 (UID 999 FLAGS (\\Seen))"]
