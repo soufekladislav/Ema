@@ -1890,7 +1890,8 @@ def create_app(test_config=None):
                         box.smtp_username != (field("smtp_username") or username) or
                         box.smtp_port != smtp_port)
         box.label = required("label", 120)
-        box.signature_html = sanitized_signature
+        if "signature_html" in request.form:
+            box.signature_html = sanitized_signature
         box.address = address
         box.username = username
         box.smtp_username = field("smtp_username") or username
