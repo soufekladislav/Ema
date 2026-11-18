@@ -2,7 +2,7 @@
 
 AI obchodní a projektová asistentka Fresh Crackers: **chat-first pracovní prostor pro firmy, klienty, e-maily, obchodní příležitosti, nabídky a projekty.**
 
-**Aktuální stav (18. 11. 2026):** EMA běží na `hub.freshcrackers.cz`, uživatel otestoval poštovní rozhraní a potvrdil **úspěšnou instalaci PWA**. **Jednotný release EMA Mail V1.2 byl sloučen do `main`** (squash merge commit `1531f7e`, [PR #81](https://github.com/soufekladislav/Ema/pull/81)); vývojová větev prošla **95 automatickými testy**. PWA instalace neznamená automatické potvrzení všech mailových operací, Gmail OAuth, bezpečného vysypání Koše ani kompletní mobilní přejímky. **[Podrobný aktuální stav a plán](docs/EMA_STATUS_2026-11-18.md)**.
+**Aktuální stav (18. 11. 2026):** EMA běží na `hub.freshcrackers.cz`, uživatel otestoval poštovní rozhraní a potvrdil **úspěšnou instalaci PWA**. **Jednotný release EMA Mail V1.3 je sloučený do `main`** (squash commit `5653800`, [PR #84](https://github.com/soufekladislav/Ema/pull/84)); poslední společná vývojová větev prošla **109 automatickými testy**. V1.3 obsahuje šest finálních úprav pošty. Vyžaduje jednorázovou aditivní migraci `upgrade-db` pro výsledky IMAP/SMTP. PWA instalace neznamená automatické potvrzení všech mailových operací, Gmail OAuth, bezpečného vysypání Koše ani kompletní mobilní přejímky. **[Podrobný aktuální stav a plán](docs/EMA_STATUS_2026-11-18.md)**.
 
 ## Zdrojový kód a instalace
 
@@ -12,12 +12,14 @@ AI obchodní a projektová asistentka Fresh Crackers: **chat-first pracovní pro
 - [PR #62 – původní sloučená V0.1](https://github.com/soufekladislav/Ema/pull/62)
 - [PR #77 – sloučený poštovní základ](https://github.com/soufekladislav/Ema/pull/77)
 - [PR #81 – sloučený EMA Mail V1.2 + mobil + PWA, provozní přejímka zbývá](https://github.com/soufekladislav/Ema/pull/81)
+- **[PR #84 – sloučený EMA Mail V1.3 (šest závěrečných úprav)](https://github.com/soufekladislav/Ema/pull/84)**
 - **Potvrzená doména:** `hub.freshcrackers.cz`
 
 ## Dokumentace a řízení
 
 - **[Aktuální revize – hotové / částečné / neověřené / backlog (18. 11. 2026)](docs/EMA_STATUS_2026-11-18.md)**
-- **[EMA Mail V1.2 – postup nasazení a testů na Exonu](docs/EMA_MAIL_V12_DEPLOY.md)**
+- **[EMA Mail V1.3 – aktuální postup nasazení a závěrečné přejímky](docs/EMA_MAIL_V13_DEPLOY.md)**
+- [EMA Mail V1.2 – předchozí historická verze](docs/EMA_MAIL_V12_DEPLOY.md)
 - [Master produktové zadání / mapa v1.3](docs/EMA_PROJECT_MAP.md)
 - [Původní realizační backlog (historický snímek 16. 11.)](docs/IMPLEMENTATION_BACKLOG.md)
 - [Řídicí Issue #1](https://github.com/soufekladislav/Ema/issues/1)
