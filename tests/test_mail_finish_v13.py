@@ -205,3 +205,48 @@ def test_signature_save_is_sanitized_and_status_invalidates_when_smtp_changes(se
     with Session(client.application.extensions["ema_engine"]) as db:
         assert db.scalar(select(MailboxConnectionCheck).where(
             MailboxConnectionCheck.mailbox_id==box_id)) is None
+
+
+
+def test_missing_new_connection_table_does_not_crash_mailbox_settings(seeded,monkeypatch):
+    """Code-first deploy: settings remain accessible until the additive migration."""
+    client=seeded
+    login(client,"owner")
+    org=client.application.ids["org"]
+    box_id=client.ids_v1["box"]
+    engine=client.application.extensions["ema_engine"]
+    MailboxConnectionCheck.__table__.drop(engine)
+    url=f"/org/{org}/mail/{box_id}/edit"
+    page=client.get(url)
+    assert page.status_code==200
+    assert b"upgrade-db" in page.data
+    assert b'Otestovat IMAP + SMTP' not in page.data
+    # Never attempt live connections before the status schema is available.
+    monkeypatch.setattr("ema.web.verify_imap_connection",
+                        lambda *a:pytest.fail("IMAP must not run without schema"))
+    response=client.post(f"/org/{org}/mail/{box_id}/check",
+                         data={"csrf_token":csrf(client)})
+    assert response.status_code==302
+    page=client.get(url)
+    assert page.status_code==200
+
+
+def test_reply_over_limit_is_refused_before_smtp_idempotency_row(seeded,monkeypatch):
+    """A long original quote may make final message exceed 100k user body limit."""
+    from ema.models import Outbound
+    client=seeded
+    login(client,"owner")
+    msg_id=client.ids_v1["message"]
+    monkeypatch.setattr("ema.web.original_reply_quote",lambda *args:"Q"*60000)
+    send_calls=[]
+    monkeypatch.setattr("ema.web.send_composed",lambda *a,**kw:send_calls.append(True))
+    nonce="reply-preflight-v13"
+    result=client.post("/mail/compose/send",data={
+        "csrf_token":csrf(client),"nonce":nonce,
+        "box_id":str(client.ids_v1["box"]),"reply_id":str(msg_id),
+        "to":"buyer@example.cz","subject":"Re: Offer","body":"B"*50000
+    })
+    assert result.status_code==422
+    assert not send_calls
+    with Session(client.application.extensions["ema_engine"]) as db:
+        assert db.scalar(select(Outbound.id).where(Outbound.nonce==nonce)) is None
