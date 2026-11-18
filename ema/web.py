@@ -750,6 +750,7 @@ def create_app(test_config=None):
                 prepared.get("expires", 0) < int(time()) or
                 field("confirmation", 40) != "permanently-delete-whole-trash" or
                 field("acknowledge", 10) != "yes" or
+                field("trash_phrase", 30) != "SMAZAT KOŠ" or
                 not secrets.compare_digest(str(prepared.get("nonce", "")), field("nonce", 80))):
             abort(400, description="Potvrzení vysypání Koše chybí nebo vypršelo.")
         # Consume session permission BEFORE remote IMAP; never auto-retry after uncertainty.
