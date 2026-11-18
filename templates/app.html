@@ -192,6 +192,21 @@
   </div>
   <div class="notice">{{ warning }}</div>
   {% if preview %}
+
+  {% if preview.attachments %}
+  <section class="ema-attachment-list" aria-label="Přílohy e-mailu">
+    <h4>📎 Přílohy ({{ preview.attachments|length }})</h4>
+    {% for part in preview.attachments %}
+    <div class="ema-attachment-row">
+      <div><strong>{{ part.filename }}</strong>
+        <small>{{ part.content_type }} · {{ (part.size_bytes / 1024)|round(1) }} kB</small></div>
+      <a class="btn ema-attachment-download" href="{{ url_for('mail_attachment_download', mail_id=message.id, part_index=part.index) }}"
+         download="{{ part.filename }}" title="Stáhnout přímo do zařízení">⬇ Stáhnout</a>
+    </div>
+    {% endfor %}
+  </section>
+  {% endif %}
+
     {% if preview.truncated %}<p class="small muted">Zpráva je větší než limit náhledu. Obsah může být zkrácený; celá zpráva zůstává na poštovním serveru.</p>{% endif %}
     {% if preview.is_html %}
       {% if not show_images %}
