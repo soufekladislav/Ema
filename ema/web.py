@@ -830,6 +830,24 @@ def create_app(test_config=None):
         return response
 
 
+    @app.get("/mail/<int:mail_id>/folders")
+    @login_required
+    def mail_move_targets(mail_id):
+        msg = g.db.get(MailMessage, mail_id)
+        if not msg or msg.moved:
+            abort(404)
+        box = mailbox_or_403(msg.mailbox_id, manage=True)
+        organization_access(g.db, g.user.id, box.organization_id)
+        rows = g.db.scalars(select(MailFolder).where(
+            MailFolder.mailbox_id == box.id).order_by(MailFolder.name)).all()
+        targets = [{"id": folder.id, "name": decode_modified_utf7(folder.name)}
+                   for folder in rows if folder.id != msg.folder_id and
+                   r"\noselect" not in (folder.special_use or "").lower()]
+        result = {"mailbox_id": box.id, "folders": targets}
+        response = app.make_response(result)
+        response.headers["Cache-Control"] = "private, no-store"
+        return response
+
     @app.post("/mail/<int:mail_id>/quick-move")
     @login_required
     def mail_quick_move(mail_id):
@@ -842,18 +860,29 @@ def create_app(test_config=None):
         except Forbidden:
             abort(403)
         action = field("action", 20)
-        if action not in ("trash", "archive"):
+        if action not in ("trash", "archive", "move"):
             abort(400)
+        folder_id = positive_id("target_folder_id") if action == "move" else None
+        if action == "move" and not folder_id:
+            abort(400)
+        json_mode = request.headers.get("Accept") == "application/json"
         try:
-            target = move_message(g.db, box, app.config["MAIL_ENCRYPTION_KEY"], msg, action)
+            kw = {"target_folder_id": folder_id} if action == "move" else {}
+            target = move_message(g.db, box, app.config["MAIL_ENCRYPTION_KEY"],
+                                  msg, action, **kw)
             audit("mail.move", f"mail={mail_id},target={target.id},action={action}", box.organization_id)
             g.db.commit()
             pending = g.db.info.get("ema_move_mode") == "copy-pending-cleanup"
-            flash("Zpráva přesunuta do serverové složky " + decode_modified_utf7(target.name) +
-                  ("; původní kopie je pouze označená \\Deleted a může být viditelná "
-                   "v Roundcube, aby nebyly omylem smazány jiné zprávy." if pending else ""),
-                  "error" if pending else "success")
+            summary = "Zpráva přesunuta do serverové složky " + decode_modified_utf7(target.name)
+            if pending:
+                summary += ("; originál zůstává označený \Deleted. Server nepovolil "
+                            "bezpečný cílený výmaz; zkontrolujte jej v Roundcube.")
+            if json_mode:
+                return {"ok": True, "message": summary, "pending_cleanup": pending}
+            flash(summary, "error" if pending else "success")
         except MailError as ex:
+            if json_mode:
+                return {"ok": False, "error": str(ex)}, 409
             flash(str(ex), "error")
         return redirect(url_for("mail_hub", box=box.id, folder=msg.folder_id))
 
@@ -861,7 +890,7 @@ def create_app(test_config=None):
     @login_required
     def bulk_mail_action():
         action = field("action", 20)
-        if action not in ("trash", "archive", "read", "unread"):
+        if action not in ("trash", "archive", "move", "read", "unread", "star", "unstar"):
             abort(400)
         raw = request.form.getlist("mail_ids")
         if not raw or len(raw) > 50 or any(not x.isdigit() or int(x) <= 0 for x in raw):
@@ -873,49 +902,53 @@ def create_app(test_config=None):
         messages = g.db.scalars(select(MailMessage).where(MailMessage.id.in_(msg_ids))).all()
         if len(messages) != len(msg_ids) or any(m.moved for m in messages):
             abort(400, description="Některá zpráva již byla přesunuta")
-        # Preauthorize ALL selected messages before any write or IMAP side effect.
         authorized = {}
         for msg in messages:
-            box = mailbox_or_403(msg.mailbox_id, manage=action in ("trash", "archive"))
+            box = mailbox_or_403(msg.mailbox_id, manage=True)
             try:
                 organization_access(g.db, g.user.id, box.organization_id)
             except Forbidden:
                 abort(403)
             authorized[msg.id] = box
-        if action in ("read", "unread"):
-            for msg in messages:
-                state = get_mail_user_state(g.db, g.user.id, msg.id)
-                state.read_override = action == "read"
-            g.db.commit()
-            flash(f"Upraveno {len(messages)} zpráv v Emě.", "success")
-        else:
-            done, failed, reasons = 0, 0, []
-            pending_cleanup = []
-            groups = {}
-            for msg in messages:
-                groups.setdefault((msg.mailbox_id, msg.folder_id), []).append(msg)
-            for (box_id, _folder_id), batch in groups.items():
-                box = authorized[batch[0].id]
-                try:
+        folder_id = positive_id("target_folder_id") if action == "move" else None
+        if action == "move":
+            if not folder_id:
+                abort(400)
+            destination = g.db.get(MailFolder, folder_id)
+            if not destination or any(m.mailbox_id != destination.mailbox_id for m in messages):
+                abort(400, description="Nelze přesouvat mezi různými poštovními schránkami")
+        groups = {}
+        for msg in messages:
+            groups.setdefault((msg.mailbox_id, msg.folder_id), []).append(msg)
+        done, failed, reasons, pending_cleanup = 0, 0, [], []
+        for (box_id, source_id), batch in groups.items():
+            box = authorized[batch[0].id]
+            try:
+                if action in ("read", "unread", "star", "unstar"):
+                    done += set_server_flags(g.db, box, app.config["MAIL_ENCRYPTION_KEY"],
+                                             batch, action)
+                    audit("mail.bulk_flags", f"box={box_id},action={action},count={len(batch)}",
+                          box.organization_id)
+                else:
+                    kw = {"target_folder_id": folder_id} if action == "move" else {}
                     target = move_many_messages(g.db, box, app.config["MAIL_ENCRYPTION_KEY"],
-                                                batch, action)
+                                                batch, action, **kw)
                     audit("mail.bulk_move", f"box={box_id},target={target.id},count={len(batch)}",
                           box.organization_id)
-                    g.db.commit()
                     done += len(batch)
                     if g.db.info.get("ema_move_mode") == "copy-pending-cleanup":
                         pending_cleanup.append(box.label)
-                except MailError as ex:
-                    failed += len(batch)
-                    reasons.append(f"{box.label}: {ex}")
-                    # A remote result may be uncertain. Never retry a failed batch automatically.
-            detail = " " + " | ".join(reasons[:3]) if reasons else ""
-            if pending_cleanup:
-                detail += " Původní zprávy jsou u serveru bez UIDPLUS označené ke smazání " \
-                          "(\\Deleted) a mohou být v Roundcube šedé; bez bezpečného " \
-                          "EXPUNGE nebudou smazané. Schránky: " + ", ".join(pending_cleanup[:3])
-            flash(f"Přesunuto {done} zpráv, {failed} nepřesunuto." + detail,
-                  "success" if not failed and not pending_cleanup else "error")
+                g.db.commit()
+            except MailError as ex:
+                failed += len(batch)
+                reasons.append(f"{box.label}: {ex}")
+                # Never retry an uncertain remote write automatically.
+        detail = " " + " | ".join(reasons[:3]) if reasons else ""
+        if pending_cleanup:
+            detail += (" Originály mohou zůstat označené \Deleted na serveru: "
+                       + ", ".join(pending_cleanup[:3]))
+        flash(f"Server potvrdil {done} změn, {failed} nepotvrzeno." + detail,
+              "success" if not failed and not pending_cleanup else "error")
         return redirect(url_for("mail_hub"))
 
     @app.get("/mail/compose")
