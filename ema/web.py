@@ -784,7 +784,7 @@ def create_app(test_config=None):
             confirmed_read = is_imap_read(msg)
             flag_warning = ""
             try:
-                mailbox_or_403(box.id, manage=True)
+                mailbox_access(g.db, g.user.id, box.id, manage=True)
                 if not confirmed_read:
                     set_server_flags(g.db, box, app.config["MAIL_ENCRYPTION_KEY"], [msg], "read")
                 confirmed_read = is_imap_read(msg)
@@ -837,7 +837,10 @@ def create_app(test_config=None):
         if not msg or msg.moved:
             abort(404)
         box = mailbox_or_403(msg.mailbox_id, manage=True)
-        organization_access(g.db, g.user.id, box.organization_id)
+        try:
+            organization_access(g.db, g.user.id, box.organization_id)
+        except Forbidden:
+            abort(403)
         rows = g.db.scalars(select(MailFolder).where(
             MailFolder.mailbox_id == box.id).order_by(MailFolder.name)).all()
         targets = [{"id": folder.id, "name": decode_modified_utf7(folder.name)}
@@ -863,8 +866,10 @@ def create_app(test_config=None):
         if action not in ("trash", "archive", "move"):
             abort(400)
         folder_id = positive_id("target_folder_id") if action == "move" else None
-        if action == "move" and not folder_id:
-            abort(400)
+        if action == "move":
+            destination = g.db.get(MailFolder, folder_id) if folder_id else None
+            if not destination or destination.mailbox_id != box.id:
+                abort(400, description="Cílová složka musí být ve stejné schránce")
         json_mode = request.headers.get("Accept") == "application/json"
         try:
             kw = {"target_folder_id": folder_id} if action == "move" else {}
@@ -1721,7 +1726,7 @@ def create_app(test_config=None):
             preview = preview_message(box, msg, app.config["MAIL_ENCRYPTION_KEY"],
                                       show_images=show_images, folder_name=folder.name)
             try:
-                mailbox_or_403(box.id, manage=True)
+                mailbox_access(g.db, g.user.id, box.id, manage=True)
                 if not is_imap_read(msg):
                     set_server_flags(g.db, box, app.config["MAIL_ENCRYPTION_KEY"], [msg], "read")
             except Forbidden:
