@@ -250,3 +250,21 @@ def test_reply_over_limit_is_refused_before_smtp_idempotency_row(seeded,monkeypa
     assert not send_calls
     with Session(client.application.extensions["ema_engine"]) as db:
         assert db.scalar(select(Outbound.id).where(Outbound.nonce==nonce)) is None
+
+
+
+def test_html_only_original_reply_is_converted_to_safe_readable_quote(monkeypatch):
+    from ema.mail_compose import original_reply_quote
+    original=EmailMessage()
+    original.set_content("<html><body><h2>Požadavek</h2>"
+                         "<p>Dobrý den,<br>prosím o nabídku.</p>"
+                         "<script>steal()</script></body></html>",subtype="html")
+    monkeypatch.setattr("ema.mail_compose.fetch_message_mime",
+                        lambda *a,**kw:original.as_bytes())
+    metadata=SimpleNamespace(sender="Buyer <buyer@example.cz>",
+                             recipients="info@example.cz",subject="Nabídka",sent_at=None)
+    quoted=original_reply_quote(None,metadata,"key","INBOX")
+    assert "Požadavek" in quoted
+    assert "Dobrý den," in quoted and "prosím o nabídku." in quoted
+    assert "<script>" not in quoted and "steal()" not in quoted
+    assert quoted.index("Předmět:") < quoted.index("> Požadavek")
