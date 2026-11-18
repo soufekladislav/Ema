@@ -232,6 +232,7 @@
 <p class="small muted">Vazba na projekt neuděluje přístup k samotné poštovní schránce.</p></div>
 {% elif section == 'mailbox-edit' %}
 <div class="page-head"><div><span class="eyebrow">NASTAVENÍ SCHRÁNKY</span><h1>Upravit {{ box.label }}</h1><p>{{ box.address }} · {{ active_org.name }}</p></div><a class="btn" href="{{ url_for('settings', org_id=active_org.id) }}">Zpět</a></div>
+<div class="ema-mailbox-edit-layout">
 <div class="card panel ema-mailbox-edit-card">
   {% if box.imap_host|lower == 'imap.gmail.com' %}
   <div class="notice">
@@ -252,9 +253,47 @@
     <label>Server SMTP<input name="smtp_host" required value="{{ box.smtp_host }}"></label>
     <label>Port SMTP<select name="smtp_port"><option value="465" {{ 'selected' if box.smtp_port == 465 else '' }}>465 – SSL</option><option value="587" {{ 'selected' if box.smtp_port == 587 else '' }}>587 – STARTTLS</option></select></label>
     <label>Nové heslo / aplikační heslo (nepovinné)<input type="password" name="password" autocomplete="new-password" maxlength="512" placeholder="Nechat prázdné = zachovat heslo"></label>
+    <label>E-mailový podpis (prostý text nebo jednoduché bezpečné HTML)
+      <textarea name="signature_html" rows="9" maxlength="12000"
+        placeholder="S pozdravem,&#10;Jméno · společnost&#10;www.example.cz">{{ box.signature_html or '' }}</textarea>
+    </label>
+    <small class="muted">Podpis se automaticky připojí k odesílaným zprávám a odpovědím před původní e-mail.
+      Podporuje odkazy, formátovaný text a obrázek přes zabezpečené HTTPS.</small>
+    {% if signature_preview %}
+      <div class="ema-signature-settings-preview">
+        <strong>Náhled uloženého podpisu</strong>
+        <div>{{ signature_preview|safe }}</div>
+      </div>
+    {% endif %}
     <button class="btn primary" type="submit">Uložit změny</button>
   </form>
   <p class="small muted">Po importu zpráv nelze měnit identitu schránky (adresu, IMAP server a login), aby nedošlo ke smíchání údajů ze dvou různých schránek. Změnu poskytovatele vyřešíme samostatnou migrací.</p>
+</div>
+<aside class="card panel ema-mailbox-connection-panel">
+  <h3>Stav poštovní schránky</h3>
+  <p class="small muted">Ověření skutečného spojení nezávisle pro IMAP a SMTP. Není odeslána žádná testovací zpráva.</p>
+  {% if connection_check %}
+  <div class="ema-mail-connection-result {{ 'success' if connection_check.imap_ok else 'error' }}">
+    <strong>IMAP · {{ 'Ověřeno' if connection_check.imap_ok else 'Chyba' }}</strong>
+    <small>{{ connection_check.imap_detail }}</small>
+  </div>
+  <div class="ema-mail-connection-result {{ 'success' if connection_check.smtp_ok else 'error' }}">
+    <strong>SMTP · {{ 'Ověřeno' if connection_check.smtp_ok else 'Chyba' }}</strong>
+    <small>{{ connection_check.smtp_detail }}</small>
+  </div>
+  <p class="small muted">Poslední kontrola {{ connection_check.checked_at.strftime('%d.%m.%Y %H:%M') }}.
+     SMTP ověření potvrzuje přihlášení, nikoliv doručení adresátovi.</p>
+  {% else %}
+  <p class="notice">Připojení zatím nebylo samostatně ověřeno. Uložené nastavení
+  ani zobrazení starých zpráv samo o sobě nepotvrzuje funkčnost SMTP.</p>
+  {% endif %}
+  <form method="post" action="{{ url_for('check_mailbox_connection',org_id=active_org.id,box_id=box.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button class="btn primary" type="submit">Otestovat IMAP + SMTP</button>
+  </form>
+  <p class="small muted">Po změně přístupových údajů nebo serveru se předchozí kontrola zneplatní.
+     Test může trvat déle při nedostupnosti serveru.</p>
+</aside>
 </div>
 {% elif section == 'settings' %}
 <div class="page-head"><div><span class="eyebrow">Organizace</span><h1>Nastavení firmy</h1><p>Přístupy k firmě, projektům a schránkám jsou oddělené.</p></div></div>
