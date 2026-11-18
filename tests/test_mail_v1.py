@@ -336,6 +336,7 @@ def test_move_target_rejects_other_mailbox_and_uses_one_server_move(seeded,monke
         other = MailFolder(mailbox_id=client.ids_v1["other"],name="Other",uidvalidity=9)
         db.add_all([folder,other]);db.commit()
         target_id,other_id = folder.id,other.id
+    monkeypatch.setattr("ema.web.discover_folders",lambda db,box,key:0)
     folders = client.get(f"/mail/{msg}/folders")
     assert folders.status_code == 200
     assert any(row["id"] == target_id for row in folders.json["folders"])
