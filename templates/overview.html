@@ -140,6 +140,7 @@
                   <div class="ema-mail-folder-entries">
                 {% for f in imap_folders %}
                   <a class="ema-mail-folder {{ 'active' if selected_folder and selected_folder.id == f.id else '' }}"
+                     data-folder-id="{{ f.id }}" data-folder-mailbox-id="{{ b.id }}"
                      data-folder-fullname="{{ folder_names[f.id] }}" data-folder-delimiter="{{ f.delimiter }}"
                      href="{{ url_for('mail_hub', box=b.id, folder=f.id) }}">
                     <span>▸ {{ folder_names[f.id] }}</span>
@@ -171,6 +172,7 @@
             <button class="ema-toolbar-button" name="action" value="archive" type="submit" title="Archivovat vybrané">▣ Archiv</button>
             <button class="ema-toolbar-button" name="action" value="read" type="submit" title="Označit jako přečtené">✉ Přečtené</button>
             <button class="ema-toolbar-button" name="action" value="unread" type="submit" title="Označit jako nepřečtené">◉ Nepřečtené</button>
+            <button class="ema-toolbar-button" id="ema-bulk-move-button" type="button" title="Přesunout vybrané do složky stejné schránky">↳ Přesunout…</button>
           </form>
           <span class="ema-mail-toolbar-hint">Otevři zprávu pro rychlý náhled</span>
         </div>
@@ -193,6 +195,20 @@
         </div>
       </section>
     </div>
+    <div id="ema-mail-context" class="ema-mail-context" role="menu" aria-label="Akce e-mailu" hidden>
+      <button type="button" role="menuitem" data-ema-mail-action="toggle-read">Označit jako nepřečtené</button>
+      <button type="button" role="menuitem" data-ema-mail-action="toggle-star">Označit příznakem</button>
+      <button type="button" role="menuitem" data-ema-mail-action="move">↳ Přesunout do složky…</button>
+      <button type="button" role="menuitem" data-ema-mail-action="archive">Archivovat</button>
+      <button type="button" role="menuitem" data-ema-mail-action="trash">Přesunout do Koše</button>
+    </div>
+    <dialog id="ema-mail-folder-dialog" class="ema-mail-target-dialog" aria-labelledby="ema-mail-folder-title">
+      <h3 id="ema-mail-folder-title">Přesunout do složky</h3>
+      <p>Vyber cílovou složku stejné poštovní schránky. Přesun bude proveden na IMAP serveru.</p>
+      <div id="ema-mail-target-list" class="ema-mail-target-list" role="listbox" aria-label="Cílové složky"></div>
+      <button class="btn" type="button" id="ema-mail-folder-cancel">Zrušit</button>
+    </dialog>
+    <p class="sr-only" id="ema-mail-operations-status" role="status" aria-live="polite"></p>
   </div>
 {% elif section == 'compose' %}
   <div class="ema-compose-screen">
