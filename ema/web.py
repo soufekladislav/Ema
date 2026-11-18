@@ -19,6 +19,7 @@ from sqlalchemy import func, select, text, or_, and_, case
 from sqlalchemy.exc import IntegrityError
 from werkzeug.security import check_password_hash, generate_password_hash
 
+from .mail_compose import clean_signature, original_reply_quote
 from .mail_service import MailError, encrypt_password, preview_message, download_message_attachment, send_plain, send_composed, validate_recipients, sync_inbox, validate_mail_host
 from .mail_folders import (
     PAGE_SIZE, discover_folders, available_folders, decode_modified_utf7,
@@ -1010,9 +1011,24 @@ def create_app(test_config=None):
                            "Od: " + (source.sender or "") + "\n"
                            "Předmět: " + (source.subject or "") + "\n"
                            "Obsah otevři v původní zprávě; přílohy se nepřikládají automaticky.")
+        quote_preview, quote_error = "", ""
+        if reply_id and source:
+            source_folder = g.db.get(MailFolder, source.folder_id)
+            if not source_folder or source_folder.mailbox_id != active_box.id:
+                abort(404)
+            try:
+                quote_preview = original_reply_quote(
+                    active_box, source, app.config["MAIL_ENCRYPTION_KEY"],
+                    source_folder.name)
+            except MailError as exc:
+                quote_error = str(exc)
         return render_hub("compose", send_boxes=can_send, active_box=active_box,
                           recipient=recipient, subject=subject, draft_content=content,
                           source_message=source, reply_id=reply_id,
+                          signature_preview=clean_signature(active_box.signature_html or "")
+                          if active_box else "",
+                          reply_quote_preview=quote_preview,
+                          reply_quote_error=quote_error,
                           csrf_nonce=secrets.token_urlsafe(24))
 
     @app.get("/mail/contacts/suggest")
@@ -1051,12 +1067,29 @@ def create_app(test_config=None):
         to, cc, bcc = field("to", 1500), field("cc", 1500), field("bcc", 1500)
         subject, body = required("subject", 500), required("body", 100000)
         reply_id = positive_id("reply_id")
-        message_id = None
+        message_id, original_quote = None, ""
         if reply_id:
             src = g.db.get(MailMessage, reply_id)
-            if not src or src.mailbox_id != box.id:
+            if not src or src.mailbox_id != box.id or src.moved:
+                abort(403)
+            source_folder = g.db.get(MailFolder, src.folder_id)
+            if not source_folder or source_folder.mailbox_id != box.id:
                 abort(403)
             message_id = src.message_id or None
+            # Mandatory server-origin quote; on failure do NOT send an
+            # incomplete reply and do NOT create an idempotency row.
+            try:
+                original_quote = original_reply_quote(
+                    box, src, app.config["MAIL_ENCRYPTION_KEY"], source_folder.name)
+            except MailError as exc:
+                flash("Původní zprávu nelze bezpečně připojit: " + str(exc),
+                      "error")
+                return render_hub("compose", send_boxes=[box], active_box=box,
+                                  recipient=to, subject=subject, draft_content=body,
+                                  source_message=src, reply_id=reply_id,
+                                  signature_preview=clean_signature(box.signature_html or ""),
+                                  reply_quote_error=str(exc),
+                                  csrf_nonce=secrets.token_urlsafe(24)), 422
         if g.db.scalar(select(Outbound.id).where(Outbound.nonce == nonce)):
             flash("Pokus o odeslání již existuje. Zkontroluj Odeslané před opakováním.", "error")
             return redirect(url_for("mail_hub", box=box.id))
@@ -1069,6 +1102,8 @@ def create_app(test_config=None):
                               recipient=to, subject=subject, draft_content=body,
                               cc_prefill=cc, bcc_prefill=bcc,
                               source_message=src if reply_id else None, reply_id=reply_id,
+                              signature_preview=clean_signature(box.signature_html or ""),
+                              reply_quote_preview=original_quote,
                               csrf_nonce=secrets.token_urlsafe(24)), 422
         if request.content_length and request.content_length > 11_000_000:
             abort(413)
@@ -1093,7 +1128,10 @@ def create_app(test_config=None):
             return redirect(url_for("mail_hub", box=box.id))
         try:
             sent_bytes = send_composed(box, app.config["MAIL_ENCRYPTION_KEY"], to, cc, bcc,
-                                       subject, body, reply_message_id=message_id, attachments=attached)
+                                       subject, body, reply_message_id=message_id,
+                                       attachments=attached,
+                                       signature_html=box.signature_html or "",
+                                       quoted_original=original_quote)
         except MailError as ex:
             record.state = "uncertain"
             audit("mail.compose.uncertain", nonce, box.organization_id)
