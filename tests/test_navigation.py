@@ -277,7 +277,7 @@ def test_global_mail_sync_action_is_available_only_to_mailbox_managers(web_clien
                         data={"csrf_token": csrf(another)}).status_code == 403
 
 
-def test_mailbox_order_visibility_and_personal_read_star_state(web_client):
+def test_mailbox_order_visibility_and_imap_flags(web_client, monkeypatch):
     from ema.models import MailboxView, MailUserState
     client = web_client
     with Session(client.application.extensions["ema_engine"]) as db:
@@ -331,6 +331,18 @@ def test_mailbox_order_visibility_and_personal_read_star_state(web_client):
     client.post(f"/mail/{id1}/include", data={"csrf_token": csrf(client)})
     assert b"Unread mail" in client.get("/mail").data
 
+    def fake_server_flags(db, box, key, messages, action):
+        for msg in messages:
+            flags = set((msg.flags or "").split())
+            flag = r"\Seen" if action in ("read","unread") else r"\Flagged"
+            if action in ("read","star"):
+                flags.add(flag)
+            else:
+                flags.discard(flag)
+            msg.flags = " ".join(sorted(flags))
+        db.commit()
+        return len(messages)
+    monkeypatch.setattr("ema.web.set_server_flags", fake_server_flags)
     client.post(f"/mail/{mid1}/state", data={"csrf_token": csrf(client), "action": "star"})
     client.post(f"/mail/{mid1}/state", data={"csrf_token": csrf(client), "action": "read"})
     page = client.get(f"/mail?box={id1}")
@@ -339,9 +351,9 @@ def test_mailbox_order_visibility_and_personal_read_star_state(web_client):
     client.post(f"/mail/{mid2}/state", data={"csrf_token": csrf(client), "action": "unread"})
     assert b"1</strong> nep" in client.get("/mail").data
     with Session(client.application.extensions["ema_engine"]) as db:
-        row = db.scalar(select(MailUserState).where(
-            MailUserState.mail_id == mid1, MailUserState.user_id == client.application.ids["owner"]))
-        assert row.read_override is True and row.starred is True
+        msg = db.get(MailMessage, mid1)
+        assert r"\Seen" in msg.flags and r"\Flagged" in msg.flags
+        assert db.scalar(select(MailUserState).where(MailUserState.mail_id == mid1)) is None
 
     guest = web_client.application.test_client()
     login(guest, "guest")
@@ -410,6 +422,12 @@ def test_mail_detail_renders_capped_sanitized_html_and_image_opt_in(web_client, 
         seen.append(show_images)
         return MailPreview("<p>Read-only HTML</p>", "Plain", True, True, False)
     monkeypatch.setattr("ema.web.preview_message", fake_preview)
+    def fake_server_flags(db, box, key, messages, action):
+        for msg in messages:
+            msg.flags = r"\Seen"
+        db.commit()
+        return len(messages)
+    monkeypatch.setattr("ema.web.set_server_flags", fake_server_flags)
     login(client, "owner")
     url = f"/org/{client.application.ids['org']}/mail/message/{id_mail}"
     base = client.get(url)
@@ -420,8 +438,8 @@ def test_mail_detail_renders_capped_sanitized_html_and_image_opt_in(web_client, 
     assert seen == [False, True]
     with Session(client.application.extensions["ema_engine"]) as db:
         from ema.models import MailUserState
-        stored = db.scalar(select(MailUserState).where(MailUserState.mail_id == id_mail))
-        assert stored.read_override is True
+        assert r"\Seen" in db.get(MailMessage,id_mail).flags
+        assert db.scalar(select(MailUserState).where(MailUserState.mail_id == id_mail)) is None
     assert "img-src".encode() in client.get(url + "?images=1").headers["Content-Security-Policy"].encode()
 
 
