@@ -20,7 +20,7 @@ from sqlalchemy.exc import IntegrityError
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from .mail_compose import clean_signature, original_reply_quote
-from .mail_service import MailError, encrypt_password, preview_message, download_message_attachment, send_plain, send_composed, validate_recipients, sync_inbox, validate_mail_host
+from .mail_service import MailError, encrypt_password, preview_message, download_message_attachment, send_plain, send_composed, validate_recipients, sync_inbox, validate_mail_host, verify_imap_connection, verify_smtp_connection
 from .mail_folders import (
     PAGE_SIZE, discover_folders, available_folders, decode_modified_utf7,
     fetch_folder_page, special_folder, move_message, move_many_messages,
@@ -30,7 +30,7 @@ from .assistant_service import AssistantError, run_assistant
 from .contact_import import ImportErrorCSV, extract_contacts
 from .schema_upgrade import upgrade_schema
 from .models import (
-    Audit, AssistantTurn, Base, ChatMessage, Company, Contact, MailFolder, Mailbox, MailboxGrant, MailboxView, MailMessage, MailUserState,
+    Audit, AssistantTurn, Base, ChatMessage, Company, Contact, MailFolder, Mailbox, MailboxGrant, MailboxView, MailboxConnectionCheck, MailMessage, MailUserState,
     Membership, Opportunity, Organization, Outbound, Project, ProjectGrant,
     Task, User, make_session, now,
 )
@@ -1855,8 +1855,15 @@ def create_app(test_config=None):
         if box.organization_id != org_id:
             abort(403)
         if request.method == "GET":
-            return render("mailbox-edit", box=box)
+            connection = g.db.scalar(select(MailboxConnectionCheck).where(
+                MailboxConnectionCheck.mailbox_id == box.id))
+            return render("mailbox-edit", box=box, connection_check=connection)
         password = request.form.get("password", "")
+        try:
+            sanitized_signature = clean_signature(request.form.get("signature_html", ""))
+        except ValueError as ex:
+            flash(str(ex), "error")
+            return redirect(url_for("edit_mailbox", org_id=org_id, box_id=box_id))
         if len(password) > 512:
             abort(400, description="Příliš dlouhé heslo")
         address = required("address")
@@ -1878,7 +1885,11 @@ def create_app(test_config=None):
             MailMessage.mailbox_id == box.id).limit(1)):
             flash("Schránka již obsahuje indexované zprávy. Kvůli ochraně jejich vazeb nelze měnit adresu, IMAP server ani IMAP login. Lze změnit SMTP a heslo.", "error")
             return redirect(url_for("edit_mailbox", org_id=org_id, box_id=box_id))
+        smtp_changed = (box.smtp_host != smtp_host or
+                        box.smtp_username != (field("smtp_username") or username) or
+                        box.smtp_port != smtp_port)
         box.label = required("label", 120)
+        box.signature_html = sanitized_signature
         box.address = address
         box.username = username
         box.smtp_username = field("smtp_username") or username
@@ -1891,10 +1902,43 @@ def create_app(test_config=None):
             box.status, box.sync_error = "not_synced", ""
             box.last_sync = None
             box.server_message_count = None
+        if changed_identity or encrypted is not None or smtp_changed:
+            checked = g.db.scalar(select(MailboxConnectionCheck).where(
+                MailboxConnectionCheck.mailbox_id == box.id))
+            if checked:
+                g.db.delete(checked)  # Old successful check cannot verify new settings.
         audit("mailbox.update", str(box.id), org_id)
         g.db.commit()
         flash("Nastavení schránky uloženo. Heslo bylo změněno jen při jeho zadání.", "success")
         return redirect(url_for("settings", org_id=org_id))
+
+    @app.post("/org/<int:org_id>/mail/<int:box_id>/check")
+    @org_admin
+    def check_mailbox_connection(org_id, box_id):
+        box = mailbox_or_403(box_id, manage=True)
+        if box.organization_id != org_id:
+            abort(403)
+        # An explicit user action, not background polling or a sent test email.
+        imap_ok, imap_detail = verify_imap_connection(
+            box, app.config["MAIL_ENCRYPTION_KEY"])
+        smtp_ok, smtp_detail = verify_smtp_connection(
+            box, app.config["MAIL_ENCRYPTION_KEY"])
+        check = g.db.scalar(select(MailboxConnectionCheck).where(
+            MailboxConnectionCheck.mailbox_id == box.id))
+        if check is None:
+            check = MailboxConnectionCheck(mailbox_id=box.id)
+            g.db.add(check)
+        check.imap_ok, check.smtp_ok = bool(imap_ok), bool(smtp_ok)
+        check.imap_detail = imap_detail[:240]
+        check.smtp_detail = smtp_detail[:240]
+        check.checked_at = now()
+        audit("mailbox.connection_check",
+              f"mailbox={box.id};imap={int(imap_ok)};smtp={int(smtp_ok)}",org_id)
+        g.db.commit()
+        flash(("IMAP ověřen" if imap_ok else "IMAP neověřen") +
+              " · " + ("SMTP ověřen" if smtp_ok else "SMTP neověřen") +
+              ". Nebyl odeslán žádný e-mail.", "success" if imap_ok and smtp_ok else "error")
+        return redirect(url_for("edit_mailbox", org_id=org_id, box_id=box_id))
 
     @app.post("/org/<int:org_id>/members")
     @org_admin
