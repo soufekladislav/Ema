@@ -1,26 +1,46 @@
 {
-  "name": "EMA HUB – pošta a projekty",
-  "short_name": "EMA HUB",
-  "description": "Souhrnná pošta, projekty a obchodní komunikace",
-  "start_url": "/mail",
+  "name": "EMA",
+  "short_name": "EMA",
+  "description": "EMA – osobní pracovní prostředí pro e-maily, projekty, úkoly a komunikaci.",
+  "start_url": "/",
   "scope": "/",
   "id": "/mail",
   "display": "standalone",
-  "background_color": "#f5f6f3",
-  "theme_color": "#111715",
+  "background_color": "#101510",
+  "theme_color": "#101510",
   "lang": "cs",
   "icons": [
     {
       "src": "/static/icons/ema-192.png",
       "sizes": "192x192",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
     },
     {
       "src": "/static/icons/ema-512.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "E-maily",
+      "short_name": "Pošta",
+      "url": "/mail",
+      "description": "Otevřít e-mailové schránky"
+    },
+    {
+      "name": "Projekty",
+      "short_name": "Projekty",
+      "url": "/projects",
+      "description": "Otevřít projektový přehled"
+    },
+    {
+      "name": "Úkoly",
+      "short_name": "Úkoly",
+      "url": "/tasks",
+      "description": "Otevřít plánovač úkolů"
     }
   ]
 }

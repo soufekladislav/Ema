@@ -8,7 +8,23 @@
       <a href="{{ url_for('mail_detail', org_id=box.organization_id, message_id=message.id, folder=message.folder_id) }}" class="btn">Detail</a>
     </div>
   </div>
-  {% if preview.truncated %}<div class="ema-quick-warning">Zkrácený náhled zprávy (max. 192 KiB).</div>{% endif %}
+  {% if flag_warning %}<p class="ema-quick-warning">{{ flag_warning }}</p>{% endif %}
+
+  {% if preview.attachments %}
+  <section class="ema-attachment-list" aria-label="Přílohy e-mailu">
+    <h4>📎 Přílohy ({{ preview.attachments|length }})</h4>
+    {% for part in preview.attachments %}
+    <div class="ema-attachment-row">
+      <div><strong>{{ part.filename }}</strong>
+        <small>{{ part.content_type }} · {{ (part.size_bytes / 1024)|round(1) }} kB</small></div>
+      <a class="btn ema-attachment-download" href="{{ url_for('mail_attachment_download', mail_id=message.id, part_index=part.index) }}"
+         download="{{ part.filename }}" title="Stáhnout přímo do zařízení">⬇ Stáhnout</a>
+    </div>
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  {% if preview.truncated %}<div class="ema-quick-warning">Náhled zprávy se nepodařilo načíst celý.</div>{% endif %}
   {% if preview.is_html %}
     {% if show_images %}
     <div class="ema-mail-image-warning">Obrázky jsou pro tuto zprávu povolené. Odesílatel může zjistit otevření zprávy.</div>

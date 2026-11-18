@@ -6,7 +6,7 @@ import re
 import smtplib
 import socket
 import ssl
-from email.utils import getaddresses
+from email.utils import getaddresses, make_msgid, formatdate
 from pathlib import PurePath
 from datetime import timezone
 from email.headerregistry import Address
@@ -183,8 +183,21 @@ def sync_inbox(db, box, key, limit=30):
                 pass
 
 
-def preview_message(box, row, key, *, show_images=False, folder_name="INBOX"):
-    """Fetch bounded MIME directly from IMAP; body and images stay out of MariaDB."""
+MAX_MAIL_MIME_BYTES = 30 * 1024 * 1024
+MIME_CHUNK_SIZE = 512 * 1024
+
+
+def fetch_message_mime(box, row, key, *, folder_name="INBOX", max_bytes=MAX_MAIL_MIME_BYTES):
+    """Fetch an explicit IMAP UID in bounded chunks, without saving MIME to SQL.
+
+    All downloaded data exists only in request memory. IMAP UIDVALIDITY protects
+    against using a recycled UID. A hard upper bound protects Passenger RAM.
+    """
+    if row.mailbox_id != box.id or row.moved:
+        raise MailError("Zpráva již neexistuje v této schránce")
+    if row.size_bytes and row.size_bytes > max_bytes:
+        raise MailError("Zpráva je větší než bezpečný limit 30 MB. "
+                        "Pro velmi velké přílohy použijte původní webmail.")
     client = _connect(box, key)
     try:
         typ, _ = client.select(quote_mailbox_name(folder_name), readonly=True)
@@ -192,17 +205,40 @@ def preview_message(box, row, key, *, show_images=False, folder_name="INBOX"):
             raise MailError("Nelze otevřít složku zprávy")
         current = client.response("UIDVALIDITY")[1]
         if not current or int(current[0]) != row.uidvalidity:
-            raise MailError("UID zprávy již neodpovídá serveru. Proveďte synchronizaci.")
-        # A partial RFC822 fetch supplies MIME headers too, unlike BODY.PEEK[TEXT].
-        # This caps decoded mail exposure and prevents large attachments being cached.
-        typ, data = client.uid("FETCH", str(row.uid), f"(BODY.PEEK[]<0.{MAX_PREVIEW_BYTES}>)")
-        if typ != "OK":
-            raise MailError("Obsah zprávy není dostupný na IMAP serveru")
-        buf = b"".join(item[1] for item in data if isinstance(item, tuple) and isinstance(item[1], bytes))
-        if not buf:
-            raise MailError("IMAP nevrátil obsah zprávy")
-        return make_preview(buf[:MAX_PREVIEW_BYTES], show_images=show_images,
-                            truncated=(row.size_bytes or 0) > MAX_PREVIEW_BYTES)
+            raise MailError("UID zprávy se na serveru změnilo. Nejdříve obnovte složku.")
+        payload = bytearray()
+        offset = 0
+        while offset < max_bytes:
+            length = min(MIME_CHUNK_SIZE, max_bytes - offset)
+            status, response = client.uid("FETCH", str(row.uid),
+                                          f"(BODY.PEEK[]<{offset}.{length}>)")
+            if status != "OK":
+                raise MailError("IMAP server odmítl načíst obsah zprávy")
+            parts = [item for item in response or [] if isinstance(item, tuple)
+                     and len(item) > 1 and isinstance(item[1], bytes)]
+            if len(parts) != 1:
+                raise MailError("IMAP server vrátil neúplný obsah zprávy")
+            prefix, chunk = parts[0]
+            match = re.search(rb"\bUID\s+(\d+)\b", prefix if isinstance(prefix, bytes) else b"", re.I)
+            if match and int(match.group(1)) != row.uid:
+                raise MailError("IMAP odpověď se netýká vybrané zprávy")
+            if not chunk or len(chunk) > length:
+                raise MailError("IMAP server nevrátil očekávaný rozsah zprávy")
+            payload.extend(chunk)
+            offset += len(chunk)
+            if len(chunk) < length:
+                break
+            if row.size_bytes and offset >= row.size_bytes:
+                break
+        if row.size_bytes and len(payload) < row.size_bytes:
+            raise MailError("IMAP nevrátil celou zprávu. Přílohy nebyly zpřístupněny.")
+        if len(payload) >= max_bytes and (not row.size_bytes or row.size_bytes > len(payload)):
+            raise MailError("Zpráva překračuje bezpečný limit 30 MB")
+        return bytes(payload)
+    except MailError:
+        raise
+    except Exception:
+        raise MailError("Načtení MIME z IMAP selhalo. Zkuste znovu po obnovení schránky.") from None
     finally:
         try:
             client.logout()
@@ -210,9 +246,27 @@ def preview_message(box, row, key, *, show_images=False, folder_name="INBOX"):
             pass
 
 
+def preview_message(box, row, key, *, show_images=False, folder_name="INBOX"):
+    """Safe MIME preview; decode only in request memory, never in MariaDB."""
+    raw = fetch_message_mime(box, row, key, folder_name=folder_name)
+    return make_preview(raw, show_images=show_images)
+
+
+def download_message_attachment(box, row, key, part_index, *, folder_name="INBOX"):
+    """Return one user-requested MIME part, never persisted; strict index bounds."""
+    from .mail_render import extract_attachment
+    if not isinstance(part_index, int) or part_index < 0 or part_index > 99:
+        raise MailError("Neplatný identifikátor přílohy")
+    raw = fetch_message_mime(box, row, key, folder_name=folder_name)
+    return extract_attachment(raw, part_index)
+
 
 def _parse_addresses(value, *, required=False):
     """Validate recipients; refuse header injection and large fanout."""
+    if not value or not value.strip():
+        if required:
+            raise MailError("Zadejte příjemce")
+        return []
     if any(c in value for c in "\r\n") or len(value) > 1500:
         raise MailError("Neplatný seznam příjemců")
     result = []
@@ -225,13 +279,23 @@ def _parse_addresses(value, *, required=False):
     return list(dict.fromkeys(result))
 
 
+def validate_recipients(to, cc="", bcc=""):
+    """Pure input validation, before recording the first SMTP attempt."""
+    result = []
+    for value, label, required in ((to, "Komu", True), (cc, "Kopie", False),
+                                   (bcc, "Skrytá kopie", False)):
+        try:
+            result.append(_parse_addresses(value, required=required))
+        except MailError as ex:
+            raise MailError(f"{label}: {ex}") from None
+    if sum(len(group) for group in result) > 25:
+        raise MailError("Nejvýše 25 příjemců dohromady")
+    return tuple(result)
+
+
 def send_composed(box, key, to, cc, bcc, subject, body, *, reply_message_id=None, attachments=None):
     """Only explicit SMTP send. No retry if delivery outcome is uncertain."""
-    primary = _parse_addresses(to, required=True)
-    copy = _parse_addresses(cc)
-    blind = _parse_addresses(bcc)
-    if len(primary) + len(copy) + len(blind) > 25:
-        raise MailError("Příliš mnoho příjemců")
+    primary, copy, blind = validate_recipients(to, cc, bcc)
     if not subject or len(subject) > 500 or any(c in subject for c in "\r\n"):
         raise MailError("Neplatný předmět")
     if not body.strip() or len(body) > 100000:
@@ -243,6 +307,8 @@ def send_composed(box, key, to, cc, bcc, subject, body, *, reply_message_id=None
         raise MailError("SMTP vyžaduje TLS na portu 465 nebo 587")
     msg = EmailMessage()
     msg["From"], msg["To"], msg["Subject"] = box.address, ", ".join(primary), subject
+    msg["Date"] = formatdate(localtime=True)
+    msg["Message-ID"] = make_msgid()
     if copy:
         msg["Cc"] = ", ".join(copy)
     if reply_message_id:
@@ -276,8 +342,15 @@ def send_composed(box, key, to, cc, bcc, subject, body, *, reply_message_id=None
                 smtp.ehlo()
                 smtp.login(getattr(box, "smtp_username", "") or box.username, password)
                 smtp.send_message(msg, to_addrs=recipients)
+    except smtplib.SMTPAuthenticationError as ex:
+        raise MailError("SMTP odmítlo přihlášení. Ověř SMTP login, heslo a nastavení portu 465/587.") from ex
+    except smtplib.SMTPRecipientsRefused as ex:
+        raise MailError("SMTP odmítlo alespoň jednoho příjemce. Zkontroluj adresy.") from ex
+    except (ssl.SSLError, socket.timeout, TimeoutError, OSError) as ex:
+        raise MailError("SMTP spojení selhalo nebo vypršelo; výsledek odeslání může být nejistý.") from ex
     except Exception as ex:
-        raise MailError("SMTP odeslání není potvrzené; ověřte Odeslané před opakováním") from ex
+        raise MailError("SMTP odeslání není potvrzené; ověř doručení před opakováním") from ex
+    return msg.as_bytes()
 
 
 def send_plain(box, key, to_addr, subject, text):

@@ -94,6 +94,17 @@
         <button class="ema-toolbar-button" type="submit" title="Obnovit zprávy">↻ <span>Obnovit</span></button>
       </form>
       {% endif %}
+      {% if selected_box and selected_folder and is_trash_folder and selected_box.id in syncable_ids %}
+      <form method="post" action="{{ url_for('mail_prepare_trash', box_id=selected_box.id) }}"
+            class="ema-mail-refresh-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="folder_id" value="{{ selected_folder.id }}">
+        <button class="ema-toolbar-button ema-mail-trash" type="submit"
+                title="Nejdříve ověřit počet zpráv a potvrdit nevratné vyprázdnění celého Koše">
+          🗑 Vysypat Koš
+        </button>
+      </form>
+      {% endif %}
       <a class="ema-toolbar-button" href="{{ url_for('account_hub') }}" title="Nastavení schránek">⚙</a>
     </div>
     <div class="ema-mail-hub">
@@ -124,8 +135,14 @@
               </form>
               {% if selected_box and selected_box.id == b.id %}
               <nav class="ema-mail-folder-tree" aria-label="Složky schránky {{ b.label }}">
+                <details class="ema-mail-folders-root" data-mail-folder-root="{{ me.id }}:{{ b.id }}" open>
+                  <summary>Složky schránky</summary>
+                  <div class="ema-mail-folder-entries">
                 {% for f in imap_folders %}
-                  <a class="ema-mail-folder {{ 'active' if selected_folder and selected_folder.id == f.id else '' }}" href="{{ url_for('mail_hub', box=b.id, folder=f.id) }}">
+                  <a class="ema-mail-folder {{ 'active' if selected_folder and selected_folder.id == f.id else '' }}"
+                     data-folder-id="{{ f.id }}" data-folder-mailbox-id="{{ b.id }}"
+                     data-folder-fullname="{{ folder_names[f.id] }}" data-folder-delimiter="{{ f.delimiter }}"
+                     href="{{ url_for('mail_hub', box=b.id, folder=f.id) }}">
                     <span>▸ {{ folder_names[f.id] }}</span>
                   </a>
                 {% endfor %}
@@ -133,6 +150,8 @@
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                   <button class="ema-mail-folders-refresh" type="submit">↻ Aktualizovat složky</button>
                 </form>
+                  </div>
+                </details>
               </nav>
               {% endif %}
             </div>
@@ -153,6 +172,7 @@
             <button class="ema-toolbar-button" name="action" value="archive" type="submit" title="Archivovat vybrané">▣ Archiv</button>
             <button class="ema-toolbar-button" name="action" value="read" type="submit" title="Označit jako přečtené">✉ Přečtené</button>
             <button class="ema-toolbar-button" name="action" value="unread" type="submit" title="Označit jako nepřečtené">◉ Nepřečtené</button>
+            <button class="ema-toolbar-button" id="ema-bulk-move-button" type="button" title="Přesunout vybrané do složky stejné schránky">↳ Přesunout…</button>
           </form>
           <span class="ema-mail-toolbar-hint">Otevři zprávu pro rychlý náhled</span>
         </div>
@@ -161,6 +181,8 @@
              data-folder-id="{{ selected_folder.id if selected_folder else '' }}"
              data-page-url="{{ url_for('mail_folder_page', box_id=selected_box.id) if selected_box else '' }}"
              data-aggregate-url="{{ url_for('mail_aggregate_page') }}"
+             data-aggregate-sync-url="{{ url_for('mail_aggregate_sync_one') }}"
+             data-included-box-ids="{% for b in boxes if not view_prefs.get(b.id) or view_prefs[b.id].included %}{{ b.id }}{% if not loop.last %},{% endif %}{% endfor %}"
              data-csrf="{{ csrf_token() }}"
              data-next-cursor="{{ initial_cursor or '' }}"
              data-has-more="{{ 'true' if initial_has_more else 'false' }}">
@@ -173,6 +195,20 @@
         </div>
       </section>
     </div>
+    <div id="ema-mail-context" class="ema-mail-context" role="menu" aria-label="Akce e-mailu" hidden>
+      <button type="button" role="menuitem" data-ema-mail-action="toggle-read">Označit jako nepřečtené</button>
+      <button type="button" role="menuitem" data-ema-mail-action="toggle-star">Označit příznakem</button>
+      <button type="button" role="menuitem" data-ema-mail-action="move">↳ Přesunout do složky…</button>
+      <button type="button" role="menuitem" data-ema-mail-action="archive">Archivovat</button>
+      <button type="button" role="menuitem" data-ema-mail-action="trash">Přesunout do Koše</button>
+    </div>
+    <dialog id="ema-mail-folder-dialog" class="ema-mail-target-dialog" aria-labelledby="ema-mail-folder-title">
+      <h3 id="ema-mail-folder-title">Přesunout do složky</h3>
+      <p>Vyber cílovou složku stejné poštovní schránky. Přesun bude proveden na IMAP serveru.</p>
+      <div id="ema-mail-target-list" class="ema-mail-target-list" role="listbox" aria-label="Cílové složky"></div>
+      <button class="btn" type="button" id="ema-mail-folder-cancel">Zrušit</button>
+    </dialog>
+    <p class="sr-only" id="ema-mail-operations-status" role="status" aria-live="polite"></p>
   </div>
 {% elif section == 'compose' %}
   <div class="ema-compose-screen">
@@ -191,9 +227,9 @@
         <input name="to" id="ema-compose-to" type="text" maxlength="1500" required value="{{ recipient }}" placeholder="Příjemce@example.cz" list="ema-contact-datalist" spellcheck="false">
       </label>
       <datalist id="ema-contact-datalist"></datalist>
-      <details class="ema-compose-extra"><summary>Kopie / Skrytá kopie</summary>
-        <label class="ema-compose-line">Kopie<input name="cc" type="text" maxlength="1500" list="ema-contact-datalist"></label>
-        <label class="ema-compose-line">Skrytá kopie<input name="bcc" type="text" maxlength="1500" list="ema-contact-datalist"></label>
+      <details class="ema-compose-extra" {{ 'open' if cc_prefill|default('') or bcc_prefill|default('') else '' }}><summary>Kopie / Skrytá kopie</summary>
+        <label class="ema-compose-line">Kopie<input name="cc" type="text" maxlength="1500" value="{{ cc_prefill|default('') }}" list="ema-contact-datalist"></label>
+        <label class="ema-compose-line">Skrytá kopie<input name="bcc" type="text" maxlength="1500" value="{{ bcc_prefill|default('') }}" list="ema-contact-datalist"></label>
       </details>
       <label class="ema-compose-line">Předmět<input type="text" name="subject" maxlength="500" required value="{{ subject }}"></label>
       <label class="ema-compose-body-label">Text zprávy

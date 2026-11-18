@@ -33,7 +33,7 @@ def test_html_preview_blocks_scripts_forms_images_and_unsafe_links():
     assert "<script" not in blocked.srcdoc
     assert "<form" not in blocked.srcdoc
     assert "javascript:alert" not in blocked.srcdoc
-    assert "img-src 'none'" in blocked.srcdoc
+    assert "img-src data:" in blocked.srcdoc
 
     enabled = make_preview(msg.as_bytes(), show_images=True)
     assert "https://tracker.example.org/open" in enabled.srcdoc
@@ -41,14 +41,14 @@ def test_html_preview_blocks_scripts_forms_images_and_unsafe_links():
     assert "<script" not in enabled.srcdoc
 
 
-def test_cid_inline_image_only_after_opt_in():
+def test_cid_inline_image_is_local_and_renders_without_remote_tracking():
     msg = EmailMessage()
     msg.set_content("Plain text")
     msg.add_alternative('<p>Logo <img src="cid:logo123" alt="logo"></p>', subtype="html")
     msg.get_payload()[1].add_related(b"\x89PNG\r\n\x1a\n" + b"12345", maintype="image",
                                      subtype="png", cid="<logo123>")
     hidden = make_preview(msg.as_bytes())
-    assert "data:image/png" not in hidden.srcdoc
+    assert "data:image/png" in hidden.srcdoc
     allowed = make_preview(msg.as_bytes(), show_images=True)
     assert "data:image/png;base64," in allowed.srcdoc
 
@@ -78,3 +78,88 @@ def test_newsletter_css_not_rendered_as_raw_code_and_safe_inline_style_survives(
     assert "table { border: 0" not in p.srcdoc
     assert "alert(" not in p.srcdoc
     assert "color:green" in p.srcdoc or "color: green" in p.srcdoc
+
+
+
+def test_newsletter_preserves_safe_css_classes_tables_and_strips_remote_css():
+    from email.message import EmailMessage
+    from ema.mail_render import make_preview
+    msg = EmailMessage()
+    msg.set_content("Textová alternativa")
+    msg.add_alternative("""
+      <html><head>
+      <style>
+        @import url("https://tracker.example/evil.css");
+        @font-face {font-family: X;src:url(https://tracker.example/x.woff)}
+        .hero { background-color: #223344; color: #ffffff; padding: 24px; }
+        .danger { background-image: url(https://tracker.example/track) }
+        table td { padding: 12px; font-size: 18px; }
+      </style></head>
+      <body><table cellpadding="0" cellspacing="0">
+      <tr><td class="hero" style="font-weight:bold">Produktový katalog</td></tr>
+      </table><img src="https://tracker.example/pixel" alt="pixel">
+      </body></html>
+    """, subtype="html")
+    preview = make_preview(msg.as_bytes())
+    assert preview.is_html
+    assert 'class="hero"' in preview.srcdoc
+    assert "background-color" in preview.srcdoc
+    assert "table td{" in preview.srcdoc
+    assert "Produktový katalog" in preview.srcdoc
+    assert "tracker.example" not in preview.srcdoc
+    assert "@import" not in preview.srcdoc
+    assert "@font-face" not in preview.srcdoc
+    assert "background-image:" not in preview.srcdoc
+    assert "<script" not in preview.srcdoc
+    assert "sandbox" not in preview.srcdoc  # sandbox is on the embedding iframe
+
+
+def test_html_preview_still_works_without_optional_css_parser(monkeypatch):
+    import ema.mail_render as renderer
+    from email.message import EmailMessage
+    msg = EmailMessage()
+    msg.set_content("Plain")
+    msg.add_alternative(
+        '<html><head><style>.title{font-weight:bold}</style></head>'
+        '<body><div class="title">Obsah HTML</div></body></html>',
+        subtype="html",
+    )
+    monkeypatch.setattr(renderer, "tinycss2", None)
+    preview = renderer.make_preview(msg.as_bytes())
+    assert preview.is_html
+    assert "Obsah HTML" in preview.srcdoc
+    assert "font-weight:bold" not in preview.srcdoc
+
+
+
+def test_attachments_index_and_download_are_in_memory_only():
+    from ema.mail_render import extract_attachment
+    msg = EmailMessage()
+    msg.set_content("Přikládám fakturu.")
+    msg.add_attachment(b"%PDF-1.7 fake", maintype="application", subtype="pdf",
+                       filename="faktura-červen.pdf")
+    preview = make_preview(msg.as_bytes())
+    assert len(preview.attachments) == 1
+    assert preview.attachments[0].filename == "faktura-červen.pdf"
+    assert preview.attachments[0].content_type == "application/pdf"
+    name, content_type, data = extract_attachment(msg.as_bytes(), 0)
+    assert name == "faktura-červen.pdf"
+    assert content_type == "application/pdf"
+    assert data == b"%PDF-1.7 fake"
+    import pytest
+    with pytest.raises(IndexError):
+        extract_attachment(msg.as_bytes(), 12)
+
+
+def test_newsletter_keeps_safe_responsive_media_rules_and_poppins_fallback():
+    msg = EmailMessage()
+    msg.set_content("Text")
+    msg.add_alternative("""
+    <html><head><style>@media screen and (max-width: 600px) {
+      .col {width: 100%; padding: 12px;}
+    }</style></head><body><table><tr><td class="col">Nabídka</td></tr></table></body></html>
+    """, subtype="html")
+    preview = make_preview(msg.as_bytes())
+    assert "@media screen and (max-width: 600px)" in preview.srcdoc
+    assert "Poppins" in preview.srcdoc
+    assert "Nabídka" in preview.srcdoc

@@ -3,7 +3,9 @@ import os
 import re
 import json
 import secrets
+from io import BytesIO
 from datetime import datetime, timedelta
+from time import time
 from functools import wraps
 from pathlib import Path
 from email.utils import parseaddr
@@ -12,15 +14,16 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 import click
-from flask import Flask, abort, flash, g, redirect, render_template, request, session, url_for, send_from_directory
+from flask import Flask, abort, flash, g, redirect, render_template, request, session, url_for, send_from_directory, send_file
 from sqlalchemy import func, select, text, or_, and_, case
 from sqlalchemy.exc import IntegrityError
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from .mail_service import MailError, encrypt_password, preview_message, send_plain, send_composed, sync_inbox, validate_mail_host
+from .mail_service import MailError, encrypt_password, preview_message, download_message_attachment, send_plain, send_composed, validate_recipients, sync_inbox, validate_mail_host
 from .mail_folders import (
     PAGE_SIZE, discover_folders, available_folders, decode_modified_utf7,
-    fetch_folder_page, special_folder, move_message,
+    fetch_folder_page, special_folder, move_message, move_many_messages,
+    append_sent_copy, empty_trash_batch, preview_trash_all, empty_trash_all, is_trash_folder, set_server_flags,
 )
 from .assistant_service import AssistantError, run_assistant
 from .contact_import import ImportErrorCSV, extract_contacts
@@ -225,16 +228,13 @@ def mailbox_counts(db, uid, boxes):
     ids = [b.id for b in boxes]
     if not ids:
         return {}
-    read_value = case(
-        (MailUserState.read_override.is_not(None), MailUserState.read_override),
-        else_=func.instr(func.lower(MailMessage.flags), r"\seen") > 0,
-    )
+    # IMAP is the sole source of truth for Seen/Flagged. Do not let historic
+    # personal MailUserState overrides affect unread counters.
+    read_value = func.instr(func.lower(MailMessage.flags), r"\seen") > 0
     rows = db.execute(
         select(MailMessage.mailbox_id, func.count(MailMessage.id),
                func.sum(case((read_value, 0), else_=1)))
         .join(MailFolder, MailFolder.id == MailMessage.folder_id)
-        .outerjoin(MailUserState, and_(
-            MailUserState.mail_id == MailMessage.id, MailUserState.user_id == uid))
         .where(MailMessage.mailbox_id.in_(ids), MailFolder.name == "INBOX",
                MailMessage.moved.is_(False),
                MailMessage.uidvalidity == MailFolder.uidvalidity)
@@ -244,18 +244,12 @@ def mailbox_counts(db, uid, boxes):
 
 
 def mail_rows_state(db, uid, messages):
-    ids = [m.id for m in messages]
-    states = {row.mail_id: row for row in db.scalars(
-        select(MailUserState).where(
-            MailUserState.user_id == uid,
-            MailUserState.mail_id.in_(ids)
-        )).all()} if ids else {}
+    """IMAP FLAGS are authoritative across EMA, Roundcube and other clients."""
     return {
-        m.id: {
-            "read": states[m.id].read_override if m.id in states and
-                    states[m.id].read_override is not None else is_imap_read(m),
-            "starred": bool(states[m.id].starred) if m.id in states else False,
-        } for m in messages
+        msg.id: {
+            "read": is_imap_read(msg),
+            "starred": r"\flagged" in (msg.flags or "").lower().split(),
+        } for msg in messages
     }
 
 
@@ -347,7 +341,11 @@ def create_app(test_config=None):
 
     @app.get("/manifest.webmanifest")
     def pwa_manifest():
-        return send_from_directory(app.static_folder, "manifest.webmanifest", mimetype="application/manifest+json")
+        resp = send_from_directory(app.static_folder, "manifest.webmanifest",
+                                   mimetype="application/manifest+json")
+        # Installed PWA should see renamed app metadata promptly on next launch.
+        resp.headers["Cache-Control"] = "no-cache, must-revalidate"
+        return resp
 
     @app.get("/service-worker.js")
     def pwa_worker():
@@ -504,6 +502,8 @@ def create_app(test_config=None):
             initial_has_more=initial_has_more,
             initial_cursor=min((m.uid for m in messages), default=None),
             can_move_ids=syncable_ids,
+            is_trash_folder=bool(selected and selected_folder and
+                                 is_trash_folder(selected_folder)),
         )
 
     @app.post("/mail/<int:box_id>/page")
@@ -571,6 +571,37 @@ def create_app(test_config=None):
         except MailError as ex:
             flash(str(ex), "error")
         return redirect(url_for("mail_hub", box=box.id, folder=folder.id))
+
+
+    @app.post("/mail/aggregate/sync-one")
+    @login_required
+    def mail_aggregate_sync_one():
+        """Fetch one included mailbox's latest 50 INBOX headers. Never bulk-load bodies."""
+        _, orgs, _ = current_scope()
+        boxes = visible_mailboxes(g.db, g.user.id, orgs)
+        prefs = user_mail_preferences(g.db, g.user.id, boxes)
+        payload = request.get_json(silent=True) or {}
+        raw_box = payload.get("box_id")
+        if not isinstance(raw_box, int) or isinstance(raw_box, bool):
+            abort(400)
+        box = next((b for b in boxes if b.id == raw_box and
+                    (b.id not in prefs or prefs[b.id].included)), None)
+        if box is None:
+            abort(403)
+        folder = g.db.scalar(select(MailFolder).where(
+            MailFolder.mailbox_id == box.id, MailFolder.name == "INBOX"))
+        if folder is None:
+            folder = MailFolder(mailbox_id=box.id, name="INBOX")
+            g.db.add(folder)
+            g.db.flush()
+        try:
+            page = fetch_folder_page(g.db, box, app.config["MAIL_ENCRYPTION_KEY"],
+                                     folder, limit=PAGE_SIZE)
+        except MailError as ex:
+            return {"error": str(ex), "box_id": box.id}, 422
+        unread, indexed = mailbox_counts(g.db, g.user.id, [box]).get(box.id, (0, 0))
+        return {"box_id": box.id, "unread": unread, "indexed": indexed,
+                "server_total": page["server_total"], "refreshed": len(page["uids"])}
 
     @app.get("/mail/aggregate/page")
     @login_required
@@ -659,10 +690,76 @@ def create_app(test_config=None):
             target = move_message(g.db, box, app.config["MAIL_ENCRYPTION_KEY"], msg, action)
             audit("mail.move", f"mail={mail_id},folder={target.id},action={action}", box.organization_id)
             g.db.commit()
-            flash(f"Zpráva přesunuta do složky {decode_modified_utf7(target.name)}. Nebyla trvale smazána.", "success")
+            pending = g.db.info.get("ema_move_mode") == "copy-pending-cleanup"
+            flash(f"Zpráva přesunuta do složky {decode_modified_utf7(target.name)}. " +
+                  ("Původní zpráva je zatím na serveru jen označená ke smazání (\\Deleted), "
+                   "může být šedá v Roundcube. Nedojde k mazání cizích zpráv." if pending
+                   else "Původní zpráva byla na serveru bezpečně odstraněna, případně přesunuta."),
+                  "error" if pending else "success")
         except MailError as ex:
             flash(str(ex), "error")
         return redirect(url_for("mail_hub", box=box.id, folder=msg.folder_id))
+
+
+    @app.post("/mail/<int:box_id>/trash/prepare")
+    @login_required
+    def mail_prepare_trash(box_id):
+        """Read-only IMAP preview before any irreversible full-folder cleanup."""
+        box = mailbox_or_403(box_id, manage=True)
+        try:
+            organization_access(g.db, g.user.id, box.organization_id)
+        except Forbidden:
+            abort(403)
+        folder_id = positive_id("folder_id")
+        folder = g.db.get(MailFolder, folder_id) if folder_id else None
+        if not folder or folder.mailbox_id != box.id:
+            abort(403)
+        session.pop("ema_trash_prepared", None)
+        try:
+            snapshot = preview_trash_all(g.db, box, app.config["MAIL_ENCRYPTION_KEY"], folder)
+        except MailError as ex:
+            flash(str(ex), "error")
+            return redirect(url_for("mail_hub", box=box.id, folder=folder.id))
+        nonce = secrets.token_urlsafe(20)
+        session["ema_trash_prepared"] = {
+            "uid": g.user.id, "box": box.id, "folder": folder.id,
+            "snapshot": snapshot, "nonce": nonce, "expires": int(time()) + 300,
+        }
+        return render_template("trash_confirm.html", **base_context(), section="mail",
+                               box=box, folder=folder, snapshot=snapshot, nonce=nonce)
+
+    @app.post("/mail/<int:box_id>/trash/empty")
+    @login_required
+    def mail_empty_trash(box_id):
+        box = mailbox_or_403(box_id, manage=True)
+        try:
+            organization_access(g.db, g.user.id, box.organization_id)
+        except Forbidden:
+            abort(403)
+        folder_id = positive_id("folder_id")
+        folder = g.db.get(MailFolder, folder_id) if folder_id else None
+        if not folder or folder.mailbox_id != box.id:
+            abort(403)
+        prepared = session.pop("ema_trash_prepared", None)
+        if (not isinstance(prepared, dict) or
+                prepared.get("uid") != g.user.id or
+                prepared.get("box") != box.id or prepared.get("folder") != folder.id or
+                prepared.get("expires", 0) < int(time()) or
+                field("confirmation", 40) != "permanently-delete-whole-trash" or
+                field("acknowledge", 10) != "yes" or
+                not secrets.compare_digest(str(prepared.get("nonce", "")), field("nonce", 80))):
+            abort(400, description="Potvrzení vysypání Koše chybí nebo vypršelo.")
+        # Consume session permission BEFORE remote IMAP; never auto-retry after uncertainty.
+        try:
+            deleted = empty_trash_all(g.db, box, app.config["MAIL_ENCRYPTION_KEY"],
+                                      folder, prepared["snapshot"])
+            audit("mail.trash.empty_all", f"box={box.id},folder={folder.id},count={deleted}",
+                  box.organization_id)
+            g.db.commit()
+            flash(f"Server potvrdil vyprázdnění Koše: {deleted} zpráv.", "success")
+        except MailError as ex:
+            flash(str(ex), "error")
+        return redirect(url_for("mail_hub", box=box.id, folder=folder.id))
 
     @app.get("/mail/<int:mail_id>/quick")
     @login_required
@@ -682,14 +779,83 @@ def create_app(test_config=None):
         try:
             preview = preview_message(box, msg, app.config["MAIL_ENCRYPTION_KEY"],
                                       folder_name=folder.name, show_images=show_images)
-            state = get_mail_user_state(g.db, g.user.id, msg.id)
-            state.read_override = True
-            g.db.commit()
+            # Opening marks \Seen on IMAP; read-only mailbox grants do not
+            # silently mutate someone else's mailbox.
+            confirmed_read = is_imap_read(msg)
+            flag_warning = ""
+            try:
+                mailbox_access(g.db, g.user.id, box.id, manage=True)
+                if not confirmed_read:
+                    set_server_flags(g.db, box, app.config["MAIL_ENCRYPTION_KEY"], [msg], "read")
+                confirmed_read = is_imap_read(msg)
+            except Forbidden:
+                flag_warning = "Pouze čtení: příznak zůstal beze změny."
+            except MailError as ex:
+                flag_warning = str(ex)
             content = render_template("_mail_quick_preview.html", message=msg, box=box,
-                                      preview=preview, show_images=show_images)
-            return {"html": content, "read": True}
+                                      preview=preview, show_images=show_images,
+                                      flag_warning=flag_warning)
+            return {"html": content, "read": confirmed_read, "warning": flag_warning}
         except MailError as ex:
             return {"error": str(ex)}, 422
+
+    @app.get("/mail/<int:mail_id>/attachment/<int:part_index>")
+    @login_required
+    def mail_attachment_download(mail_id, part_index):
+        """Download exactly one attachment; no SQL, disk or cache persistence."""
+        msg = g.db.get(MailMessage, mail_id)
+        if not msg or msg.moved:
+            abort(404)
+        box = mailbox_or_403(msg.mailbox_id)
+        try:
+            organization_access(g.db, g.user.id, box.organization_id)
+        except Forbidden:
+            abort(403)
+        folder = g.db.get(MailFolder, msg.folder_id)
+        if not folder or folder.mailbox_id != box.id or folder.uidvalidity != msg.uidvalidity:
+            abort(404)
+        try:
+            filename, content_type, data = download_message_attachment(
+                box, msg, app.config["MAIL_ENCRYPTION_KEY"], part_index,
+                folder_name=folder.name)
+        except (IndexError, ValueError):
+            abort(404)
+        except MailError as ex:
+            abort(422, description=str(ex))
+        response = send_file(BytesIO(data), mimetype="application/octet-stream",
+                             as_attachment=True, download_name=filename,
+                             max_age=0)
+        response.headers["Cache-Control"] = "private, no-store, max-age=0"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        return response
+
+
+    @app.get("/mail/<int:mail_id>/folders")
+    @login_required
+    def mail_move_targets(mail_id):
+        msg = g.db.get(MailMessage, mail_id)
+        if not msg or msg.moved:
+            abort(404)
+        box = mailbox_or_403(msg.mailbox_id, manage=True)
+        try:
+            organization_access(g.db, g.user.id, box.organization_id)
+        except Forbidden:
+            abort(403)
+        # Refresh server LIST on demand, including folders of mailboxes that
+        # have not yet been opened individually from the combined inbox.
+        try:
+            discover_folders(g.db, box, app.config["MAIL_ENCRYPTION_KEY"])
+        except MailError as ex:
+            return {"error": str(ex)}, 422
+        rows = g.db.scalars(select(MailFolder).where(
+            MailFolder.mailbox_id == box.id).order_by(MailFolder.name)).all()
+        targets = [{"id": folder.id, "name": decode_modified_utf7(folder.name)}
+                   for folder in rows if folder.id != msg.folder_id and
+                   r"\noselect" not in (folder.special_use or "").lower()]
+        result = {"mailbox_id": box.id, "folders": targets}
+        response = app.make_response(result)
+        response.headers["Cache-Control"] = "private, no-store"
+        return response
 
     @app.post("/mail/<int:mail_id>/quick-move")
     @login_required
@@ -703,14 +869,31 @@ def create_app(test_config=None):
         except Forbidden:
             abort(403)
         action = field("action", 20)
-        if action not in ("trash", "archive"):
+        if action not in ("trash", "archive", "move"):
             abort(400)
+        folder_id = positive_id("target_folder_id") if action == "move" else None
+        if action == "move":
+            destination = g.db.get(MailFolder, folder_id) if folder_id else None
+            if not destination or destination.mailbox_id != box.id:
+                abort(400, description="Cílová složka musí být ve stejné schránce")
+        json_mode = request.headers.get("Accept") == "application/json"
         try:
-            target = move_message(g.db, box, app.config["MAIL_ENCRYPTION_KEY"], msg, action)
+            kw = {"target_folder_id": folder_id} if action == "move" else {}
+            target = move_message(g.db, box, app.config["MAIL_ENCRYPTION_KEY"],
+                                  msg, action, **kw)
             audit("mail.move", f"mail={mail_id},target={target.id},action={action}", box.organization_id)
             g.db.commit()
-            flash("Zpráva přesunuta do serverové složky " + decode_modified_utf7(target.name), "success")
+            pending = g.db.info.get("ema_move_mode") == "copy-pending-cleanup"
+            summary = "Zpráva přesunuta do serverové složky " + decode_modified_utf7(target.name)
+            if pending:
+                summary += ("; originál zůstává označený \Deleted. Server nepovolil "
+                            "bezpečný cílený výmaz; zkontrolujte jej v Roundcube.")
+            if json_mode:
+                return {"ok": True, "message": summary, "pending_cleanup": pending}
+            flash(summary, "error" if pending else "success")
         except MailError as ex:
+            if json_mode:
+                return {"ok": False, "error": str(ex)}, 409
             flash(str(ex), "error")
         return redirect(url_for("mail_hub", box=box.id, folder=msg.folder_id))
 
@@ -718,11 +901,11 @@ def create_app(test_config=None):
     @login_required
     def bulk_mail_action():
         action = field("action", 20)
-        if action not in ("trash", "archive", "read", "unread"):
+        if action not in ("trash", "archive", "move", "read", "unread", "star", "unstar"):
             abort(400)
         raw = request.form.getlist("mail_ids")
-        if not raw or len(raw) > 30 or any(not x.isdigit() or int(x) <= 0 for x in raw):
-            flash("Vyber 1–30 zpráv v jednom kroku.", "error")
+        if not raw or len(raw) > 50 or any(not x.isdigit() or int(x) <= 0 for x in raw):
+            flash("Vyber 1–50 zpráv v jednom kroku.", "error")
             return redirect(url_for("mail_hub"))
         msg_ids = list(dict.fromkeys(int(x) for x in raw))
         if len(msg_ids) != len(raw):
@@ -730,36 +913,53 @@ def create_app(test_config=None):
         messages = g.db.scalars(select(MailMessage).where(MailMessage.id.in_(msg_ids))).all()
         if len(messages) != len(msg_ids) or any(m.moved for m in messages):
             abort(400, description="Některá zpráva již byla přesunuta")
-        # Preauthorize ALL selected messages before any write or IMAP side effect.
         authorized = {}
         for msg in messages:
-            box = mailbox_or_403(msg.mailbox_id, manage=action in ("trash", "archive"))
+            box = mailbox_or_403(msg.mailbox_id, manage=True)
             try:
                 organization_access(g.db, g.user.id, box.organization_id)
             except Forbidden:
                 abort(403)
             authorized[msg.id] = box
-        if action in ("read", "unread"):
-            for msg in messages:
-                state = get_mail_user_state(g.db, g.user.id, msg.id)
-                state.read_override = action == "read"
-            g.db.commit()
-            flash(f"Upraveno {len(messages)} zpráv v Emě.", "success")
-        else:
-            done = 0
-            failed = 0
-            for msg in messages:
-                box = authorized[msg.id]
-                try:
-                    target = move_message(g.db, box, app.config["MAIL_ENCRYPTION_KEY"], msg, action)
-                    audit("mail.bulk_move", f"mail={msg.id},target={target.id}", box.organization_id)
-                    g.db.commit()
-                    done += 1
-                except MailError:
-                    failed += 1
-                    # The remote result may be uncertain; do not retry automatically.
-                    continue
-            flash(f"Přesunuto {done} zpráv, {failed} nepřesunuto. Při chybě zkontroluj server.", "success" if not failed else "error")
+        folder_id = positive_id("target_folder_id") if action == "move" else None
+        if action == "move":
+            if not folder_id:
+                abort(400)
+            destination = g.db.get(MailFolder, folder_id)
+            if not destination or any(m.mailbox_id != destination.mailbox_id for m in messages):
+                abort(400, description="Nelze přesouvat mezi různými poštovními schránkami")
+        groups = {}
+        for msg in messages:
+            groups.setdefault((msg.mailbox_id, msg.folder_id), []).append(msg)
+        done, failed, reasons, pending_cleanup = 0, 0, [], []
+        for (box_id, source_id), batch in groups.items():
+            box = authorized[batch[0].id]
+            try:
+                if action in ("read", "unread", "star", "unstar"):
+                    done += set_server_flags(g.db, box, app.config["MAIL_ENCRYPTION_KEY"],
+                                             batch, action)
+                    audit("mail.bulk_flags", f"box={box_id},action={action},count={len(batch)}",
+                          box.organization_id)
+                else:
+                    kw = {"target_folder_id": folder_id} if action == "move" else {}
+                    target = move_many_messages(g.db, box, app.config["MAIL_ENCRYPTION_KEY"],
+                                                batch, action, **kw)
+                    audit("mail.bulk_move", f"box={box_id},target={target.id},count={len(batch)}",
+                          box.organization_id)
+                    done += len(batch)
+                    if g.db.info.get("ema_move_mode") == "copy-pending-cleanup":
+                        pending_cleanup.append(box.label)
+                g.db.commit()
+            except MailError as ex:
+                failed += len(batch)
+                reasons.append(f"{box.label}: {ex}")
+                # Never retry an uncertain remote write automatically.
+        detail = " " + " | ".join(reasons[:3]) if reasons else ""
+        if pending_cleanup:
+            detail += (" Originály mohou zůstat označené \Deleted na serveru: "
+                       + ", ".join(pending_cleanup[:3]))
+        flash(f"Server potvrdil {done} změn, {failed} nepotvrzeno." + detail,
+              "success" if not failed and not pending_cleanup else "error")
         return redirect(url_for("mail_hub"))
 
     @app.get("/mail/compose")
@@ -856,6 +1056,16 @@ def create_app(test_config=None):
         if g.db.scalar(select(Outbound.id).where(Outbound.nonce == nonce)):
             flash("Pokus o odeslání již existuje. Zkontroluj Odeslané před opakováním.", "error")
             return redirect(url_for("mail_hub", box=box.id))
+        try:
+            validate_recipients(to, cc, bcc)
+        except MailError as ex:
+            # SMTP never started and no idempotency row was created; allow correction.
+            flash(str(ex) + " Zpráva nebyla odeslána, opravte adresu.", "error")
+            return render_hub("compose", send_boxes=[box], active_box=box,
+                              recipient=to, subject=subject, draft_content=body,
+                              cc_prefill=cc, bcc_prefill=bcc,
+                              source_message=src if reply_id else None, reply_id=reply_id,
+                              csrf_nonce=secrets.token_urlsafe(24)), 422
         if request.content_length and request.content_length > 11_000_000:
             abort(413)
         attached = []
@@ -878,16 +1088,27 @@ def create_app(test_config=None):
             flash("Odeslání již bylo zahájeno. Před opakováním zkontroluj Odeslané.", "error")
             return redirect(url_for("mail_hub", box=box.id))
         try:
-            send_composed(box, app.config["MAIL_ENCRYPTION_KEY"], to, cc, bcc,
-                          subject, body, reply_message_id=message_id, attachments=attached)
-            record.state, record.sent_at = "sent", now()
-            audit("mail.compose.sent", nonce, box.organization_id)
-            flash("Zpráva byla předána SMTP serveru.", "success")
-        except MailError:
+            sent_bytes = send_composed(box, app.config["MAIL_ENCRYPTION_KEY"], to, cc, bcc,
+                                       subject, body, reply_message_id=message_id, attachments=attached)
+        except MailError as ex:
             record.state = "uncertain"
             audit("mail.compose.uncertain", nonce, box.organization_id)
-            flash("Odeslání není potvrzené. Zkontroluj složku Odeslané, bez opakování.", "error")
+            g.db.commit()
+            flash(str(ex) + " Ověř doručení u adresáta; neodesílej automaticky znovu.", "error")
+            return redirect(url_for("mail_hub", box=box.id))
+        # SMTP succeeded. Commit that fact BEFORE attempting IMAP APPEND.
+        record.state, record.sent_at = "sent", now()
+        audit("mail.compose.sent", nonce, box.organization_id)
         g.db.commit()
+        try:
+            sent_folder = append_sent_copy(g.db, box, app.config["MAIL_ENCRYPTION_KEY"], sent_bytes)
+            flash("SMTP zprávu přijalo a kopie je v " + decode_modified_utf7(sent_folder.name) + ".", "success")
+        except MailError as ex:
+            record.state = "sent_no_copy"
+            audit("mail.compose.sent_without_copy", nonce, box.organization_id)
+            g.db.commit()
+            flash("Zpráva byla odeslána přes SMTP, ale kopie se neuložila do Odeslaných: " +
+                  str(ex) + ". Zprávu znovu NEODESÍLEJ.", "error")
         return redirect(url_for("mail_hub", box=box.id))
 
     @app.post("/mail/order")
@@ -934,9 +1155,9 @@ def create_app(test_config=None):
     @login_required
     def set_mail_state(mail_id):
         msg = g.db.get(MailMessage, mail_id)
-        if msg is None:
+        if msg is None or msg.moved:
             abort(404)
-        box = mailbox_or_403(msg.mailbox_id)
+        box = mailbox_or_403(msg.mailbox_id, manage=True)
         try:
             organization_access(g.db, g.user.id, box.organization_id)
         except Forbidden:
@@ -944,12 +1165,19 @@ def create_app(test_config=None):
         action = field("action", 20)
         if action not in ("read", "unread", "star", "unstar"):
             abort(400)
-        state = get_mail_user_state(g.db, g.user.id, mail_id)
-        if action in ("read", "unread"):
-            state.read_override = action == "read"
-        else:
-            state.starred = action == "star"
-        g.db.commit()
+        json_mode = request.headers.get("Accept") == "application/json"
+        try:
+            set_server_flags(g.db, box, app.config["MAIL_ENCRYPTION_KEY"], [msg], action)
+            audit("mail.flags", f"mail={mail_id},action={action}", box.organization_id)
+            g.db.commit()
+            if json_mode:
+                return {"ok": True, "read": is_imap_read(msg),
+                        "starred": r"\flagged" in (msg.flags or "").lower().split()}
+            flash("Změna příznaku potvrzena na IMAP serveru.", "success")
+        except MailError as ex:
+            if json_mode:
+                return {"ok": False, "error": str(ex)}, 409
+            flash(str(ex), "error")
         if field("return_to", 20) == "detail" and action != "unread":
             return redirect(url_for("mail_detail", org_id=box.organization_id, message_id=mail_id))
         folder_id = positive_id("folder")
@@ -1497,23 +1725,26 @@ def create_app(test_config=None):
         folder = g.db.get(MailFolder, msg.folder_id)
         if folder is None or folder.mailbox_id != box.id:
             abort(404)
-        # Personal read state is local to Ema; IMAP is opened read-only.
-        state = get_mail_user_state(g.db, g.user.id, msg.id)
-        if state.read_override is not True:
-            state.read_override = True
-            g.db.commit()
         show_images = request.args.get("images") == "1"
+        warning = ("HTML a přílohy se načítají přímo z IMAP pouze po otevření."
+                   " Přílohy ani těla e-mailů se neukládají do databáze; soubory až do 25 MB.")
         try:
             preview = preview_message(box, msg, app.config["MAIL_ENCRYPTION_KEY"],
                                       show_images=show_images, folder_name=folder.name)
-            warning = ("HTML a prostý text jsou čtené přímo z IMAP, maximálně 192 KiB."
-                       " Přílohy a obsah zprávy se neukládají do databáze.")
+            try:
+                mailbox_access(g.db, g.user.id, box.id, manage=True)
+                if not is_imap_read(msg):
+                    set_server_flags(g.db, box, app.config["MAIL_ENCRYPTION_KEY"], [msg], "read")
+            except Forbidden:
+                warning += " Jen pro čtení: IMAP příznak není měněn."
+            except MailError as ex:
+                warning += " Změna \Seen selhala: " + str(ex)
         except MailError as ex:
             preview, warning = None, str(ex)
         companies = g.db.scalars(select(Company).where(Company.organization_id == org_id)).all()
         projs = g.db.scalars(select(Project).where(Project.organization_id == org_id)).all()
         return render("mail-detail", message=msg, selected_box=box, preview=preview,
-                      warning=warning, show_images=show_images, starred=state.starred,
+                      warning=warning, show_images=show_images, starred=r"\flagged" in (msg.flags or "").lower().split(),
                       mail_folder_id=folder.id, companies=companies, projects=projs)
 
     @app.post("/org/<int:org_id>/mail/message/<int:message_id>/link")

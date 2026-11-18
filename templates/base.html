@@ -3,26 +3,36 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#101510">
-  <title>{% block title %}Ema • Fresh HUB{% endblock %}</title>
+  <title>{% block title %}EMA{% endblock %}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="icon" type="image/png" href="https://www.freshcrackers.cz/wp-content/uploads/2023/10/Fresh-Crackers-Logo.png">
-  <link rel="apple-touch-icon" href="https://www.freshcrackers.cz/wp-content/uploads/2023/10/Fresh-Crackers-Logo.png">
+  <link rel="apple-touch-icon" sizes="192x192" href="{{ url_for('static', filename='icons/ema-192.png') }}">
   <link rel="manifest" href="{{ url_for('pwa_manifest') }}">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="EMA HUB">
-  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
-  <script src="{{ url_for('static', filename='mail-v1.js') }}" defer></script>
+  <meta name="apple-mobile-web-app-title" content="EMA">
+  <link rel="stylesheet" href="{{ url_for('static', filename='app-v11.css') }}">
+  {# New path deliberately bypasses old PWA worker cache-first CSS. #}
+  <link rel="stylesheet" href="{{ url_for('static', filename='mobile-shell-v2.css') }}">
+  <script src="{{ url_for('static', filename='mail-v11.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='mobile-shell-v2.js') }}" defer></script>
   <script src="{{ url_for('static', filename='pwa.js') }}" defer></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='pwa-install-v2.css') }}">
+  <script src="{{ url_for('static', filename='pwa-install-v2.js') }}" defer></script>
   <script src="{{ url_for('static', filename='mail-ui.js') }}" defer></script>
-  <script src="{{ url_for('static', filename='mail-pager.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='mail-pager-v11.js') }}" defer></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='mail-actions-v12.css') }}">
+  <script src="{{ url_for('static', filename='mail-actions-v12.js') }}" defer></script>
 </head>
 <body class="ema-screen-{{ section|default('other') }}">
 {% if me is defined and me %}
 <div class="layout">
-  <aside class="sidebar" aria-label="Hlavní navigace">
+  <button id="ema-appmenu-backdrop" class="ema-appmenu-backdrop" type="button"
+          aria-label="Zavřít hlavní menu" tabindex="-1" hidden></button>
+  <aside class="sidebar" id="ema-app-main-nav" aria-label="Hlavní navigace">
+    <button class="ema-appmenu-close" id="ema-appmenu-close" type="button" aria-label="Zavřít menu">×</button>
     <a class="brand" href="{{ url_for('home') }}">
       <img class="sidebar-logo" src="https://www.freshcrackers.cz/wp-content/uploads/2023/10/Fresh-Crackers-Logo.png" alt="Fresh Crackers" referrerpolicy="no-referrer">
       <span><strong>EMA HUB</strong><small>Fresh Crackers · asistentka</small></span>
@@ -42,6 +52,11 @@
     <span class="label">SPRÁVA</span>
     <nav class="main-nav ema-fixed-nav" aria-label="Správa účtu">
       <a class="{{ 'active' if request.endpoint in ['account_hub','settings','organization_home'] else '' }}" href="{{ url_for('account_hub') }}">⚙ &nbsp; Nastavení účtu</a>
+      <button type="button" class="ema-install-menu-item" id="ema-install-button"
+              aria-haspopup="dialog" aria-controls="ema-install-dialog"
+              title="Nainstalovat EMA jako aplikaci do telefonu nebo počítače">
+        <span aria-hidden="true">↓</span> &nbsp; Nainstalovat EMA
+      </button>
       {% if me.superadmin %}<a class="{{ 'active' if request.endpoint == 'superadmin' else '' }}" href="{{ url_for('superadmin') }}">♜ &nbsp; Superadmin</a>{% endif %}
     </nav>
     <div class="sidebar-bottom">
@@ -54,7 +69,8 @@
   </aside>
   <div class="workspace">
     <header class="topbar ema-topbar">
-      <button class="ema-mobile-nav-toggle" id="ema-mobile-nav-toggle" type="button" aria-label="Otevřít hlavní menu" aria-expanded="false">☰</button>
+      <button class="ema-mobile-nav-toggle" id="ema-mobile-nav-toggle" type="button"
+              aria-label="Otevřít hlavní menu" aria-expanded="false" aria-controls="ema-app-main-nav">☰</button>
       <div class="ema-topbar-brand"><strong>EMA</strong><span class="top-subtitle">{{ selected_project.name if selected_project else 'Obchodní a projektová asistentka' }}</span></div>
       <form method="post" action="{{ url_for('set_firm_scope') }}" class="ema-global-filter">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -75,6 +91,33 @@
     </main>
   </div>
 </div>
+  <dialog id="ema-install-dialog" class="ema-install-dialog" aria-labelledby="ema-install-heading">
+    <div class="ema-install-dialog-head">
+      <h2 id="ema-install-heading">EMA do mobilu</h2>
+      <button type="button" class="ema-install-close" id="ema-install-close" aria-label="Zavřít nápovědu">×</button>
+    </div>
+    <div id="ema-install-instructions" role="status" aria-live="polite"></div>
+    <div class="ema-install-controls">
+      <button type="button" class="ema-install-ok" id="ema-pwa-retry" hidden>Spustit instalaci</button>
+      <button type="button" class="ema-install-ok ema-install-secondary" id="ema-pwa-check">Zkontrolovat PWA</button>
+      <button type="button" class="ema-install-ok ema-install-secondary" id="ema-pwa-copy">Kopírovat diagnostiku</button>
+    </div>
+    <details class="ema-install-details" open>
+      <summary>Výsledek kontroly instalace</summary>
+      <pre id="ema-pwa-diagnostics-output" class="ema-pwa-diagnostics-output" aria-live="polite">Diagnostiku zatím nemám načtenou.</pre>
+      <a href="{{ url_for('pwa_manifest') }}" target="_blank" rel="noopener">Otevřít manifest</a>
+    </details>
+    <button type="button" class="ema-install-ok" id="ema-install-ok">Zavřít</button>
+  </dialog>
+
 {% else %}{% block login %}{% endblock %}{% endif %}
+  <div id="ema-pwa-splash" class="ema-pwa-splash" aria-hidden="true" hidden>
+    <div class="ema-pwa-splash-inner">
+      <img src="https://www.freshcrackers.cz/wp-content/uploads/2026/10/fresh-hub.png"
+           alt="" width="268" height="180" decoding="async" referrerpolicy="no-referrer">
+      <strong>EMA</strong>
+      <span>Obchodní a projektová asistentka</span>
+    </div>
+  </div>
 </body>
 </html>

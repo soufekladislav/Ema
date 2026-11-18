@@ -5,7 +5,7 @@ The IMAP server owns message history. Only headers and folder references enter M
 import base64
 import re
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from .mail_service import MailError, _connect, parse_metadata, quote_mailbox_name
 from .models import MailFolder, MailMessage, now
 
@@ -126,6 +126,7 @@ def fetch_folder_page(db, box, key, folder, *, before_uid=None, limit=PAGE_SIZE)
     if before_uid is not None and (not isinstance(before_uid, int) or before_uid <= 0):
         raise MailError("Neplatná stránkovací pozice")
     client = _connect(box, key)
+    stage = "LIST"
     try:
         # On first visit to a mailbox enumerate real server folders, once.
         if not db.scalar(select(MailFolder.id).where(
@@ -135,13 +136,15 @@ def fetch_folder_page(db, box, key, folder, *, before_uid=None, limit=PAGE_SIZE)
             except MailError:
                 # Do not prevent INBOX reading on a server with broken LIST.
                 pass
+        stage = "SELECT"
         validity, total = _select(client, folder)
         if folder.name == "INBOX":
             box.server_message_count = total
         if folder.uidvalidity != validity:
             folder.uidvalidity = validity
             folder.last_uid = 0
-        typ, data = client.uid("SEARCH", None, "ALL")
+        stage = "SEARCH"
+        typ, data = client.uid("SEARCH", None, "UNDELETED")
         if typ != "OK" or not data:
             raise MailError("IMAP server odmítl vyhledání UID")
         numbers = [int(raw) for raw in (data[0] or b"").split() if raw.isdigit()]
@@ -151,6 +154,7 @@ def fetch_folder_page(db, box, key, folder, *, before_uid=None, limit=PAGE_SIZE)
         has_more = len(eligible) > len(selected)
         cursor = min(selected) if selected else None
         if selected:
+            stage = "FETCH"
             typ, response = client.uid("FETCH", ",".join(str(uid) for uid in selected), HEADER_REQUEST)
             if typ != "OK":
                 raise MailError("IMAP server odmítl načtení hlaviček")
@@ -192,13 +196,16 @@ def fetch_folder_page(db, box, key, folder, *, before_uid=None, limit=PAGE_SIZE)
                 saved_uids.add(uid)
             # A message can disappear between SEARCH and FETCH; no extra UID fetch.
             folder.last_uid = max(folder.last_uid, max(selected))
+        stage = "DATABASE"
         box.status, box.sync_error, box.last_sync = "ok", "", now()
         db.commit()
         return {"uids": selected, "has_more": has_more, "cursor": cursor,
                 "uidvalidity": validity, "server_total": total}
     except Exception as ex:
         db.rollback()
-        message = str(ex) if isinstance(ex, MailError) else "Načtení zpráv z IMAP složky selhalo"
+        message = (str(ex) if isinstance(ex, MailError) else
+                   f"Načtení IMAP selhalo ve fázi {stage} ({type(ex).__name__}). "
+                   "Ověřte stav serveru a čerstvý diagnostický log.")
         box.status, box.sync_error = "error", message[:380]
         db.commit()
         raise MailError(message) from None
@@ -209,42 +216,222 @@ def fetch_folder_page(db, box, key, folder, *, before_uid=None, limit=PAGE_SIZE)
             pass
 
 
+
+def set_server_flags(db, box, key, messages, action):
+    """Propagate Seen/Flagged to IMAP; do not pretend local state is authoritative.
+
+    One source folder per batch. Never auto-retry after an uncertain STORE.
+    The row flags are updated only after server confirms UID+FLAGS.
+    """
+    if action not in ("read", "unread", "star", "unstar"):
+        raise MailError("Neplatná akce se zprávou")
+    if not messages or len(messages) > 50:
+        raise MailError("V jedné dávce lze změnit 1 až 50 zpráv")
+    folder_ids = {msg.folder_id for msg in messages}
+    if len(folder_ids) != 1 or any(msg.mailbox_id != box.id or msg.moved for msg in messages):
+        raise MailError("Zprávy musí být v jedné schránce a složce")
+    folder = db.get(MailFolder, messages[0].folder_id)
+    if not folder or folder.mailbox_id != box.id or any(
+            msg.uidvalidity != folder.uidvalidity for msg in messages):
+        raise MailError("UIDVALIDITY zpráv není aktuální")
+    flag = r"\Seen" if action in ("read", "unread") else r"\Flagged"
+    operation = "+FLAGS.SILENT" if action in ("read", "star") else "-FLAGS.SILENT"
+    uids = sorted({msg.uid for msg in messages})
+    uid_set = ",".join(str(uid) for uid in uids)
+    client = _connect(box, key)
+    try:
+        typ, _ = client.select(quote_mailbox_name(folder.name), readonly=False)
+        if typ != "OK":
+            raise MailError("IMAP neumožňuje změnu příznaků v této složce")
+        validity = client.response("UIDVALIDITY")[1]
+        if not validity or int(validity[0]) != folder.uidvalidity:
+            raise MailError("UIDVALIDITY se změnilo. Nejdříve obnovte schránku")
+        typ, data = client.uid("FETCH", uid_set, "(UID FLAGS)")
+        if typ != "OK":
+            raise MailError("IMAP odmítl ověření UID")
+        headers = [item[0] if isinstance(item, tuple) else item
+                   for item in (data or [])]
+        present = {int(m.group(1)) for head in headers if isinstance(head, bytes)
+                   for m in [re.search(rb"\bUID\s+(\d+)\b", head, re.I)] if m}
+        if present != set(uids):
+            raise MailError("Zprávy již na serveru nejsou dostupné. Obnovte složku")
+        typ, _ = client.uid("STORE", uid_set, operation, f"({flag})")
+        if typ != "OK":
+            raise MailError("IMAP nepotvrdil změnu příznaku. Před opakováním ověřte webmail")
+        typ, data = client.uid("FETCH", uid_set, "(UID FLAGS)")
+        if typ != "OK":
+            raise MailError("Příznak byl odeslán, ale ověření selhalo; obnovte složku")
+        remote = {}
+        for item in (data or []):
+            head = item[0] if isinstance(item, tuple) else item
+            if not isinstance(head, bytes):
+                continue
+            uid = re.search(rb"\bUID\s+(\d+)\b", head, re.I)
+            flags = re.search(rb"\bFLAGS\s+\(([^)]*)\)", head, re.I)
+            if uid and flags:
+                remote[int(uid.group(1))] = flags.group(1).decode("ascii", "replace")
+        expected = action in ("read", "star")
+        if set(remote) != set(uids) or any(
+                (flag.lower() in remote[uid].lower().split()) != expected for uid in uids):
+            raise MailError("IMAP nepotvrdil konečný stav příznaků. Obnovte složku")
+        for msg in messages:
+            msg.flags = remote[msg.uid]
+        db.commit()
+        return len(uids)
+    except MailError:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise MailError("Změna IMAP příznaků je nejistá. Zkontrolujte stav na serveru") from None
+    finally:
+        try:
+            client.logout()
+        except Exception:
+            pass
+
+
+def _move_destination(db, box, action, target_folder_id=None):
+    if action == "move":
+        folder = db.get(MailFolder, target_folder_id) if isinstance(target_folder_id, int) else None
+        if not folder or folder.mailbox_id != box.id:
+            raise MailError("Vybraná cílová složka nepatří ke schránce")
+        if r"\noselect" in (folder.special_use or "").lower():
+            raise MailError("Do této IMAP složky nelze zprávy přesunout")
+        return folder
+    if action not in ("trash", "archive"):
+        raise MailError("Neplatný cíl přesunu")
+    return special_folder(db, box, action)
+
+
+
+def is_trash_folder(folder):
+    """Identify a real user-visible Trash leaf, regardless of stale LIST flags.
+
+    This is deliberately narrower than substring matching ('Trash drafts'
+    cannot be a Trash); full operations still revalidate mailbox and folder.
+    """
+    if folder is None:
+        return False
+    flags = (folder.special_use or "").lower().split()
+    if r"\trash" in flags:
+        return True
+    name = decode_modified_utf7(folder.name).casefold()
+    delimiter = folder.delimiter or "/"
+    leaf = name.rsplit(delimiter, 1)[-1]
+    if delimiter != "." and "." in leaf:
+        leaf = leaf.rsplit(".", 1)[-1]
+    return leaf in {"trash", "deleted messages", "deleted items",
+                    "deleted", "koš", "kos", "bin"}
+
+
 def special_folder(db, box, action):
-    """Respect IMAP SPECIAL-USE flags; never guess the Trash destination."""
+    """Resolve a real IMAP destination; favor SPECIAL-USE, then known folder leaves.
+
+    Names may be hierarchical (INBOX.Trash, INBOX/Sent), and the delimiter
+    must come from LIST rather than assuming a slash.
+    """
     folders = available_folders(db, box)
-    if action == "trash":
-        options = [f for f in folders if "\\trash" in (f.special_use or "").lower()]
-        if not options:
-            options = [f for f in folders if f.name.lower().rsplit("/", 1)[-1] in ("trash", "deleted messages", "koš")]
-    elif action == "archive":
-        options = [f for f in folders if "\\archive" in (f.special_use or "").lower()]
-        if not options:
-            options = [f for f in folders if "\\all" in (f.special_use or "").lower()]
-        if not options:
-            options = [f for f in folders if f.name.lower().rsplit("/", 1)[-1] == "archive"]
-    else:
-        options = []
-    return options[0] if options else None
+    flags = {"trash": r"\Trash", "archive": r"\Archive", "sent": r"\Sent"}
+    flag = flags.get(action, "").lower()
+    if flag:
+        by_flag = [f for f in folders if flag in (f.special_use or "").lower().split()]
+        if by_flag:
+            return by_flag[0]
+    if action == "archive":
+        by_all = [f for f in folders if r"\all" in (f.special_use or "").lower().split()]
+        if by_all:
+            return by_all[0]
+    names = {
+        "trash": {"trash", "deleted messages", "deleted items", "deleted", "koš", "kos", "bin"},
+        "archive": {"archive", "archiv"},
+        "sent": {"sent", "sent items", "sent mail", "odeslané", "odeslane", "odeslaná pošta"},
+    }.get(action, set())
+    for f in folders:
+        decoded = decode_modified_utf7(f.name).casefold()
+        delimiter = f.delimiter or "/"
+        if decoded.rsplit(delimiter, 1)[-1] in names:
+            return f
+    return None
 
 
-def move_message(db, box, key, msg, action):
+def _uid_move_or_soft_delete(client, uids, target, *, known_deleted_uids=()):
+    """MOVE; otherwise COPY+Deleted and *verified* source cleanup when safe.
+
+    UIDPLUS: expunge only copied UIDs. On legacy IMAP standard EXPUNGE is used
+    only when every Deleted UID is either this batch or an earlier EMA move
+    recorded in the same source/UIDVALIDITY; never expunge unrelated UIDs.
+    An unavoidable concurrent-client race remains on legacy servers, so do
+    not attempt cleanup when preconditions or server status are uncertain.
+    """
+    capabilities = {word.upper() for item in getattr(client, "capabilities", [])
+                    for word in (item if isinstance(item, bytes) else str(item).encode()).split()}
+    if b"MOVE" in capabilities:
+        result, _ = client.uid("MOVE", uids, quote_mailbox_name(target.name))
+        if result != "OK":
+            raise MailError("IMAP server odmítl UID MOVE; stav ověřte na serveru")
+        return "move"
+    result, _ = client.uid("COPY", uids, quote_mailbox_name(target.name))
+    if result != "OK":
+        raise MailError("IMAP odmítl kopírování do cílové složky; zdroj zůstal beze změn")
+    try:
+        result, _ = client.uid("STORE", uids, "+FLAGS.SILENT", r"(\Deleted)")
+    except Exception:
+        raise MailError("Kopie může být v cílové složce, ale označení zdroje selhalo. "
+                        "Ověřte obě složky, operaci automaticky neopakujte") from None
+    if result != "OK":
+        raise MailError("Kopie může být v cílové složce, zdroj ale nebyl označen jako přesunutý. "
+                        "Před opakováním ověřte obě složky")
+    # COPY succeeded, so no retries even when EXPUNGE response is uncertain.
+    selected = {int(uid) for uid in uids.split(",") if uid.isdigit()}
+    if b"UIDPLUS" in capabilities:
+        try:
+            result, _ = client.uid("EXPUNGE", uids)
+            return "copy-expunged" if result == "OK" else "copy-pending-cleanup"
+        except Exception:
+            return "copy-pending-cleanup"
+    try:
+        typ, response = client.uid("SEARCH", None, "DELETED")
+        if typ != "OK" or not response:
+            return "copy-pending-cleanup"
+        actually_deleted = {int(uid) for uid in (response[0] or b"").split() if uid.isdigit()}
+        permitted = selected | set(known_deleted_uids)
+        if not selected.issubset(actually_deleted) or not actually_deleted.issubset(permitted):
+            return "copy-pending-cleanup"
+        # Last safe observable check. Standard EXPUNGE is not UID-targeted.
+        # We cannot guarantee cross-client atomicity on older IMAP servers.
+        result, _ = client.expunge()
+        return "copy-expunged" if result == "OK" else "copy-pending-cleanup"
+    except Exception:
+        return "copy-pending-cleanup"
+
+
+def _previously_moved_uids(db, box, source):
+    """Only messages EMA itself marked moved within this source UIDVALIDITY."""
+    return set(db.scalars(select(MailMessage.uid).where(
+        MailMessage.mailbox_id == box.id, MailMessage.folder_id == source.id,
+        MailMessage.uidvalidity == source.uidvalidity, MailMessage.moved.is_(True)
+    ).limit(5000)).all())
+
+
+def move_message(db, box, key, msg, action, *, target_folder_id=None):
     """Explicit server-side MOVE only. Trash never implies EXPUNGE or permanent deletion."""
     if msg.mailbox_id != box.id or msg.moved:
         raise MailError("Tato zpráva již byla přesunuta nebo není ve schránce")
     src = db.get(MailFolder, msg.folder_id)
     if src is None or src.mailbox_id != box.id or src.uidvalidity != msg.uidvalidity:
         raise MailError("Složka nebo UID zprávy se změnily. Nejdříve obnovte přehled")
-    target = special_folder(db, box, action)
-    if not target:
-        raise MailError("Cílová IMAP složka nebyla nalezena. Nejprve načti seznam složek")
-    if target.id == src.id:
-        raise MailError("Zpráva je již v cílové složce")
+    target = _move_destination(db, box, action, target_folder_id)
     client = _connect(box, key)
     try:
-        capabilities = {x.upper() if isinstance(x, bytes) else str(x).upper().encode()
-                        for x in getattr(client, "capabilities", [])}
-        if b"MOVE" not in capabilities:
-            raise MailError("Server nepodporuje bezpečný přesun UID MOVE; schránka se nezměnila")
+        # Folder LIST may not have run yet (especially on imported mailboxes).
+        if target is None:
+            _discover_on_client(db, box, client)
+            target = _move_destination(db, box, action, target_folder_id)
+        if target is None:
+            raise MailError("Cílová složka Koš/Archiv nebyla na IMAP serveru nalezena; zkontrolujte názvy složek.")
+        if target.id == src.id:
+            raise MailError("Zpráva je již v cílové složce")
         validity, _ = _select(client, src)
         if validity != msg.uidvalidity:
             raise MailError("UIDVALIDITY se změnilo. Zprávu je nutné znovu načíst")
@@ -252,10 +439,11 @@ def move_message(db, box, key, msg, action):
         typ, _ = client.select(quote_mailbox_name(src.name), readonly=False)
         if typ != "OK":
             raise MailError("Server neumožňuje zápis do zdrojové složky")
-        typ, _ = client.uid("MOVE", str(msg.uid), quote_mailbox_name(target.name))
-        if typ != "OK":
-            raise MailError("IMAP server přesun zprávy odmítl")
-        # No EXPUNGE, no action on the user's other mail. Keep original row for
+        db.info["ema_move_mode"] = _uid_move_or_soft_delete(
+            client, str(msg.uid), target,
+            known_deleted_uids=_previously_moved_uids(db, box, src))
+        # Legacy cleanup can only EXPUNGE after checking Deleted UIDs. Keep
+        # original row for
         # future UID reconciliation and its linked project, client and user flag.
         msg.moved = True
         db.commit()
@@ -264,6 +452,279 @@ def move_message(db, box, key, msg, action):
         db.rollback()
         raise MailError(str(ex) if isinstance(ex, MailError)
                         else "Přesun IMAP zprávy není potvrzen; ověřte ji na serveru") from None
+    finally:
+        try:
+            client.logout()
+        except Exception:
+            pass
+
+
+
+def append_sent_copy(db, box, key, raw_message):
+    """After confirmed SMTP send, store a copy in the *actual* remote Sent folder.
+
+    This must never trigger a second SMTP attempt. A failed APPEND means sent
+    without a confirmed copy, not failed mail delivery.
+    """
+    if not raw_message or len(raw_message) > 25_000_000:
+        raise MailError("Odeslaná zpráva nemá platný formát pro uložení kopie")
+    client = _connect(box, key)
+    try:
+        _discover_on_client(db, box, client)
+        destination = special_folder(db, box, "sent")
+        if destination is None:
+            raise MailError("Na IMAP serveru není rozpoznána složka Odeslané")
+        status, _ = client.append(quote_mailbox_name(destination.name), r"(\Seen)", None, raw_message)
+        if status != "OK":
+            raise MailError("IMAP server odmítl uložit kopii do složky Odeslané")
+        db.commit()
+        return destination
+    except Exception as ex:
+        db.rollback()
+        raise MailError(str(ex) if isinstance(ex, MailError)
+                        else "Kopii odeslaného e-mailu se nepodařilo uložit do IMAP") from None
+    finally:
+        try:
+            client.logout()
+        except Exception:
+            pass
+
+
+
+def move_many_messages(db, box, key, messages, action, *, target_folder_id=None):
+    """One remote UID MOVE per mailbox/source-folder batch (up to 50 UIDs)."""
+    if not messages or len(messages) > 50:
+        raise MailError("Dávka přesunu musí obsahovat 1–50 zpráv")
+    folders = {m.folder_id for m in messages}
+    if len(folders) != 1 or any(m.mailbox_id != box.id or m.moved for m in messages):
+        raise MailError("Přesun vyžaduje jednu zdrojovou složku a platné zprávy")
+    src = db.get(MailFolder, messages[0].folder_id)
+    if src is None or src.mailbox_id != box.id or any(m.uidvalidity != src.uidvalidity for m in messages):
+        raise MailError("UIDVALIDITY se změnilo; nejprve obnov zprávy")
+    target = _move_destination(db, box, action, target_folder_id)
+    client = _connect(box, key)
+    try:
+        if target is None:
+            _discover_on_client(db, box, client)
+            target = _move_destination(db, box, action, target_folder_id)
+        if target is None:
+            raise MailError("Cílová složka Koš/Archiv nebyla na IMAP serveru nalezena")
+        if target.id == src.id:
+            raise MailError("Zprávy jsou již v cílové složce")
+        validity, _ = _select(client, src)
+        if validity != src.uidvalidity:
+            raise MailError("UIDVALIDITY se změnilo; obnov zprávy a operaci ověř")
+        status, _ = client.select(quote_mailbox_name(src.name), readonly=False)
+        if status != "OK":
+            raise MailError("IMAP server neumožňuje zápis do zdrojové složky")
+        uids = ",".join(str(uid) for uid in sorted({m.uid for m in messages}))
+        db.info["ema_move_mode"] = _uid_move_or_soft_delete(
+            client, uids, target,
+            known_deleted_uids=_previously_moved_uids(db, box, src))
+        for m in messages:
+            m.moved = True
+        db.commit()
+        return target
+    except Exception as ex:
+        db.rollback()
+        raise MailError(str(ex) if isinstance(ex, MailError)
+                        else "Hromadný přesun není potvrzen. Před opakováním ověřte IMAP") from None
+    finally:
+        try:
+            client.logout()
+        except Exception:
+            pass
+
+
+def empty_trash_batch(db, box, key, folder, *, limit=100):
+    """Delete at most 100 messages from the verified Trash folder only.
+
+    UIDPLUS uses targeted UID EXPUNGE. Legacy IMAP may use regular EXPUNGE
+    *only* when the complete Trash fits the limit, because standard EXPUNGE
+    removes every message marked Deleted in the selected folder.
+    Never use regular EXPUNGE in INBOX or for a partial Trash page.
+    """
+    if folder.mailbox_id != box.id:
+        raise MailError("Koš nepatří k vybrané schránce")
+    if special_folder(db, box, "trash") is None or special_folder(db, box, "trash").id != folder.id:
+        raise MailError("Vybraná složka není ověřený serverový Koš")
+    limit = max(1, min(int(limit), 100))
+    client = _connect(box, key)
+    try:
+        capabilities = {word.upper() for item in getattr(client, "capabilities", [])
+                        for word in (item if isinstance(item, bytes) else str(item).encode()).split()}
+        uidplus = b"UIDPLUS" in capabilities
+        status, _ = client.select(quote_mailbox_name(folder.name), readonly=False)
+        if status != "OK":
+            raise MailError("IMAP server neumožnil otevření Koše pro mazání")
+        valid_info = client.response("UIDVALIDITY")[1]
+        validity = int(valid_info[0]) if valid_info and valid_info[0] else 0
+        if not validity or (folder.uidvalidity and folder.uidvalidity != validity):
+            raise MailError("Koš změnil UIDVALIDITY. Nejdříve obnov složku")
+        status, data = client.uid("SEARCH", None, "ALL")
+        if status != "OK":
+            raise MailError("Nelze ověřit obsah IMAP Koše")
+        all_uids = sorted(int(x) for x in (data[0] or b"").split() if x.isdigit())
+        if not uidplus and len(all_uids) > limit:
+            raise MailError(f"Koš obsahuje {len(all_uids)} zpráv. Server bez UIDPLUS "
+                            f"neumí bezpečně smazat jen {limit} zpráv; nic nebylo smazáno.")
+        selected = all_uids[:limit]
+        for start in range(0, len(selected), 50):
+            batch = ",".join(str(x) for x in selected[start:start+50])
+            status, _ = client.uid("STORE", batch, "+FLAGS.SILENT", r"(\Deleted)")
+            if status != "OK":
+                raise MailError("IMAP server odmítl označení zpráv ke smazání")
+            if uidplus:
+                status, _ = client.uid("EXPUNGE", batch)
+                if status != "OK":
+                    raise MailError("IMAP server nepotvrdil cílené smazání; neopakujte bez kontroly")
+                for row in db.scalars(select(MailMessage).where(
+                        MailMessage.folder_id == folder.id, MailMessage.uidvalidity == validity,
+                        MailMessage.uid.in_(selected[start:start+50]))).all():
+                    row.moved = True
+                db.commit()
+        if not uidplus and selected:
+            # All server Trash UIDs were explicitly selected and flagged above;
+            # standard EXPUNGE is permitted only on this entire Trash folder.
+            status, _ = client.expunge()
+            if status != "OK":
+                raise MailError("IMAP server nepotvrdil vysypání Koše. Zkontrolujte obsah před opakováním")
+            for row in db.scalars(select(MailMessage).where(
+                    MailMessage.folder_id == folder.id, MailMessage.uidvalidity == validity,
+                    MailMessage.uid.in_(selected))).all():
+                row.moved = True
+            db.commit()
+        return len(selected), len(all_uids) > len(selected)
+    except Exception as ex:
+        db.rollback()
+        raise MailError(str(ex) if isinstance(ex, MailError)
+                        else "Mazání Koše není potvrzené; ověřte jeho obsah na IMAP serveru") from None
+    finally:
+        try:
+            client.logout()
+        except Exception:
+            pass
+
+
+
+def _trash_selected_state(client, folder, *, readonly):
+    """Verify the real server Trash and capture a precise immutable UID boundary."""
+    typ, exists = client.select(quote_mailbox_name(folder.name), readonly=readonly)
+    if typ != "OK":
+        raise MailError("IMAP server neotevřel složku Koš")
+    valid = client.response("UIDVALIDITY")[1]
+    try:
+        uidvalidity = int(valid[0]) if valid and valid[0] else 0
+    except (ValueError, TypeError):
+        uidvalidity = 0
+    if not uidvalidity or (folder.uidvalidity and uidvalidity != folder.uidvalidity):
+        raise MailError("UIDVALIDITY Koše se změnilo. Obnovte složku před mazáním.")
+    def search_uids(*conditions):
+        typ, result = client.uid("SEARCH", None, *conditions)
+        if typ != "OK" or not result:
+            raise MailError("IMAP server nepotvrdil počty zpráv v Koši")
+        return {int(uid) for uid in (result[0] or b"").split() if uid.isdigit()}
+
+    # Roundcube's blue folder badge can show UNREAD, while SELECT/SEARCH ALL
+    # counts physical messages including already \\Deleted copies.
+    uids = search_uids("ALL")
+    visible = search_uids("UNDELETED")
+    unread = search_uids("UNDELETED", "UNSEEN")
+    if not visible.issubset(uids) or not unread.issubset(visible):
+        raise MailError("IMAP server vrátil nekonzistentní počet zpráv. Načtěte Koš znovu.")
+    try:
+        exists_count = int(exists[0])
+    except (ValueError, TypeError, IndexError):
+        raise MailError("Nelze ověřit počet zpráv v Koši") from None
+    if exists_count != len(uids):
+        raise MailError("Obsah Koše se během kontroly změnil. Načtěte počet znovu.")
+    return {"count": len(uids), "uidvalidity": uidvalidity,
+            "max_uid": max(uids, default=0),
+            "visible_count": len(visible),
+            "unread_count": len(unread),
+            "already_deleted": len(uids) - len(visible)}
+
+
+def _verify_trash_scope(db, box, folder):
+    if folder.mailbox_id != box.id:
+        raise MailError("Koš nepatří vybrané schránce")
+    if not is_trash_folder(folder):
+        raise MailError("Tato složka není ověřeným IMAP Košem dané schránky")
+    # Explicitly selected Trash is allowed even when a stale SPECIAL-USE LIST
+    # cache points at another folder. The real server must still SELECT it.
+
+
+def preview_trash_all(db, box, key, folder):
+    """Read-only snapshot for a separate, explicit all-trash confirmation page."""
+    _verify_trash_scope(db, box, folder)
+    client = _connect(box, key)
+    try:
+        return _trash_selected_state(client, folder, readonly=True)
+    except Exception as ex:
+        raise MailError(str(ex) if isinstance(ex, MailError) else
+                        "Nepodařilo se ověřit obsah serverového Koše.") from None
+    finally:
+        try:
+            client.logout()
+        except Exception:
+            pass
+
+
+def empty_trash_all(db, box, key, folder, expected):
+    """Delete a confirmed *entire* Trash even on legacy IMAP without UIDPLUS.
+
+    Standard EXPUNGE is safe only in a verified Trash, not for arbitrary
+    folders or subsets. One UID STORE range, one server-side EXPUNGE.
+    The preview snapshot count/uidvalidity/highest UID must still match.
+    """
+    _verify_trash_scope(db, box, folder)
+    if (not isinstance(expected, dict) or
+            any(not isinstance(expected.get(k), int) or isinstance(expected.get(k), bool)
+                for k in ("count", "uidvalidity", "max_uid")) or
+            expected["count"] < 0 or expected["max_uid"] < 0):
+        raise MailError("Neplatné potvrzení vyprázdnění Koše")
+    client = _connect(box, key)
+    try:
+        observed = _trash_selected_state(client, folder, readonly=False)
+        # Read/unread flags may change normally. Verify identity and visible
+        # membership instead, so even a new \\Deleted state invalidates preview.
+        identity = ("count", "uidvalidity", "max_uid", "visible_count", "already_deleted")
+        if any(observed.get(key) != expected.get(key) for key in identity):
+            raise MailError("Počet nebo UID zpráv v Koši se změnily od potvrzení. "
+                            "Nic nebylo smazáno, načtěte potvrzení znovu.")
+        if not observed["count"]:
+            return 0
+        # Never use UID 1:*: that could mark messages delivered during this request.
+        # Only existing UIDs <= the last UID the user explicitly confirmed.
+        sequence = f"1:{observed['max_uid']}"
+        typ, _ = client.uid("STORE", sequence, "+FLAGS.SILENT", r"(\Deleted)")
+        if typ != "OK":
+            raise MailError("IMAP server odmítl označení Koše k výmazu. "
+                            "Stav je nejistý; zkontrolujte Koš před opakováním.")
+        capabilities = {word.upper() for item in getattr(client, "capabilities", [])
+                        for word in (item if isinstance(item, bytes) else str(item).encode()).split()}
+        if b"UIDPLUS" in capabilities:
+            typ, _ = client.uid("EXPUNGE", sequence)
+        else:
+            # The user explicitly chose EMPTY ENTIRE TRASH (not a subset).
+            # This is the sole place regular EXPUNGE is allowed.
+            typ, _ = client.expunge()
+        if typ != "OK":
+            raise MailError("IMAP server nepotvrdil vyprázdnění Koše. "
+                            "Zkontrolujte skutečný stav na serveru; automaticky neopakujte.")
+        # One SQL statement, independent of how many remote messages existed.
+        db.execute(update(MailMessage).where(
+            MailMessage.mailbox_id == box.id,
+            MailMessage.folder_id == folder.id,
+            MailMessage.uidvalidity == observed["uidvalidity"],
+            MailMessage.uid <= observed["max_uid"]
+        ).values(moved=True))
+        db.commit()
+        return observed["count"]
+    except Exception as ex:
+        db.rollback()
+        raise MailError(str(ex) if isinstance(ex, MailError)
+                        else "Vyprázdnění Koše není potvrzené; ověřte stav na IMAP serveru") from None
     finally:
         try:
             client.logout()

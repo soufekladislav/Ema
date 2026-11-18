@@ -97,4 +97,70 @@
   }, { passive: true });
   if (remote) void load(true);
   else if (hasMore && panel.scrollHeight <= panel.clientHeight + 60) void load();
+
+  // The combined inbox is an indexed view, not a server mailbox.
+  // Refresh one included IMAP inbox at a time; never fetch full MIME bodies.
+  const included = (panel.dataset.includedBoxIds || "").split(",")
+    .map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0);
+  let refreshing = false;
+  const refreshAll = async () => {
+    if (remote || refreshing || document.hidden || !included.length) return;
+    refreshing = true;
+    let updated = 0;
+    let errors = [];
+    say("Aktualizuji příchozí zprávy ze " + included.length + " schránek…");
+    try {
+      for (const id of included) {
+        if (document.hidden) break;
+        try {
+          const response = await fetch(panel.dataset.aggregateSyncUrl, {
+            method: "POST", credentials: "same-origin", cache: "no-store",
+            headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf },
+            body: JSON.stringify({ box_id: id }),
+          });
+          const result = await response.json();
+          if (!response.ok) throw Error(result.error || "IMAP synchronizace selhala");
+          updated += 1;
+          const countLabel = document.querySelector('[data-mailbox-count="' + id + '"]');
+          if (countLabel) {
+            countLabel.textContent = result.unread + " nepřečtených · " + result.indexed +
+              " v přehledu" + (result.server_total != null ? " · IMAP " + result.server_total : "");
+          }
+        } catch (error) {
+          errors.push("Schránka " + id + ": " + (error.message || "chyba synchronizace"));
+        }
+      }
+      const url = new URL(panel.dataset.aggregateUrl, window.location.href);
+      url.searchParams.set("offset", "0");
+      const response = await fetch(url, { credentials: "same-origin", cache: "no-store" });
+      if (!response.ok) throw Error("Nedaří se načíst aktualizovaný souhrn");
+      const result = await response.json();
+      const temp = document.createElement("div");
+      temp.innerHTML = result.html || "";
+      const existing = new Set(Array.from(container.querySelectorAll("[data-mail-id]"))
+        .map((node) => node.dataset.mailId));
+      const fresh = Array.from(temp.children).filter((node) => node.dataset.mailId &&
+        !existing.has(node.dataset.mailId));
+      const beforeHeight = panel.scrollHeight;
+      // Prepend in reverse to preserve newest-first order from the server.
+      for (let i = fresh.length - 1; i >= 0; i -= 1) container.prepend(fresh[i]);
+      if (panel.scrollTop > 60) panel.scrollTop += panel.scrollHeight - beforeHeight;
+      offset += fresh.length;
+      if (result.has_more) hasMore = true;
+      say("Souhrn: aktualizováno " + updated + "/" + included.length +
+          " schránek, " + fresh.length + " nových zpráv." +
+          (errors.length ? " Chyby: " + errors.slice(0, 2).join("; ") : ""));
+    } catch (error) {
+      say(error.message || "Souhrn se nepodařilo aktualizovat.");
+    } finally {
+      refreshing = false;
+    }
+  };
+  if (!remote && included.length) {
+    void refreshAll();
+    window.setInterval(() => { void refreshAll(); }, 120000);
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) void refreshAll();
+    });
+  }
 })();

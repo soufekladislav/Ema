@@ -56,14 +56,21 @@ def test_compact_inbox_and_inline_mime_preview(seeded, monkeypatch):
     def fake_preview(*args, **kwargs):
         return MailPreview("<p>Safe HTML</p>","Safe plain",True,False,False)
     monkeypatch.setattr("ema.web.preview_message",fake_preview)
+    def fake_server_flags(db, box, key, messages, action):
+        for message in messages:
+            message.flags = r"\Seen"
+        db.commit()
+        return len(messages)
+    monkeypatch.setattr("ema.web.set_server_flags", fake_server_flags)
     quick=client.get(f"/mail/{client.ids_v1['message']}/quick")
     assert quick.status_code==200
     assert b"Safe HTML" in quick.json["html"].encode()
     assert b"Odpov" in quick.json["html"].encode()
     with Session(client.application.extensions["ema_engine"]) as db:
-        state=db.scalar(select(MailUserState).where(
-            MailUserState.mail_id==client.ids_v1["message"]))
-        assert state.read_override is True
+        message=db.get(MailMessage,client.ids_v1["message"])
+        assert r"\Seen" in message.flags
+        assert db.scalar(select(MailUserState).where(
+            MailUserState.mail_id==client.ids_v1["message"])) is None
     guest=client.application.test_client()
     login(guest,"guest")
     assert guest.get(f"/mail/{client.ids_v1['message']}/quick").status_code==403
@@ -85,7 +92,10 @@ def test_compose_reply_uses_exact_sender_and_company_contacts(seeded,monkeypatch
     called=[]
     def fake_send(box,key,to,cc,bcc,subject,body,*,reply_message_id=None,attachments=None):
         called.append((box.id,to,cc,bcc,subject,body,reply_message_id,attachments))
+        return b"From: test@example.cz\r\nTo: buyer@example.cz\r\n\r\nHello"
     monkeypatch.setattr("ema.web.send_composed",fake_send)
+    monkeypatch.setattr("ema.web.append_sent_copy", lambda db,box,key,data:
+                        MailFolder(name="Sent", mailbox_id=box.id))
     form={"csrf_token":csrf(client),"nonce":"unique-v1-send",
           "box_id":str(b),"reply_id":str(mid),"to":"buyer@example.cz",
           "cc":"coworker@example.cz","bcc":"","subject":"Re: Please send offer",
@@ -149,3 +159,249 @@ def test_pwa_shell_and_private_http_cache_policy(seeded):
     mailbox=client.get("/mail")
     assert mailbox.headers["Cache-Control"]=="no-store"
     assert b"manifest.webmanifest" in mailbox.data
+
+
+def test_compose_smtp_success_but_sent_append_failure_never_resends(seeded, monkeypatch):
+    from ema.mail_service import MailError
+    client = seeded
+    login(client, "owner")
+    called = []
+    def fake_send(*args, **kwargs):
+        called.append("smtp")
+        return b"From: test@example.cz\\r\\nTo: a@example.cz\\r\\n\\r\\nHello"
+    def fail_append(*args, **kwargs):
+        raise MailError("Složka Odeslané chybí")
+    monkeypatch.setattr("ema.web.send_composed", fake_send)
+    monkeypatch.setattr("ema.web.append_sent_copy", fail_append)
+    form = {"csrf_token": csrf(client), "nonce": "sent-no-copy-test",
+            "box_id": str(client.ids_v1["box"]), "to": "a@example.cz",
+            "subject": "Pilot", "body": "Pozdrav"}
+    one = client.post("/mail/compose/send", data=form)
+    assert one.status_code == 302 and called == ["smtp"]
+    with Session(client.application.extensions["ema_engine"]) as db:
+        outbound = db.scalar(select(Outbound).where(Outbound.nonce == "sent-no-copy-test"))
+        assert outbound.state == "sent_no_copy"
+    two = client.post("/mail/compose/send", data=form)
+    assert two.status_code == 302 and called == ["smtp"]
+
+
+def test_aggregate_sync_one_is_scoped_and_only_fetches_latest_50(seeded, monkeypatch):
+    client = seeded
+    login(client, "owner")
+    calls = []
+    def fake_page(db, box, key, folder, **kwargs):
+        calls.append((box.id, folder.name, kwargs["limit"]))
+        folder.uidvalidity = 9
+        db.commit()
+        return {"server_total": 12, "uids": [7], "uidvalidity": 9}
+    monkeypatch.setattr("ema.web.fetch_folder_page", fake_page)
+    response = client.post("/mail/aggregate/sync-one",
+                           json={"box_id": client.ids_v1["box"]},
+                           headers={"X-CSRF-Token": csrf(client)})
+    assert response.status_code == 200
+    assert response.json["server_total"] == 12
+    assert calls == [(client.ids_v1["box"], "INBOX", 50)]
+    denied = client.post("/mail/aggregate/sync-one",
+                         json={"box_id": client.ids_v1["other"]},
+                         headers={"X-CSRF-Token": csrf(client)})
+    assert denied.status_code == 403 and len(calls) == 1
+
+
+def test_empty_trash_requires_fresh_server_preview_nonce_and_mailbox_manage(seeded, monkeypatch):
+    client = seeded
+    login(client, "owner")
+    with Session(client.application.extensions["ema_engine"]) as db:
+        folder = MailFolder(mailbox_id=client.ids_v1["box"], name="INBOX.Trash",
+                            delimiter=".", special_use=r"\Trash", uidvalidity=9)
+        db.add(folder)
+        db.commit()
+        trash_id = folder.id
+    snapshot = {"count": 3301, "uidvalidity": 9, "max_uid": 3301,
+                "visible_count": 1270, "unread_count": 950, "already_deleted": 2031}
+    calls = []
+    monkeypatch.setattr("ema.web.preview_trash_all", lambda db, box, key, folder: snapshot)
+    def fake_empty(db, box, key, folder, expected):
+        calls.append((box.id, folder.id, expected))
+        return 3301
+    monkeypatch.setattr("ema.web.empty_trash_all", fake_empty)
+    path = f"/mail/{client.ids_v1['box']}/trash/empty"
+    prepare_path = f"/mail/{client.ids_v1['box']}/trash/prepare"
+    direct = client.post(path, data={"csrf_token": csrf(client),
+                                    "folder_id": str(trash_id),
+                                    "confirmation": "permanently-delete-whole-trash",
+                                    "acknowledge": "yes"})
+    assert direct.status_code == 400
+    preview = client.post(prepare_path, data={"csrf_token": csrf(client),
+                                             "folder_id": str(trash_id)})
+    assert preview.status_code == 200
+    assert b"3 301" in preview.data
+    with client.session_transaction() as sess:
+        nonce = sess["ema_trash_prepared"]["nonce"]
+    confirmed = {"csrf_token": csrf(client), "folder_id": str(trash_id),
+                 "nonce": nonce, "confirmation": "permanently-delete-whole-trash",
+                 "acknowledge": "yes"}
+    no_check = client.post(path, data={k: v for k,v in confirmed.items() if k != "acknowledge"})
+    assert no_check.status_code == 400 and calls == []
+    preview = client.post(prepare_path, data={"csrf_token": csrf(client),
+                                             "folder_id": str(trash_id)})
+    with client.session_transaction() as sess:
+        confirmed["nonce"] = sess["ema_trash_prepared"]["nonce"]
+    ok = client.post(path, data=confirmed)
+    assert ok.status_code == 302
+    assert calls == [(client.ids_v1["box"], trash_id, snapshot)]
+    repeat = client.post(path, data=confirmed)
+    assert repeat.status_code == 400
+    assert len(calls) == 1
+    guest = client.application.test_client()
+    login(guest, "guest")
+    assert guest.post(prepare_path, data={"csrf_token": csrf(guest),
+                      "folder_id": str(trash_id)}).status_code == 403
+    assert guest.post(path, data={"csrf_token": csrf(guest),
+                     "folder_id": str(trash_id), "confirmation": "permanently-delete-whole-trash",
+                     "acknowledge": "yes"}).status_code == 403
+
+
+def test_invalid_recipient_never_starts_smtp_and_preserves_compose_draft(seeded, monkeypatch):
+    client = seeded
+    login(client, "owner")
+    called = []
+    monkeypatch.setattr("ema.web.send_composed", lambda *args, **kwargs: called.append("smtp"))
+    form = {"csrf_token": csrf(client), "nonce": "invalid-address-preflight",
+            "box_id": str(client.ids_v1["box"]),
+            "to": "neplatna adresa", "cc": "coworker@example.cz",
+            "subject": "Test před odesláním", "body": "Napsaný text zůstane v editoru"}
+    result = client.post("/mail/compose/send", data=form)
+    assert result.status_code == 422
+    assert "Komu:".encode() in result.data
+    assert "Napsaný text zůstane v editoru".encode() in result.data
+    assert b'coworker@example.cz' in result.data
+    assert called == []
+    with Session(client.application.extensions["ema_engine"]) as db:
+        assert db.scalar(select(Outbound).where(Outbound.nonce == form["nonce"])) is None
+
+
+
+def test_trash_empty_button_shows_for_selected_dotted_folder_without_special_use(seeded):
+    client = seeded
+    login(client, "owner")
+    with Session(client.application.extensions["ema_engine"]) as db:
+        box_id = client.ids_v1["box"]
+        trash = MailFolder(mailbox_id=box_id, name="INBOX.Trash",
+                           delimiter=".", special_use="", uidvalidity=9)
+        db.add(trash)
+        db.commit()
+        trash_id = trash.id
+    response = client.get(f"/mail?box={box_id}&folder={trash_id}")
+    assert response.status_code == 200
+    assert "Vysypat Koš".encode() in response.data
+    assert f'/mail/{box_id}/trash/prepare'.encode() in response.data
+    assert b'name="folder_id"' in response.data
+
+
+
+def test_attachment_download_is_scoped_no_store_and_not_in_database(seeded,monkeypatch):
+    client = seeded
+    login(client, "owner")
+    message_id = client.ids_v1["message"]
+    downloaded = []
+    def fake_download(box,msg,key,part_index,*,folder_name="INBOX"):
+        downloaded.append((box.id,msg.id,part_index,folder_name))
+        return ("faktura.pdf","application/pdf",b"%PDF-1.7\nInvoice")
+    monkeypatch.setattr("ema.web.download_message_attachment",fake_download)
+    response = client.get(f"/mail/{message_id}/attachment/0")
+    assert response.status_code == 200
+    assert response.data == b"%PDF-1.7\nInvoice"
+    assert response.headers["Content-Disposition"].startswith("attachment;")
+    assert "faktura.pdf" in response.headers["Content-Disposition"]
+    assert "no-store" in response.headers["Cache-Control"]
+    assert downloaded and downloaded[0][2] == 0
+    with Session(client.application.extensions["ema_engine"]) as db:
+        msg = db.get(MailMessage,message_id)
+        assert "faktura.pdf" not in (msg.subject or "")
+    forbidden = client.get(f"/mail/{client.ids_v1['private']}/attachment/0")
+    assert forbidden.status_code == 403
+    guest = client.application.test_client()
+    login(guest,"guest")
+    assert guest.get(f"/mail/{message_id}/attachment/0").status_code == 403
+
+
+def test_move_target_rejects_other_mailbox_and_uses_one_server_move(seeded,monkeypatch):
+    client = seeded
+    login(client,"owner")
+    msg = client.ids_v1["message"]
+    box = client.ids_v1["box"]
+    with Session(client.application.extensions["ema_engine"]) as db:
+        source = db.get(MailMessage,msg)
+        folder = MailFolder(mailbox_id=box,name="Clients",uidvalidity=9)
+        other = MailFolder(mailbox_id=client.ids_v1["other"],name="Other",uidvalidity=9)
+        db.add_all([folder,other]);db.commit()
+        target_id,other_id = folder.id,other.id
+    monkeypatch.setattr("ema.web.discover_folders",lambda db,box,key:0)
+    folders = client.get(f"/mail/{msg}/folders")
+    assert folders.status_code == 200
+    assert any(row["id"] == target_id for row in folders.json["folders"])
+    assert not any(row["id"] == other_id for row in folders.json["folders"])
+    moved=[]
+    def fake_move(db,box,key,mail,action,*,target_folder_id=None):
+        moved.append((mail.id,action,target_folder_id))
+        mail.moved=True;db.commit()
+        return db.get(MailFolder,target_folder_id)
+    monkeypatch.setattr("ema.web.move_message",fake_move)
+    denied = client.post(f"/mail/{msg}/quick-move",data={
+        "csrf_token":csrf(client),"action":"move","target_folder_id":str(other_id)},
+        headers={"Accept":"application/json"})
+    # This test expects the route to reject cross-mailbox targets BEFORE remote actions.
+    assert denied.status_code == 400
+    assert moved == []
+    accepted = client.post(f"/mail/{msg}/quick-move",data={
+        "csrf_token":csrf(client),"action":"move","target_folder_id":str(target_id)},
+        headers={"Accept":"application/json"})
+    assert accepted.status_code == 200
+    assert accepted.json["ok"] is True
+    assert moved == [(msg,"move",target_id)]
+
+
+def test_context_menu_uses_one_backend_for_touch_mouse_keyboard_and_drag(seeded):
+    client=seeded
+    login(client,"owner")
+    markup=client.get(f"/mail?box={client.ids_v1['box']}").data
+    assert b'id="ema-mail-context"' in markup
+    assert b'id="ema-mail-folder-dialog"' in markup
+    assert b'data-move-url=' in markup
+    assert b'data-flag-url=' in markup
+    assert b'id="ema-bulk-move-button"' in markup
+    with open("static/mail-actions-v12.js",encoding="utf-8") as f:
+        js=f.read()
+    for action in ("contextmenu","pointerdown","dragstart","drop",
+                   "chooseFolder","serverAction","data-ema-mail-action"):
+        assert action in js
+
+
+def test_imap_mime_download_uses_bounded_uid_fetch_without_sql_persistence(seeded,monkeypatch):
+    from ema.mail_service import fetch_message_mime
+    client=seeded
+    from email.message import EmailMessage
+    mail=EmailMessage()
+    mail["From"]="test@example.cz"
+    mail.set_content("Příloha")
+    mail.add_attachment(b"binary payload",maintype="application",subtype="octet-stream",
+                        filename="priloha.bin")
+    raw=mail.as_bytes()
+    class Remote:
+        def select(self,folder,readonly=True):
+            return "OK",[b"1"]
+        def response(self,name):
+            return "UIDVALIDITY",[b"9"]
+        def uid(self,cmd,uid,query):
+            import re
+            offset,length=map(int,re.search(r"<(\d+)\.(\d+)>",query).groups())
+            chunk=raw[offset:offset+length]
+            return "OK",[(f"1 (UID {uid} BODY[]<{offset}>".encode(),chunk)]
+        def logout(self):
+            pass
+    monkeypatch.setattr("ema.mail_service._connect",lambda box,key:Remote())
+    with Session(client.application.extensions["ema_engine"]) as db:
+        msg=db.get(MailMessage,client.ids_v1["message"])
+        msg.size_bytes=len(raw)
+        result=fetch_message_mime(db.get(Mailbox,client.ids_v1["box"]),msg,"key")
+    assert result == raw
