@@ -272,7 +272,11 @@
 <aside class="card panel ema-mailbox-connection-panel">
   <h3>Stav poštovní schránky</h3>
   <p class="small muted">Ověření skutečného spojení nezávisle pro IMAP a SMTP. Není odeslána žádná testovací zpráva.</p>
-  {% if connection_check %}
+  {% if not connection_ready %}
+  <p class="notice" role="status">Evidence IMAP/SMTP ještě není připravená v databázi.
+    Správce musí jednorázově spustit <code>flask --app 'ema.web:create_app' upgrade-db</code>.
+    Poštovní nastavení zůstává přístupné, kontrola spojení se zatím nespouští.</p>
+  {% elif connection_check %}
   <div class="ema-mail-connection-result {{ 'success' if connection_check.imap_ok else 'error' }}">
     <strong>IMAP · {{ 'Ověřeno' if connection_check.imap_ok else 'Chyba' }}</strong>
     <small>{{ connection_check.imap_detail }}</small>
@@ -287,10 +291,12 @@
   <p class="notice">Připojení zatím nebylo samostatně ověřeno. Uložené nastavení
   ani zobrazení starých zpráv samo o sobě nepotvrzuje funkčnost SMTP.</p>
   {% endif %}
+  {% if connection_ready %}
   <form method="post" action="{{ url_for('check_mailbox_connection',org_id=active_org.id,box_id=box.id) }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <button class="btn primary" type="submit">Otestovat IMAP + SMTP</button>
   </form>
+  {% endif %}
   <p class="small muted">Po změně přístupových údajů nebo serveru se předchozí kontrola zneplatní.
      Test může trvat déle při nedostupnosti serveru.</p>
 </aside>
