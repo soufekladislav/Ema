@@ -293,7 +293,9 @@ def validate_recipients(to, cc="", bcc=""):
     return tuple(result)
 
 
-def send_composed(box, key, to, cc, bcc, subject, body, *, reply_message_id=None, attachments=None):
+def send_composed(box, key, to, cc, bcc, subject, body, *,
+                  reply_message_id=None, attachments=None,
+                  signature_html="", quoted_original=""):
     """Only explicit SMTP send. No retry if delivery outcome is uncertain."""
     primary, copy, blind = validate_recipients(to, cc, bcc)
     if not subject or len(subject) > 500 or any(c in subject for c in "\r\n"):
@@ -318,7 +320,14 @@ def send_composed(box, key, to, cc, bcc, subject, body, *, reply_message_id=None
             raise MailError("Neplatná reference původního e-mailu")
         msg["In-Reply-To"] = reply_message_id
         msg["References"] = reply_message_id
-    msg.set_content(body)
+    if signature_html or quoted_original:
+        # Import here to keep the transport adapter independent from HTML helpers.
+        from .mail_compose import outgoing_parts
+        plain, rich = outgoing_parts(body, signature_html, quoted_original)
+        msg.set_content(plain)
+        msg.add_alternative(rich, subtype="html")
+    else:
+        msg.set_content(body)
     total_size = 0
     for name, data in attachments or []:
         total_size += len(data)
