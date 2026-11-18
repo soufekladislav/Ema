@@ -1154,12 +1154,18 @@ def create_app(test_config=None):
         action = field("action", 20)
         if action not in ("read", "unread", "star", "unstar"):
             abort(400)
+        json_mode = request.headers.get("Accept") == "application/json"
         try:
             set_server_flags(g.db, box, app.config["MAIL_ENCRYPTION_KEY"], [msg], action)
             audit("mail.flags", f"mail={mail_id},action={action}", box.organization_id)
             g.db.commit()
+            if json_mode:
+                return {"ok": True, "read": is_imap_read(msg),
+                        "starred": r"\flagged" in (msg.flags or "").lower().split()}
             flash("Změna příznaku potvrzena na IMAP serveru.", "success")
         except MailError as ex:
+            if json_mode:
+                return {"ok": False, "error": str(ex)}, 409
             flash(str(ex), "error")
         if field("return_to", 20) == "detail" and action != "unread":
             return redirect(url_for("mail_detail", org_id=box.organization_id, message_id=mail_id))
