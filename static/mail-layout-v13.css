@@ -1,0 +1,18 @@
+/* Mailbox folder pane: desktop resize handle only, no layout impact on mobile. */
+@media(min-width:761px){
+ .ema-screen-mail .ema-mail-hub{
+    grid-template-columns:var(--ema-mail-pane-width,255px) 7px minmax(0,1fr);
+ }
+ .ema-mail-pane-resizer{
+    display:flex;align-items:center;justify-content:center;
+    background:#f3f7ed;border:0;border-left:1px solid #e0eadd;
+    border-right:1px solid #e0eadd;cursor:col-resize;
+    min-height:0;height:100%;padding:0;
+    touch-action:none;color:#7c9470;z-index:1;
+ }
+ .ema-mail-pane-resizer::before{content:"";width:3px;height:50px;border-radius:4px;background:#bcccb1}
+ .ema-mail-pane-resizer:is(:hover,:focus-visible,.is-resizing){background:#dcebc7;outline:2px solid #9dbd7c;outline-offset:-2px}
+}
+@media(max-width:760px){
+ .ema-mail-pane-resizer{display:none!important}
+}
