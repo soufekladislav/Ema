@@ -107,7 +107,7 @@
       {% endif %}
       <a class="ema-toolbar-button" href="{{ url_for('account_hub') }}" title="Nastavení schránek">⚙</a>
     </div>
-    <div class="ema-mail-hub">
+    <div class="ema-mail-hub" data-user-id="{{ me.id }}">
       <aside class="ema-mail-hub-sidebar" id="ema-mail-folder-pane" aria-label="Schránky a složky">
         <a href="{{ url_for('mail_hub') }}" class="ema-mail-all-inbox {{ 'active' if not selected_box else '' }}">
           <span>▣ &nbsp; Všechny příchozí</span><small>{{ combined_count }} schránek</small>
@@ -160,6 +160,10 @@
         </div>
         <p id="ema-mail-order-status" class="small muted" aria-live="polite"></p>
       </aside>
+      <div id="ema-mail-pane-resizer" class="ema-mail-pane-resizer" role="separator"
+           tabindex="0" aria-label="Změnit šířku panelu schránek (šipky doleva/doprava)"
+           aria-orientation="vertical" aria-valuemin="205" aria-valuemax="600"
+           aria-valuenow="255" title="Tažením změnit šířku, dvojklikem obnovit"></div>
       <section class="ema-mail-hub-messages" aria-label="Seznam e-mailů">
         {% if selected_box and selected_box.sync_error and selected_box.status == 'error' %}
           <div class="ema-mail-sync-errorbar" role="alert">{{ selected_box.sync_error }}</div>
