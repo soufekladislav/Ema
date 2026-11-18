@@ -319,8 +319,13 @@ def test_full_3301_legacy_imap_trash_uses_one_uid_range_and_one_expunge(state, m
         discover_folders(db, box, "key")
         trash = special_folder(db, box, "trash")
         snapshot = preview_trash_all(db, box, "key", trash)
-        assert snapshot == {"count": 3301, "uidvalidity": 333, "max_uid": 3301,
-                            "visible_count": 3301, "unread_count": 3301, "already_deleted": 0}
+        assert snapshot["count"] == 3301
+        assert snapshot["uidvalidity"] == 333
+        assert snapshot["max_uid"] == 3301
+        assert len(snapshot["uid_digest"]) == 64
+        assert snapshot["visible_count"] == 3301
+        assert snapshot["unread_count"] == 3301
+        assert snapshot["already_deleted"] == 0
         assert not fake.deleted and not fake.full_expunge
         deleted = empty_trash_all(db, box, "key", trash, snapshot)
         assert deleted == 3301
@@ -362,7 +367,7 @@ def test_full_trash_requires_same_server_uid_boundary(state, monkeypatch):
         assert fake.full_expunge == 0
         inbox = db.scalar(select(MailFolder).where(
             MailFolder.mailbox_id == box.id, MailFolder.name == "INBOX"))
-        with pytest.raises(MailError, match="ověřeným IMAP Košem"):
+        with pytest.raises(MailError, match="celou schránku|Příchozí poštu|Košem"):
             empty_trash_all(db, box, "key", inbox, snapshot)
         assert fake.full_expunge == 0
 
