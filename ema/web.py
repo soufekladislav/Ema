@@ -15,11 +15,12 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 import click
 from flask import Flask, abort, flash, g, redirect, render_template, request, session, url_for, send_from_directory, send_file
-from sqlalchemy import func, select, text, or_, and_, case
+from sqlalchemy import func, select, text, or_, and_, case, inspect
 from sqlalchemy.exc import IntegrityError
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from .mail_service import MailError, encrypt_password, preview_message, download_message_attachment, send_plain, send_composed, validate_recipients, sync_inbox, validate_mail_host
+from .mail_compose import clean_signature, original_reply_quote, outgoing_parts
+from .mail_service import MailError, encrypt_password, preview_message, download_message_attachment, send_plain, send_composed, validate_recipients, sync_inbox, validate_mail_host, verify_imap_connection, verify_smtp_connection
 from .mail_folders import (
     PAGE_SIZE, discover_folders, available_folders, decode_modified_utf7,
     fetch_folder_page, special_folder, move_message, move_many_messages,
@@ -29,7 +30,7 @@ from .assistant_service import AssistantError, run_assistant
 from .contact_import import ImportErrorCSV, extract_contacts
 from .schema_upgrade import upgrade_schema
 from .models import (
-    Audit, AssistantTurn, Base, ChatMessage, Company, Contact, MailFolder, Mailbox, MailboxGrant, MailboxView, MailMessage, MailUserState,
+    Audit, AssistantTurn, Base, ChatMessage, Company, Contact, MailFolder, Mailbox, MailboxGrant, MailboxView, MailboxConnectionCheck, MailMessage, MailUserState,
     Membership, Opportunity, Organization, Outbound, Project, ProjectGrant,
     Task, User, make_session, now,
 )
@@ -443,9 +444,12 @@ def create_app(test_config=None):
         ctx, orgs, projects = current_scope()
         boxes = visible_mailboxes(g.db, g.user.id, orgs)
         prefs = user_mail_preferences(g.db, g.user.id, boxes)
+        # Saved per-user order is authoritative, including the first position.
+        # Unpositioned/newly granted mailboxes come after all saved positions.
         boxes.sort(key=lambda b: (
-            not bool(prefs.get(b.id) and prefs[b.id].position > 0),
-            prefs[b.id].position if b.id in prefs else 0, b.label.lower(), b.id,
+            0 if b.id in prefs and prefs[b.id].position > 0 else 1,
+            prefs[b.id].position if b.id in prefs and prefs[b.id].position > 0 else 0,
+            b.label.casefold(), b.id,
         ))
         ids = [box.id for box in boxes]
         raw_box = request.args.get("box")
@@ -747,6 +751,7 @@ def create_app(test_config=None):
                 prepared.get("expires", 0) < int(time()) or
                 field("confirmation", 40) != "permanently-delete-whole-trash" or
                 field("acknowledge", 10) != "yes" or
+                field("trash_phrase", 30) != "SMAZAT KOŠ" or
                 not secrets.compare_digest(str(prepared.get("nonce", "")), field("nonce", 80))):
             abort(400, description="Potvrzení vysypání Koše chybí nebo vypršelo.")
         # Consume session permission BEFORE remote IMAP; never auto-retry after uncertainty.
@@ -1006,9 +1011,24 @@ def create_app(test_config=None):
                            "Od: " + (source.sender or "") + "\n"
                            "Předmět: " + (source.subject or "") + "\n"
                            "Obsah otevři v původní zprávě; přílohy se nepřikládají automaticky.")
+        quote_preview, quote_error = "", ""
+        if reply_id and source:
+            source_folder = g.db.get(MailFolder, source.folder_id)
+            if not source_folder or source_folder.mailbox_id != active_box.id:
+                abort(404)
+            try:
+                quote_preview = original_reply_quote(
+                    active_box, source, app.config["MAIL_ENCRYPTION_KEY"],
+                    source_folder.name)
+            except MailError as exc:
+                quote_error = str(exc)
         return render_hub("compose", send_boxes=can_send, active_box=active_box,
                           recipient=recipient, subject=subject, draft_content=content,
                           source_message=source, reply_id=reply_id,
+                          signature_preview=clean_signature(active_box.signature_html or "")
+                          if active_box else "",
+                          reply_quote_preview=quote_preview,
+                          reply_quote_error=quote_error,
                           csrf_nonce=secrets.token_urlsafe(24))
 
     @app.get("/mail/contacts/suggest")
@@ -1047,12 +1067,29 @@ def create_app(test_config=None):
         to, cc, bcc = field("to", 1500), field("cc", 1500), field("bcc", 1500)
         subject, body = required("subject", 500), required("body", 100000)
         reply_id = positive_id("reply_id")
-        message_id = None
+        message_id, original_quote = None, ""
         if reply_id:
             src = g.db.get(MailMessage, reply_id)
-            if not src or src.mailbox_id != box.id:
+            if not src or src.mailbox_id != box.id or src.moved:
+                abort(403)
+            source_folder = g.db.get(MailFolder, src.folder_id)
+            if not source_folder or source_folder.mailbox_id != box.id:
                 abort(403)
             message_id = src.message_id or None
+            # Mandatory server-origin quote; on failure do NOT send an
+            # incomplete reply and do NOT create an idempotency row.
+            try:
+                original_quote = original_reply_quote(
+                    box, src, app.config["MAIL_ENCRYPTION_KEY"], source_folder.name)
+            except MailError as exc:
+                flash("Původní zprávu nelze bezpečně připojit: " + str(exc),
+                      "error")
+                return render_hub("compose", send_boxes=[box], active_box=box,
+                                  recipient=to, subject=subject, draft_content=body,
+                                  source_message=src, reply_id=reply_id,
+                                  signature_preview=clean_signature(box.signature_html or ""),
+                                  reply_quote_error=str(exc),
+                                  csrf_nonce=secrets.token_urlsafe(24)), 422
         if g.db.scalar(select(Outbound.id).where(Outbound.nonce == nonce)):
             flash("Pokus o odeslání již existuje. Zkontroluj Odeslané před opakováním.", "error")
             return redirect(url_for("mail_hub", box=box.id))
@@ -1065,6 +1102,22 @@ def create_app(test_config=None):
                               recipient=to, subject=subject, draft_content=body,
                               cc_prefill=cc, bcc_prefill=bcc,
                               source_message=src if reply_id else None, reply_id=reply_id,
+                              signature_preview=clean_signature(box.signature_html or ""),
+                              reply_quote_preview=original_quote,
+                              csrf_nonce=secrets.token_urlsafe(24)), 422
+        # Validate final MIME text BEFORE the Outbound idempotency row or SMTP.
+        # A too-long automatic signature/quote must not become a false
+        # "uncertain send" requiring investigation of a message never sent.
+        try:
+            outgoing_parts(body, box.signature_html or "", original_quote)
+        except (MailError, ValueError) as ex:
+            flash("Zpráva nebyla odeslána: " + str(ex), "error")
+            return render_hub("compose", send_boxes=[box], active_box=box,
+                              recipient=to, subject=subject, draft_content=body,
+                              cc_prefill=cc, bcc_prefill=bcc,
+                              source_message=src if reply_id else None, reply_id=reply_id,
+                              signature_preview=clean_signature(box.signature_html or ""),
+                              reply_quote_preview=original_quote,
                               csrf_nonce=secrets.token_urlsafe(24)), 422
         if request.content_length and request.content_length > 11_000_000:
             abort(413)
@@ -1089,7 +1142,10 @@ def create_app(test_config=None):
             return redirect(url_for("mail_hub", box=box.id))
         try:
             sent_bytes = send_composed(box, app.config["MAIL_ENCRYPTION_KEY"], to, cc, bcc,
-                                       subject, body, reply_message_id=message_id, attachments=attached)
+                                       subject, body, reply_message_id=message_id,
+                                       attachments=attached,
+                                       signature_html=box.signature_html or "",
+                                       quoted_original=original_quote)
         except MailError as ex:
             record.state = "uncertain"
             audit("mail.compose.uncertain", nonce, box.organization_id)
@@ -1131,7 +1187,7 @@ def create_app(test_config=None):
                 g.db.add(item)
             item.position = pos
         g.db.commit()
-        return {"ok": True}
+        return {"ok": True, "ids": order}
 
     @app.post("/mail/<int:box_id>/include")
     @login_required
@@ -1806,6 +1862,13 @@ def create_app(test_config=None):
         boxes = g.db.scalars(select(Mailbox).where(Mailbox.organization_id == org_id)).all() if is_admin else []
         return render("settings", membership=m, is_admin=is_admin, members=members, boxes=boxes)
 
+    def connection_check_schema_ready():
+        """Allow account settings to survive a code-first deploy until upgrade-db."""
+        try:
+            return inspect(g.db.get_bind()).has_table("mailbox_connection_checks")
+        except Exception:
+            return False
+
     @app.route("/org/<int:org_id>/mail/<int:box_id>/edit", methods=["GET", "POST"])
     @org_admin
     def edit_mailbox(org_id, box_id):
@@ -1813,8 +1876,18 @@ def create_app(test_config=None):
         if box.organization_id != org_id:
             abort(403)
         if request.method == "GET":
-            return render("mailbox-edit", box=box)
+            ready = connection_check_schema_ready()
+            connection = g.db.scalar(select(MailboxConnectionCheck).where(
+                MailboxConnectionCheck.mailbox_id == box.id)) if ready else None
+            return render("mailbox-edit", box=box, connection_check=connection,
+                          connection_ready=ready,
+                          signature_preview=clean_signature(box.signature_html or ""))
         password = request.form.get("password", "")
+        try:
+            sanitized_signature = clean_signature(request.form.get("signature_html", ""))
+        except ValueError as ex:
+            flash(str(ex), "error")
+            return redirect(url_for("edit_mailbox", org_id=org_id, box_id=box_id))
         if len(password) > 512:
             abort(400, description="Příliš dlouhé heslo")
         address = required("address")
@@ -1836,7 +1909,12 @@ def create_app(test_config=None):
             MailMessage.mailbox_id == box.id).limit(1)):
             flash("Schránka již obsahuje indexované zprávy. Kvůli ochraně jejich vazeb nelze měnit adresu, IMAP server ani IMAP login. Lze změnit SMTP a heslo.", "error")
             return redirect(url_for("edit_mailbox", org_id=org_id, box_id=box_id))
+        smtp_changed = (box.smtp_host != smtp_host or
+                        box.smtp_username != (field("smtp_username") or username) or
+                        box.smtp_port != smtp_port)
         box.label = required("label", 120)
+        if "signature_html" in request.form:
+            box.signature_html = sanitized_signature
         box.address = address
         box.username = username
         box.smtp_username = field("smtp_username") or username
@@ -1849,10 +1927,47 @@ def create_app(test_config=None):
             box.status, box.sync_error = "not_synced", ""
             box.last_sync = None
             box.server_message_count = None
+        if (changed_identity or encrypted is not None or smtp_changed) and connection_check_schema_ready():
+            checked = g.db.scalar(select(MailboxConnectionCheck).where(
+                MailboxConnectionCheck.mailbox_id == box.id))
+            if checked:
+                g.db.delete(checked)  # Old successful check cannot verify new settings.
         audit("mailbox.update", str(box.id), org_id)
         g.db.commit()
         flash("Nastavení schránky uloženo. Heslo bylo změněno jen při jeho zadání.", "success")
         return redirect(url_for("settings", org_id=org_id))
+
+    @app.post("/org/<int:org_id>/mail/<int:box_id>/check")
+    @org_admin
+    def check_mailbox_connection(org_id, box_id):
+        box = mailbox_or_403(box_id, manage=True)
+        if box.organization_id != org_id:
+            abort(403)
+        if not connection_check_schema_ready():
+            flash("Nejdříve spusťte databázovou migraci upgrade-db. "
+                  "Ověření spojení nebylo spuštěno.", "error")
+            return redirect(url_for("edit_mailbox",org_id=org_id,box_id=box_id))
+        # An explicit user action, not background polling or a sent test email.
+        imap_ok, imap_detail = verify_imap_connection(
+            box, app.config["MAIL_ENCRYPTION_KEY"])
+        smtp_ok, smtp_detail = verify_smtp_connection(
+            box, app.config["MAIL_ENCRYPTION_KEY"])
+        check = g.db.scalar(select(MailboxConnectionCheck).where(
+            MailboxConnectionCheck.mailbox_id == box.id))
+        if check is None:
+            check = MailboxConnectionCheck(mailbox_id=box.id)
+            g.db.add(check)
+        check.imap_ok, check.smtp_ok = bool(imap_ok), bool(smtp_ok)
+        check.imap_detail = imap_detail[:240]
+        check.smtp_detail = smtp_detail[:240]
+        check.checked_at = now()
+        audit("mailbox.connection_check",
+              f"mailbox={box.id};imap={int(imap_ok)};smtp={int(smtp_ok)}",org_id)
+        g.db.commit()
+        flash(("IMAP ověřen" if imap_ok else "IMAP neověřen") +
+              " · " + ("SMTP ověřen" if smtp_ok else "SMTP neověřen") +
+              ". Nebyl odeslán žádný e-mail.", "success" if imap_ok and smtp_ok else "error")
+        return redirect(url_for("edit_mailbox", org_id=org_id, box_id=box_id))
 
     @app.post("/org/<int:org_id>/members")
     @org_admin

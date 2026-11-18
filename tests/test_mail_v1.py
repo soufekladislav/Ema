@@ -81,6 +81,8 @@ def test_compose_reply_uses_exact_sender_and_company_contacts(seeded,monkeypatch
     login(client,"owner")
     b=client.ids_v1["box"]
     mid=client.ids_v1["message"]
+    monkeypatch.setattr("ema.web.original_reply_quote",
+                        lambda box,msg,key,folder_name: "--- Původní zpráva ---\n> Hello")
     response=client.get(f"/mail/compose?reply_id={mid}")
     assert response.status_code==200
     assert b"buyer@example.cz" in response.data
@@ -90,7 +92,8 @@ def test_compose_reply_uses_exact_sender_and_company_contacts(seeded,monkeypatch
     assert [x["email"] for x in suggest.json["contacts"]] == ["buyer@example.cz"]
     assert client.get(f"/mail/contacts/suggest?box={client.ids_v1['other']}&q=secret").status_code==403
     called=[]
-    def fake_send(box,key,to,cc,bcc,subject,body,*,reply_message_id=None,attachments=None):
+    def fake_send(box,key,to,cc,bcc,subject,body,*,reply_message_id=None,
+                  attachments=None,signature_html="",quoted_original=""):
         called.append((box.id,to,cc,bcc,subject,body,reply_message_id,attachments))
         return b"From: test@example.cz\r\nTo: buyer@example.cz\r\n\r\nHello"
     monkeypatch.setattr("ema.web.send_composed",fake_send)
@@ -105,6 +108,7 @@ def test_compose_reply_uses_exact_sender_and_company_contacts(seeded,monkeypatch
     assert len(called)==1
     assert called[0][0]==b
     assert called[0][6]=="<buyer-mail@example.cz>"
+    assert "Sending the offer." in called[0][5]
     with Session(client.application.extensions["ema_engine"]) as db:
         row=db.scalar(select(Outbound).where(Outbound.nonce=="unique-v1-send"))
         assert row.state=="sent"
@@ -239,7 +243,7 @@ def test_empty_trash_requires_fresh_server_preview_nonce_and_mailbox_manage(seed
         nonce = sess["ema_trash_prepared"]["nonce"]
     confirmed = {"csrf_token": csrf(client), "folder_id": str(trash_id),
                  "nonce": nonce, "confirmation": "permanently-delete-whole-trash",
-                 "acknowledge": "yes"}
+                 "acknowledge": "yes", "trash_phrase": "SMAZAT KOŠ"}
     no_check = client.post(path, data={k: v for k,v in confirmed.items() if k != "acknowledge"})
     assert no_check.status_code == 400 and calls == []
     preview = client.post(prepare_path, data={"csrf_token": csrf(client),

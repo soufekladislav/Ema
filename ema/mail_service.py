@@ -93,6 +93,61 @@ def _connect(box, key):
         raise MailError("Spojení s IMAP serverem se během přihlášení přerušilo.") from None
 
 
+
+def verify_imap_connection(box, key):
+    """Explicit read-only IMAP login/SELECT check; no message reads or writes."""
+    client = None
+    try:
+        client = _connect(box, key)
+        typ, _ = client.select("INBOX", readonly=True)
+        if typ != "OK":
+            raise MailError("IMAP přihlášení funguje, ale složka INBOX není dostupná")
+        return True, "IMAP TLS, přihlášení a INBOX ověřeny"
+    except MailError as ex:
+        return False, str(ex)[:240]
+    except Exception:
+        return False, "IMAP server nepotvrdil přihlášení a dostupnost INBOX"
+    finally:
+        if client is not None:
+            try: client.logout()
+            except Exception: pass
+
+
+def verify_smtp_connection(box, key):
+    """Test SMTP TLS authentication and NOOP, explicitly NEVER send mail."""
+    try:
+        validate_mail_host(box.smtp_host)
+        if box.smtp_port not in (465, 587):
+            raise MailError("SMTP podporuje pouze TLS na portu 465 nebo 587")
+        password = decrypt_password(box.credential, key)
+        username = box.smtp_username or box.username
+        if box.smtp_port == 465:
+            with smtplib.SMTP_SSL(box.smtp_host, 465, timeout=15,
+                                  context=ssl.create_default_context()) as smtp:
+                smtp.login(username, password)
+                code, _ = smtp.noop()
+        else:
+            with smtplib.SMTP(box.smtp_host, 587, timeout=15) as smtp:
+                smtp.ehlo()
+                smtp.starttls(context=ssl.create_default_context())
+                smtp.ehlo()
+                smtp.login(username, password)
+                code, _ = smtp.noop()
+        if not (200 <= int(code) < 300):
+            return False, "SMTP autentizace proběhla, ale server odmítl test spojení"
+        return True, "SMTP TLS, přihlášení a NOOP ověřeny (bez odeslání)"
+    except smtplib.SMTPAuthenticationError:
+        return False, "SMTP odmítlo uživatelské jméno nebo heslo"
+    except (InvalidToken, ValueError):
+        return False, "Šifrované heslo není dostupné; ověřte MAIL_ENCRYPTION_KEY"
+    except (smtplib.SMTPException, OSError, TimeoutError, ssl.SSLError, MailError) as ex:
+        if isinstance(ex, MailError):
+            return False, str(ex)[:240]
+        return False, "SMTP server nebo jeho zabezpečené připojení není dostupné"
+    except Exception:
+        return False, "SMTP ověření selhalo; žádný e-mail nebyl odeslán"
+
+
 def parse_metadata(raw, uid, box_id, folder_id, uidvalidity):
     """Only header bytes (not MIME bodies) are ever passed here."""
     pieces = [p for p in raw if isinstance(p, tuple) and len(p) > 1]
@@ -293,7 +348,9 @@ def validate_recipients(to, cc="", bcc=""):
     return tuple(result)
 
 
-def send_composed(box, key, to, cc, bcc, subject, body, *, reply_message_id=None, attachments=None):
+def send_composed(box, key, to, cc, bcc, subject, body, *,
+                  reply_message_id=None, attachments=None,
+                  signature_html="", quoted_original=""):
     """Only explicit SMTP send. No retry if delivery outcome is uncertain."""
     primary, copy, blind = validate_recipients(to, cc, bcc)
     if not subject or len(subject) > 500 or any(c in subject for c in "\r\n"):
@@ -318,7 +375,14 @@ def send_composed(box, key, to, cc, bcc, subject, body, *, reply_message_id=None
             raise MailError("Neplatná reference původního e-mailu")
         msg["In-Reply-To"] = reply_message_id
         msg["References"] = reply_message_id
-    msg.set_content(body)
+    if signature_html or quoted_original:
+        # Import here to keep the transport adapter independent from HTML helpers.
+        from .mail_compose import outgoing_parts
+        plain, rich = outgoing_parts(body, signature_html, quoted_original)
+        msg.set_content(plain)
+        msg.add_alternative(rich, subtype="html")
+    else:
+        msg.set_content(body)
     total_size = 0
     for name, data in attachments or []:
         total_size += len(data)

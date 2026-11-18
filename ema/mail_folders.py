@@ -4,6 +4,7 @@ The IMAP server owns message history. Only headers and folder references enter M
 """
 import base64
 import re
+import hashlib
 
 from sqlalchemy import select, update
 from .mail_service import MailError, _connect, parse_metadata, quote_mailbox_name
@@ -609,6 +610,19 @@ def empty_trash_batch(db, box, key, folder, *, limit=100):
 
 def _trash_selected_state(client, folder, *, readonly):
     """Verify the real server Trash and capture a precise immutable UID boundary."""
+    # Reconfirm the exact selected folder with fresh server LIST before ANY
+    # destructive command. Neither local flags nor the mailbox's INBOX is enough.
+    status, listed = client.list()
+    if status != "OK":
+        raise MailError("Před vysypáním Koše nelze ověřit seznam serverových složek")
+    remote = [parsed for line in (listed or [])
+              if (parsed := parse_list_line(line)) and parsed[0] == folder.name]
+    if len(remote) != 1:
+        raise MailError("Vybraná složka Koš neodpovídá přesně seznamu složek IMAP serveru")
+    live_flags = remote[0][1].lower().split()
+    if any(flag in live_flags for flag in (r"\inbox",r"\all",r"\sent",r"\drafts")) or (
+            r"\trash" not in live_flags and not is_trash_folder(folder)):
+        raise MailError("Server nepotvrdil vybranou složku jako samostatný Koš")
     typ, exists = client.select(quote_mailbox_name(folder.name), readonly=readonly)
     if typ != "OK":
         raise MailError("IMAP server neotevřel složku Koš")
@@ -639,6 +653,10 @@ def _trash_selected_state(client, folder, *, readonly):
     if exists_count != len(uids):
         raise MailError("Obsah Koše se během kontroly změnil. Načtěte počet znovu.")
     return {"count": len(uids), "uidvalidity": uidvalidity,
+            # Hash the exact UID membership; count + max UID alone is insufficient.
+            "uid_digest": hashlib.sha256(
+                ",".join(str(uid) for uid in sorted(uids)).encode("ascii")
+            ).hexdigest(),
             "max_uid": max(uids, default=0),
             "visible_count": len(visible),
             "unread_count": len(unread),
@@ -648,6 +666,11 @@ def _trash_selected_state(client, folder, *, readonly):
 def _verify_trash_scope(db, box, folder):
     if folder.mailbox_id != box.id:
         raise MailError("Koš nepatří vybrané schránce")
+    if (folder.name or "").upper() == "INBOX" or (folder.name or "").strip() in ("", "/"):
+        raise MailError("Příchozí poštu ani celou schránku nelze vysypat")
+    if any(flag in (folder.special_use or "").lower().split()
+           for flag in (r"\all", r"\inbox", r"\sent", r"\drafts")):
+        raise MailError("Vybraná složka není bezpečně odděleným Košem")
     if not is_trash_folder(folder):
         raise MailError("Tato složka není ověřeným IMAP Košem dané schránky")
     # Explicitly selected Trash is allowed even when a stale SPECIAL-USE LIST
@@ -681,14 +704,17 @@ def empty_trash_all(db, box, key, folder, expected):
     if (not isinstance(expected, dict) or
             any(not isinstance(expected.get(k), int) or isinstance(expected.get(k), bool)
                 for k in ("count", "uidvalidity", "max_uid")) or
-            expected["count"] < 0 or expected["max_uid"] < 0):
+            expected["count"] < 0 or expected["max_uid"] < 0 or
+            not isinstance(expected.get("uid_digest"), str) or
+            not re.fullmatch(r"[0-9a-f]{64}", expected["uid_digest"])):
         raise MailError("Neplatné potvrzení vyprázdnění Koše")
     client = _connect(box, key)
     try:
         observed = _trash_selected_state(client, folder, readonly=False)
         # Read/unread flags may change normally. Verify identity and visible
         # membership instead, so even a new \\Deleted state invalidates preview.
-        identity = ("count", "uidvalidity", "max_uid", "visible_count", "already_deleted")
+        identity = ("count", "uidvalidity", "max_uid", "uid_digest",
+                    "visible_count", "already_deleted")
         if any(observed.get(key) != expected.get(key) for key in identity):
             raise MailError("Počet nebo UID zpráv v Koši se změnily od potvrzení. "
                             "Nic nebylo smazáno, načtěte potvrzení znovu.")

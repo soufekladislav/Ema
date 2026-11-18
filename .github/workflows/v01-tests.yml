@@ -28,4 +28,5 @@ jobs:
       - run: node --check static/pwa-install-v2.js
       - run: node --check static/pwa.js
       - run: node --check static/mobile-shell-v2.js
+      - run: node --check static/mail-layout-v13.js
       - run: python -m pytest -q

@@ -161,6 +161,19 @@ class Mailbox(Base):
     __table_args__ = (Index("ix_mailbox_org", "organization_id"),)
 
 
+class MailboxConnectionCheck(Base):
+    """Most recent real IMAP/SMTP authentication check, no credentials or mail data."""
+    __tablename__ = "mailbox_connection_checks"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    mailbox_id: Mapped[int] = mapped_column(ForeignKey("mailboxes.id", ondelete="CASCADE"),
+                                           nullable=False, unique=True)
+    imap_ok: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    smtp_ok: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    imap_detail: Mapped[str] = mapped_column(String(240), default="", nullable=False)
+    smtp_detail: Mapped[str] = mapped_column(String(240), default="", nullable=False)
+    checked_at: Mapped[datetime] = mapped_column(DateTime, default=now, nullable=False)
+
+
 class MailboxView(Base):
     """Per-user mailbox order and inclusion in the combined inbox."""
     __tablename__ = "mailbox_views"
