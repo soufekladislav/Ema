@@ -1,7 +1,7 @@
 {% for m in mail_rows %}
 {% set mb = box_lookup[m.mailbox_id] %}
 {% set st = mail_state[m.id] %}
-<div class="ema-mail-message-row {{ 'is-read' if st['read'] else 'is-unread' }} {{ 'is-starred' if st['starred'] else '' }}" data-mail-id="{{ m.id }}">
+<div class="ema-mail-message-row {{ 'is-read' if st['read'] else 'is-unread' }} {{ 'is-starred' if st['starred'] else '' }}" data-mail-id="{{ m.id }}" data-mailbox-id="{{ m.mailbox_id }}" data-folder-id="{{ m.folder_id }}" data-flag-url="{{ url_for('set_mail_state', mail_id=m.id) }}" data-move-url="{{ url_for('mail_quick_move', mail_id=m.id) }}" data-targets-url="{{ url_for('mail_move_targets', mail_id=m.id) }}" data-is-read="{{ 'true' if st['read'] else 'false' }}" data-starred="{{ 'true' if st['starred'] else 'false' }}" draggable="{{ 'true' if m.mailbox_id in can_move_ids else 'false' }}">
   <input type="checkbox" class="ema-mail-select" name="mail_ids" value="{{ m.id }}" form="ema-mail-bulk-form" aria-label="Vybrat zprávu {{ m.subject or '(bez předmětu)' }}">
   <form method="post" action="{{ url_for('set_mail_state', mail_id=m.id) }}" class="ema-star-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -17,6 +17,9 @@
     <time class="ema-mail-time">{{ m.sent_at.strftime('%d.%m. %H:%M') if m.sent_at else '—' }}</time>
   </a>
   <div class="ema-message-actions">
+    {% if m.mailbox_id in can_move_ids %}
+    <button class="ema-mail-icon ema-mail-more" type="button" aria-label="Další akce zprávy" aria-haspopup="menu" title="Další akce (nebo pravé kliknutí)">⋯</button>
+    {% endif %}
     {% if m.mailbox_id in can_move_ids %}
     <form method="post" action="{{ url_for('mail_quick_move', mail_id=m.id) }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
