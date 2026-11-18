@@ -296,3 +296,111 @@ def test_trash_empty_button_shows_for_selected_dotted_folder_without_special_use
     assert "Vysypat Koš".encode() in response.data
     assert f'/mail/{box_id}/trash/prepare'.encode() in response.data
     assert b'name="folder_id"' in response.data
+
+
+
+def test_attachment_download_is_scoped_no_store_and_not_in_database(seeded,monkeypatch):
+    client = seeded
+    login(client, "owner")
+    message_id = client.ids_v1["message"]
+    downloaded = []
+    def fake_download(box,msg,key,part_index,*,folder_name="INBOX"):
+        downloaded.append((box.id,msg.id,part_index,folder_name))
+        return ("faktura.pdf","application/pdf",b"%PDF-1.7\nInvoice")
+    monkeypatch.setattr("ema.web.download_message_attachment",fake_download)
+    response = client.get(f"/mail/{message_id}/attachment/0")
+    assert response.status_code == 200
+    assert response.data == b"%PDF-1.7\nInvoice"
+    assert response.headers["Content-Disposition"].startswith("attachment;")
+    assert "faktura.pdf" in response.headers["Content-Disposition"]
+    assert "no-store" in response.headers["Cache-Control"]
+    assert downloaded and downloaded[0][2] == 0
+    with Session(client.application.extensions["ema_engine"]) as db:
+        msg = db.get(MailMessage,message_id)
+        assert "faktura.pdf" not in (msg.subject or "")
+    forbidden = client.get(f"/mail/{client.ids_v1['private']}/attachment/0")
+    assert forbidden.status_code == 403
+    guest = client.application.test_client()
+    login(guest,"guest")
+    assert guest.get(f"/mail/{message_id}/attachment/0").status_code == 403
+
+
+def test_move_target_rejects_other_mailbox_and_uses_one_server_move(seeded,monkeypatch):
+    client = seeded
+    login(client,"owner")
+    msg = client.ids_v1["message"]
+    box = client.ids_v1["box"]
+    with Session(client.application.extensions["ema_engine"]) as db:
+        source = db.get(MailMessage,msg)
+        folder = MailFolder(mailbox_id=box,name="Clients",uidvalidity=9)
+        other = MailFolder(mailbox_id=client.ids_v1["other"],name="Other",uidvalidity=9)
+        db.add_all([folder,other]);db.commit()
+        target_id,other_id = folder.id,other.id
+    folders = client.get(f"/mail/{msg}/folders")
+    assert folders.status_code == 200
+    assert any(row["id"] == target_id for row in folders.json["folders"])
+    assert not any(row["id"] == other_id for row in folders.json["folders"])
+    moved=[]
+    def fake_move(db,box,key,mail,action,*,target_folder_id=None):
+        moved.append((mail.id,action,target_folder_id))
+        mail.moved=True;db.commit()
+        return db.get(MailFolder,target_folder_id)
+    monkeypatch.setattr("ema.web.move_message",fake_move)
+    denied = client.post(f"/mail/{msg}/quick-move",data={
+        "csrf_token":csrf(client),"action":"move","target_folder_id":str(other_id)},
+        headers={"Accept":"application/json"})
+    # This test expects the route to reject cross-mailbox targets BEFORE remote actions.
+    assert denied.status_code == 400
+    assert moved == []
+    accepted = client.post(f"/mail/{msg}/quick-move",data={
+        "csrf_token":csrf(client),"action":"move","target_folder_id":str(target_id)},
+        headers={"Accept":"application/json"})
+    assert accepted.status_code == 200
+    assert accepted.json["ok"] is True
+    assert moved == [(msg,"move",target_id)]
+
+
+def test_context_menu_uses_one_backend_for_touch_mouse_keyboard_and_drag(seeded):
+    client=seeded
+    login(client,"owner")
+    markup=client.get(f"/mail?box={client.ids_v1['box']}").data
+    assert b'id="ema-mail-context"' in markup
+    assert b'id="ema-mail-folder-dialog"' in markup
+    assert b'data-move-url=' in markup
+    assert b'data-flag-url=' in markup
+    assert b'id="ema-bulk-move-button"' in markup
+    with open("static/mail-actions-v12.js",encoding="utf-8") as f:
+        js=f.read()
+    for action in ("contextmenu","pointerdown","dragstart","drop",
+                   "chooseFolder","serverAction","data-ema-mail-action"):
+        assert action in js
+
+
+def test_imap_mime_download_uses_bounded_uid_fetch_without_sql_persistence(seeded,monkeypatch):
+    from ema.mail_service import fetch_message_mime
+    client=seeded
+    from email.message import EmailMessage
+    mail=EmailMessage()
+    mail["From"]="test@example.cz"
+    mail.set_content("Příloha")
+    mail.add_attachment(b"binary payload",maintype="application",subtype="octet-stream",
+                        filename="priloha.bin")
+    raw=mail.as_bytes()
+    class Remote:
+        def select(self,folder,readonly=True):
+            return "OK",[b"1"]
+        def response(self,name):
+            return "UIDVALIDITY",[b"9"]
+        def uid(self,cmd,uid,query):
+            import re
+            offset,length=map(int,re.search(r"<(\d+)\.(\d+)>",query).groups())
+            chunk=raw[offset:offset+length]
+            return "OK",[(f"1 (UID {uid} BODY[]<{offset}>".encode(),chunk)]
+        def logout(self):
+            pass
+    monkeypatch.setattr("ema.mail_service._connect",lambda box,key:Remote())
+    with Session(client.application.extensions["ema_engine"]) as db:
+        msg=db.get(MailMessage,client.ids_v1["message"])
+        msg.size_bytes=len(raw)
+        result=fetch_message_mime(db.get(Mailbox,client.ids_v1["box"]),msg,"key")
+    assert result == raw
