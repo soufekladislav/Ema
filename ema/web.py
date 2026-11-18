@@ -841,6 +841,12 @@ def create_app(test_config=None):
             organization_access(g.db, g.user.id, box.organization_id)
         except Forbidden:
             abort(403)
+        # Refresh server LIST on demand, including folders of mailboxes that
+        # have not yet been opened individually from the combined inbox.
+        try:
+            discover_folders(g.db, box, app.config["MAIL_ENCRYPTION_KEY"])
+        except MailError as ex:
+            return {"error": str(ex)}, 422
         rows = g.db.scalars(select(MailFolder).where(
             MailFolder.mailbox_id == box.id).order_by(MailFolder.name)).all()
         targets = [{"id": folder.id, "name": decode_modified_utf7(folder.name)}
