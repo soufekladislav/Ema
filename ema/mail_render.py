@@ -160,6 +160,8 @@ def make_preview(data, *, show_images=False, truncated=False):
     msg = BytesParser(policy=policy.default).parsebytes(data or b"")
     plain, rich = "", ""
     cid_images = {}
+    attachments = list_attachments(msg)
+    cid_size = 0
     for part in msg.walk():
         if part.is_multipart() or part.get_content_disposition() == "attachment":
             continue
@@ -176,11 +178,12 @@ def make_preview(data, *, show_images=False, truncated=False):
                 rich = body[:MAX_PREVIEW_BYTES]
             if content_type == "text/plain" and not plain:
                 plain = body[:MAX_PREVIEW_BYTES]
-        elif show_images and content_type in IMAGE_MIME and len(cid_images) < 8:
+        elif content_type in IMAGE_MIME and len(cid_images) < 12:
             cid = (part.get("Content-ID") or "").strip("<> ")
             if cid:
                 payload = part.get_payload(decode=True) or b""
-                if 0 < len(payload) <= 64_000:
+                if 0 < len(payload) <= 2_000_000 and cid_size + len(payload) <= 6_000_000:
+                    cid_size += len(payload)
                     cid_images[cid.lower()] = (
                         "data:" + content_type + ";base64," +
                         base64.b64encode(payload).decode("ascii")
@@ -218,31 +221,28 @@ def make_preview(data, *, show_images=False, truncated=False):
                     return len(value) <= 300
                 if name in ("width", "height"):
                     return bool(re.fullmatch(r"\d{1,4}", value))
-                if not show_images:
-                    return False
-                if value.lower().startswith("cid:"):
-                    return value[4:].strip("<> ").lower() in cid_images
                 if value.startswith("data:"):
                     return value in cid_images.values()
-                return safe_image_url(value)
+                return show_images and safe_image_url(value)
             if tag in ("td", "th") and name in ("colspan", "rowspan"):
                 return bool(re.fullmatch(r"\d{1,2}", value))
             return False
 
-        # Substitute only recognized embedded images, and only after explicit consent.
-        if show_images:
-            def replace_cid(match):
-                cid = match.group(1).strip("<> ").lower()
-                return html.escape(cid_images.get(cid, ""), quote=True)
-            rich = re.sub(r"cid:([^'\"\s>]+)", replace_cid, rich, flags=re.I)
+        # CID images are embedded in the e-mail, so they can render offline.
+        # Only remote HTTPS images require a deliberate privacy opt-in.
+        def replace_cid(match):
+            cid = match.group(1).strip("<> ").lower()
+            return html.escape(cid_images.get(cid, ""), quote=True)
+        rich = re.sub(r"cid:([^'\"\s>]+)", replace_cid, rich, flags=re.I)
         sanitized = bleach.clean(
             rich, tags=ALLOWED_TAGS, attributes=allowed,
             protocols={"http", "https", "mailto", "data"}, strip=True,
             css_sanitizer=EMAIL_CSS,
         )
         if not show_images:
-            sanitized = re.sub(r"<img\b[^>]*>", '<span>[Obrázek skryt]</span>', sanitized, flags=re.I)
-        img_policy = "https: data:" if show_images else "'none'"
+            sanitized = re.sub(r"<img\b(?![^>]*\bsrc\s*=)[^>]*>",
+                               '<span>[Externí obrázek skryt]</span>', sanitized, flags=re.I)
+        img_policy = "https: data:" if show_images else "data:"
         envelope = (
             "<!doctype html><html><head><meta charset='utf-8'>"
             "<meta http-equiv='Content-Security-Policy' content=\""
@@ -256,6 +256,6 @@ def make_preview(data, *, show_images=False, truncated=False):
             "a{color:#436c08}blockquote{border-left:3px solid #b9d98e;padding-left:10px}"
             "</style><style>" + safe_style_rules + "</style></head><body>" + sanitized + "</body></html>"
         )
-        return MailPreview(envelope, plain, True, has_remote_images, truncated)
+        return MailPreview(envelope, plain, True, has_remote_images, truncated, attachments)
 
-    return MailPreview("", plain or "Tento e-mail neobsahuje dostupný textový náhled.", False, False, truncated)
+    return MailPreview("", plain or "Tento e-mail neobsahuje dostupný textový náhled.", False, False, truncated, attachments)
