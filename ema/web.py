@@ -1857,7 +1857,8 @@ def create_app(test_config=None):
         if request.method == "GET":
             connection = g.db.scalar(select(MailboxConnectionCheck).where(
                 MailboxConnectionCheck.mailbox_id == box.id))
-            return render("mailbox-edit", box=box, connection_check=connection)
+            return render("mailbox-edit", box=box, connection_check=connection,
+                          signature_preview=clean_signature(box.signature_html or ""))
         password = request.form.get("password", "")
         try:
             sanitized_signature = clean_signature(request.form.get("signature_html", ""))
