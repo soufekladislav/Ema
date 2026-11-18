@@ -1,0 +1,65 @@
+name: Build EMA PWA image icons
+on:
+  push:
+    branches: [release/ema-mail-mobile-20261117]
+    paths:
+      - ".github/workflows/ema-pwa-icons.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  icons:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: release/ema-mail-mobile-20261117
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install pillow==11.3.0
+      - name: Make local same-origin EMA PWA assets from approved illustration
+        shell: bash
+        run: |
+          python - <<'PY'
+          from io import BytesIO
+          from pathlib import Path
+          from urllib.request import Request, urlopen
+          from PIL import Image, ImageDraw
+          source = "https://www.freshcrackers.cz/wp-content/uploads/2026/10/fresh-hub.png"
+          request = Request(source, headers={"User-Agent":"EMA-PWA-asset-build/1.0"})
+          with urlopen(request, timeout=25) as response:
+              data = response.read(8_000_001)
+          if len(data) > 8_000_000:
+              raise RuntimeError("EMA illustration unexpectedly large")
+          im = Image.open(BytesIO(data)).convert("RGB")
+          for size in (192, 512):
+              canvas = Image.new("RGB",(size,size),"#101510")
+              bound = int(size*0.79)
+              tile = im.copy()
+              tile.thumbnail((bound,bound),Image.Resampling.LANCZOS)
+              # Rounded original illustration, no branding or object changes.
+              mask = Image.new("L",tile.size,0)
+              draw=ImageDraw.Draw(mask)
+              draw.rounded_rectangle((0,0,tile.width-1,tile.height-1),
+                                     radius=max(6,size//28),fill=255)
+              canvas.paste(tile,((size-tile.width)//2,(size-tile.height)//2),mask)
+              out=Path("static/icons")/f"ema-{size}.png"
+              canvas.save(out,format="PNG",optimize=True)
+              print(out,out.stat().st_size,"bytes")
+          PY
+      - name: Commit real binary PNG icons to the same release branch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add static/icons/ema-192.png static/icons/ema-512.png
+          if git diff --cached --quiet; then
+            echo "EMA icons already current"
+          else
+            git commit -m "assets(pwa): use Emma illustration for native Android/iOS app icons"
+            git push origin HEAD:release/ema-mail-mobile-20261117
+          fi
