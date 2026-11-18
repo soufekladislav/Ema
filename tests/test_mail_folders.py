@@ -440,3 +440,85 @@ def test_trash_counts_distinguish_deleted_unread_and_visible(state, monkeypatch)
         assert state["visible_count"] == 4
         assert state["already_deleted"] == 2
         assert state["unread_count"] == 2
+
+
+
+def test_imap_flags_are_verified_using_byte_fetch_not_only_tuple_responses(state,monkeypatch):
+    from ema.mail_folders import set_server_flags
+    engine, box_id, folder_id = state
+    class FlagImap(FakeImap):
+        def __init__(self):
+            super().__init__(count=4)
+            self.remote_flags = {n: set([r"\Seen"]) for n in range(1,5)}
+        def uid(self,action,*args):
+            if action == "FETCH" and args[-1] == "(UID FLAGS)":
+                # Real imaplib returns *bytes*, not tuple, for non-literal FETCH.
+                uids = [int(n) for n in args[0].split(",")]
+                return "OK", [f'1 (UID {n} FLAGS ({" ".join(sorted(self.remote_flags[n]))}))'.encode()
+                              for n in uids]
+            if action == "STORE":
+                uids = [int(n) for n in args[0].split(",")]
+                flag = args[2].strip("()")
+                for n in uids:
+                    if args[1] == "+FLAGS.SILENT":
+                        self.remote_flags[n].add(flag)
+                    else:
+                        self.remote_flags[n].discard(flag)
+                return "OK",[b""]
+            return super().uid(action,*args)
+    imap=FlagImap()
+    monkeypatch.setattr("ema.mail_folders._connect",lambda box,key:imap)
+    with Session(engine) as db:
+        box=db.get(Mailbox,box_id)
+        discover_folders(db,box,"key")
+        source=db.get(MailFolder,folder_id)
+        fetch_folder_page(db,box,"key",source)
+        msg=db.scalar(select(MailMessage).where(MailMessage.folder_id == source.id,MailMessage.uid == 4))
+        assert msg is not None
+        assert set_server_flags(db,box,"key",[msg],"unread") == 1
+        assert r"\Seen" not in msg.flags
+        assert set_server_flags(db,box,"key",[msg],"star") == 1
+        assert r"\Flagged" in msg.flags
+        assert set_server_flags(db,box,"key",[msg],"read") == 1
+        assert r"\Seen" in msg.flags
+        assert r"\Flagged" in imap.remote_flags[4]
+        assert set_server_flags(db,box,"key",[msg],"unstar") == 1
+        assert r"\Flagged" not in msg.flags
+
+
+def test_server_flags_refuse_missing_uid_and_do_not_issue_store(state,monkeypatch):
+    from ema.mail_folders import set_server_flags
+    engine, box_id, folder_id = state
+    class Missing(FakeImap):
+        def uid(self,action,*args):
+            if action == "FETCH" and args[-1] == "(UID FLAGS)":
+                return "OK",[b"1 (UID 999 FLAGS (\\Seen))"]
+            if action == "STORE":
+                raise AssertionError("MUST NOT STORE with invalid UID")
+            return super().uid(action,*args)
+    imap=Missing()
+    monkeypatch.setattr("ema.mail_folders._connect",lambda box,key:imap)
+    with Session(engine) as db:
+        box=db.get(Mailbox,box_id)
+        discover_folders(db,box,"key")
+        source=db.get(MailFolder,folder_id)
+        fetch_folder_page(db,box,"key",source)
+        msg=db.scalar(select(MailMessage).where(MailMessage.folder_id == source.id,MailMessage.uid == 4))
+        with pytest.raises(MailError, match="Zprávy již"):
+            set_server_flags(db,box,"key",[msg],"read")
+
+
+def test_arbitrary_folder_move_stays_inside_same_mailbox(state,monkeypatch):
+    engine,box_id,folder_id=state
+    remote=FakeImap(count=5)
+    monkeypatch.setattr("ema.mail_folders._connect",lambda box,key:remote)
+    with Session(engine) as db:
+        box=db.get(Mailbox,box_id)
+        discover_folders(db,box,"key")
+        source=db.get(MailFolder,folder_id)
+        fetch_folder_page(db,box,"key",source)
+        target=db.scalar(select(MailFolder).where(MailFolder.mailbox_id == box.id,MailFolder.name == "Work"))
+        msg=db.scalar(select(MailMessage).where(MailMessage.folder_id==source.id,MailMessage.uid==4))
+        moved=move_message(db,box,"key",msg,"move",target_folder_id=target.id)
+        assert moved.id == target.id
+        assert remote.moved and remote.moved[0][1] == '"Work"'
