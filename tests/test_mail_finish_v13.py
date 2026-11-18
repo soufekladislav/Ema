@@ -131,3 +131,77 @@ def test_imap_check_readonly(monkeypatch):
     ok,_=verify_imap_connection(None,"key")
     assert ok
     assert calls == [("INBOX",True),"logout"]
+
+
+
+def test_send_composed_mime_contains_signature_then_original_last(monkeypatch):
+    from ema.mail_service import send_composed, encrypt_password
+    from cryptography.fernet import Fernet
+    saved = []
+    class SMTP:
+        def __init__(self,*args,**kwargs):pass
+        def __enter__(self):return self
+        def __exit__(self,*args):return False
+        def login(self,user,password):pass
+        def send_message(self,message,to_addrs=None):
+            saved.append(message)
+    monkeypatch.setattr("ema.mail_service.validate_mail_host",lambda host:host)
+    monkeypatch.setattr("ema.mail_service.smtplib.SMTP_SSL",SMTP)
+    key=Fernet.generate_key().decode()
+    box=SimpleNamespace(smtp_host="smtp.example.cz",smtp_port=465,
+                        username="sender@example.cz",smtp_username="",
+                        address="sender@example.cz",
+                        credential=encrypt_password("sample-password",key))
+    raw=send_composed(box,key,"buyer@example.cz","","","Re: Offer",
+                      "Děkuji",reply_message_id="<original@example.cz>",
+                      signature_html="<strong>EMA podpis</strong>",
+                      quoted_original="--- Původní zpráva ---\n> Zpráva")
+    assert len(saved)==1
+    message=saved[0]
+    plain=message.get_body(preferencelist=("plain",)).get_content()
+    rich=message.get_body(preferencelist=("html",)).get_content()
+    assert plain.index("Děkuji")<plain.index("EMA podpis")<plain.index("Původní zpráva")
+    assert rich.index("EMA podpis")<rich.index("Původní zpráva")
+    assert message["In-Reply-To"]=="<original@example.cz>"
+    assert b"EMA podpis" in raw
+
+
+def test_signature_save_is_sanitized_and_status_invalidates_when_smtp_changes(seeded,monkeypatch):
+    client=seeded
+    login(client,"owner")
+    box_id=client.ids_v1["box"]
+    org=client.application.ids["org"]
+    monkeypatch.setattr("ema.web.validate_mail_host",lambda host:host)
+    monkeypatch.setattr("ema.web.verify_imap_connection",lambda box,key:(True,"IMAP OK"))
+    monkeypatch.setattr("ema.web.verify_smtp_connection",lambda box,key:(True,"SMTP OK"))
+    path=f"/org/{org}/mail/{box_id}/edit"
+    result=client.post(path,data={
+        "csrf_token":csrf(client),"label":"Test mailbox",
+        "address":"test@example.cz","username":"test@example.cz",
+        "smtp_username":"smtp-test@example.cz",
+        "imap_host":"imap.example.cz","smtp_host":"smtp.example.cz",
+        "smtp_port":"465","password":"",
+        "signature_html":"<b>Podpis</b><script>bad()</script>",
+    })
+    assert result.status_code==302
+    with Session(client.application.extensions["ema_engine"]) as db:
+        box=db.get(Mailbox,box_id)
+        assert "<b>Podpis</b>" in box.signature_html
+        assert "<script" not in box.signature_html
+    client.post(f"/org/{org}/mail/{box_id}/check",data={"csrf_token":csrf(client)})
+    with Session(client.application.extensions["ema_engine"]) as db:
+        assert db.scalar(select(MailboxConnectionCheck).where(
+            MailboxConnectionCheck.mailbox_id==box_id)) is not None
+    page=client.get(path)
+    assert "IMAP OK".encode() in page.data and "SMTP OK".encode() in page.data
+    client.post(path,data={
+        "csrf_token":csrf(client),"label":"Test mailbox",
+        "address":"test@example.cz","username":"test@example.cz",
+        "smtp_username":"smtp-test@example.cz",
+        "imap_host":"imap.example.cz","smtp_host":"new-smtp.example.cz",
+        "smtp_port":"465","password":"",
+        "signature_html":"<b>Podpis</b>",
+    })
+    with Session(client.application.extensions["ema_engine"]) as db:
+        assert db.scalar(select(MailboxConnectionCheck).where(
+            MailboxConnectionCheck.mailbox_id==box_id)) is None
