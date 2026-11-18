@@ -126,30 +126,45 @@ def _safe_newsletter_styles(html_body):
         return ""
     result = []
     used = 0
+
+    def sanitize_rule(rule):
+        if rule.type != "qualified-rule":
+            return ""
+        selector = tinycss2.serialize(rule.prelude).strip()
+        if not selector or len(selector) > 240 or not re.fullmatch(
+                r"[A-Za-z0-9_\-.,#\s>*:+()\[\]=\"']+", selector):
+            return ""
+        declarations = tinycss2.serialize(rule.content)
+        if len(declarations) > 4000 or re.search(
+                r"(?i)url\s*\(|expression\s*\(|@import|@font-face|behaviou?r\s*:", declarations):
+            return ""
+        css = EMAIL_CSS.sanitize_css(declarations).strip()
+        return f"{selector}{{{css}}}" if css else ""
+
     for sheet in re.findall(r"<style\b[^>]*>([\s\S]*?)</style\s*>",
-                            html_body[:MAX_PREVIEW_BYTES], flags=re.I)[:5]:
+                            html_body[:MAX_PREVIEW_BYTES], flags=re.I)[:8]:
         try:
-            rules = tinycss2.parse_stylesheet(sheet[:32_768], skip_comments=True,
+            rules = tinycss2.parse_stylesheet(sheet[:64_000], skip_comments=True,
                                                skip_whitespace=True)
         except Exception:
             continue
         for rule in rules:
-            if rule.type != "qualified-rule":
-                continue  # @import, @font-face, @media, unsupported directives
-            selector = tinycss2.serialize(rule.prelude).strip()
-            if not selector or len(selector) > 240 or not re.fullmatch(
-                    r"[A-Za-z0-9_\-.,#\s>*:+()]+", selector):
-                continue
-            text = tinycss2.serialize(rule.content)
-            if len(text) > 3000 or re.search(
-                    r"(?i)url\s*\(|expression\s*\(|@|\\\\|behaviou?r\s*:", text):
-                continue
-            safe = EMAIL_CSS.sanitize_css(text).strip()
-            if not safe:
-                continue
-            candidate = f"{selector}{{{safe}}}"
-            if used + len(candidate) > 16_000:
-                return "\n".join(result)
+            candidate = sanitize_rule(rule)
+            if rule.type == "at-rule" and rule.lower_at_keyword == "media":
+                query = tinycss2.serialize(rule.prelude).strip().lower()
+                if (len(query) <= 90 and
+                        re.fullmatch(r"[a-z0-9\s():.,\-]+", query) and
+                        not any(x in query for x in ("url", "import", "supports"))):
+                    nested = tinycss2.parse_rule_list(rule.content or [],
+                                                        skip_whitespace=True, skip_comments=True)
+                    inner = "".join(sanitize_rule(item) for item in nested[:45])
+                    candidate = f"@media {query}{{{inner}}}" if inner else ""
+            if candidate:
+                if used + len(candidate) > 28000:
+                    return "\n".join(result)
+                used += len(candidate)
+                result.append(candidate)
+    return "\n".join(result)
             used += len(candidate)
             result.append(candidate)
     return "\n".join(result)
@@ -247,10 +262,12 @@ def make_preview(data, *, show_images=False, truncated=False):
             "<!doctype html><html><head><meta charset='utf-8'>"
             "<meta http-equiv='Content-Security-Policy' content=\""
             "default-src 'none'; script-src 'none'; connect-src 'none'; "
-            "style-src 'unsafe-inline'; img-src " + img_policy +
-            "; font-src 'none'; form-action 'none'; base-uri 'none'\">"
-            "<base target='_blank'><style>"
-            "body{font:14px/1.65 Arial,sans-serif;color:#172019;margin:16px;"
+            "style-src 'unsafe-inline' https://fonts.googleapis.com; img-src " + img_policy +
+            "; font-src https://fonts.gstatic.com; form-action 'none'; base-uri 'none'\">"
+            "<base target='_blank'>"
+            "<link rel='stylesheet' href='https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap'>"
+            "<style>"
+            "body{font-family:Poppins,Arial,sans-serif;font-size:14px;line-height:1.65;color:#172019;margin:16px;"
             "overflow-wrap:anywhere;}table{max-width:100%;border-collapse:collapse}"
             "td,th{padding:4px;}img{max-width:100%;height:auto}"
             "a{color:#436c08}blockquote{border-left:3px solid #b9d98e;padding-left:10px}"
