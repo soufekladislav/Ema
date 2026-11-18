@@ -183,8 +183,21 @@ def sync_inbox(db, box, key, limit=30):
                 pass
 
 
-def preview_message(box, row, key, *, show_images=False, folder_name="INBOX"):
-    """Fetch bounded MIME directly from IMAP; body and images stay out of MariaDB."""
+MAX_MAIL_MIME_BYTES = 30 * 1024 * 1024
+MIME_CHUNK_SIZE = 512 * 1024
+
+
+def fetch_message_mime(box, row, key, *, folder_name="INBOX", max_bytes=MAX_MAIL_MIME_BYTES):
+    """Fetch an explicit IMAP UID in bounded chunks, without saving MIME to SQL.
+
+    All downloaded data exists only in request memory. IMAP UIDVALIDITY protects
+    against using a recycled UID. A hard upper bound protects Passenger RAM.
+    """
+    if row.mailbox_id != box.id or row.moved:
+        raise MailError("Zpráva již neexistuje v této schránce")
+    if row.size_bytes and row.size_bytes > max_bytes:
+        raise MailError("Zpráva je větší než bezpečný limit 30 MB. "
+                        "Pro velmi velké přílohy použijte původní webmail.")
     client = _connect(box, key)
     try:
         typ, _ = client.select(quote_mailbox_name(folder_name), readonly=True)
@@ -192,23 +205,60 @@ def preview_message(box, row, key, *, show_images=False, folder_name="INBOX"):
             raise MailError("Nelze otevřít složku zprávy")
         current = client.response("UIDVALIDITY")[1]
         if not current or int(current[0]) != row.uidvalidity:
-            raise MailError("UID zprávy již neodpovídá serveru. Proveďte synchronizaci.")
-        # A partial RFC822 fetch supplies MIME headers too, unlike BODY.PEEK[TEXT].
-        # This caps decoded mail exposure and prevents large attachments being cached.
-        typ, data = client.uid("FETCH", str(row.uid), f"(BODY.PEEK[]<0.{MAX_PREVIEW_BYTES}>)")
-        if typ != "OK":
-            raise MailError("Obsah zprávy není dostupný na IMAP serveru")
-        buf = b"".join(item[1] for item in data if isinstance(item, tuple) and isinstance(item[1], bytes))
-        if not buf:
-            raise MailError("IMAP nevrátil obsah zprávy")
-        return make_preview(buf[:MAX_PREVIEW_BYTES], show_images=show_images,
-                            truncated=(row.size_bytes or 0) > MAX_PREVIEW_BYTES)
+            raise MailError("UID zprávy se na serveru změnilo. Nejdříve obnovte složku.")
+        payload = bytearray()
+        offset = 0
+        while offset < max_bytes:
+            length = min(MIME_CHUNK_SIZE, max_bytes - offset)
+            status, response = client.uid("FETCH", str(row.uid),
+                                          f"(BODY.PEEK[]<{offset}.{length}>)")
+            if status != "OK":
+                raise MailError("IMAP server odmítl načíst obsah zprávy")
+            parts = [item for item in response or [] if isinstance(item, tuple)
+                     and len(item) > 1 and isinstance(item[1], bytes)]
+            if len(parts) != 1:
+                raise MailError("IMAP server vrátil neúplný obsah zprávy")
+            prefix, chunk = parts[0]
+            match = re.search(rb"\bUID\s+(\d+)\b", prefix if isinstance(prefix, bytes) else b"", re.I)
+            if match and int(match.group(1)) != row.uid:
+                raise MailError("IMAP odpověď se netýká vybrané zprávy")
+            if not chunk or len(chunk) > length:
+                raise MailError("IMAP server nevrátil očekávaný rozsah zprávy")
+            payload.extend(chunk)
+            offset += len(chunk)
+            if len(chunk) < length:
+                break
+            if row.size_bytes and offset >= row.size_bytes:
+                break
+        if row.size_bytes and len(payload) < row.size_bytes:
+            raise MailError("IMAP nevrátil celou zprávu. Přílohy nebyly zpřístupněny.")
+        if len(payload) >= max_bytes and (not row.size_bytes or row.size_bytes > len(payload)):
+            raise MailError("Zpráva překračuje bezpečný limit 30 MB")
+        return bytes(payload)
+    except MailError:
+        raise
+    except Exception:
+        raise MailError("Načtení MIME z IMAP selhalo. Zkuste znovu po obnovení schránky.") from None
     finally:
         try:
             client.logout()
         except Exception:
             pass
 
+
+def preview_message(box, row, key, *, show_images=False, folder_name="INBOX"):
+    """Safe MIME preview; decode only in request memory, never in MariaDB."""
+    raw = fetch_message_mime(box, row, key, folder_name=folder_name)
+    return make_preview(raw, show_images=show_images)
+
+
+def download_message_attachment(box, row, key, part_index, *, folder_name="INBOX"):
+    """Return one user-requested MIME part, never persisted; strict index bounds."""
+    from .mail_render import extract_attachment
+    if not isinstance(part_index, int) or part_index < 0 or part_index > 99:
+        raise MailError("Neplatný identifikátor přílohy")
+    raw = fetch_message_mime(box, row, key, folder_name=folder_name)
+    return extract_attachment(raw, part_index)
 
 
 def _parse_addresses(value, *, required=False):
