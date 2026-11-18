@@ -529,3 +529,46 @@ def test_arbitrary_folder_move_stays_inside_same_mailbox(state,monkeypatch):
         moved=move_message(db,box,"key",msg,"move",target_folder_id=target.id)
         assert moved.id == target.id
         assert remote.moved and remote.moved[0][1] == '"Work"'
+
+
+
+def test_trash_refuses_changed_uid_membership_even_when_count_and_max_match(state, monkeypatch):
+    """Same count/max is not a safe identity check for permanent deletion."""
+    engine, box_id, _ = state
+    class ChangedUids(FakeImap):
+        def __init__(self):
+            super().__init__(count=3)
+            self.live_uids = {1, 3, 4}
+        def uid(self,action,*args):
+            if action == "SEARCH":
+                return "OK", [b" ".join(str(n).encode()
+                                          for n in sorted(self.live_uids))]
+            if action == "STORE":
+                raise AssertionError("Must not mark anything Deleted after UID change")
+            return super().uid(action,*args)
+    fake = ChangedUids()
+    monkeypatch.setattr("ema.mail_folders._connect", lambda box,key:fake)
+    with Session(engine) as db:
+        box=db.get(Mailbox,box_id)
+        discover_folders(db,box,"key")
+        trash=special_folder(db,box,"trash")
+        snapshot=preview_trash_all(db,box,"key",trash)
+        assert snapshot["count"]==3 and snapshot["max_uid"]==4
+        fake.live_uids={2,3,4}
+        with pytest.raises(MailError,match="Počet nebo UID"):
+            empty_trash_all(db,box,"key",trash,snapshot)
+        assert not fake.deleted and fake.full_expunge==0
+
+
+def test_trash_rejects_inbox_even_if_stale_list_flag_says_trash(state, monkeypatch):
+    engine,box_id,inbox_id=state
+    fake=FakeImap(count=3)
+    monkeypatch.setattr("ema.mail_folders._connect", lambda box,key:fake)
+    with Session(engine) as db:
+        box=db.get(Mailbox,box_id)
+        folder=db.get(MailFolder,inbox_id)
+        folder.special_use=r"\Trash"
+        db.commit()
+        with pytest.raises(MailError,match="Příchozí poštu"):
+            preview_trash_all(db,box,"key",folder)
+        assert not fake.deleted and not fake.full_expunge
