@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="icon" type="image/png" href="{{ url_for('static', filename='icons/ema-192.png') }}">
+  <link rel="icon" type="image/png" href="https://www.freshcrackers.cz/wp-content/uploads/2023/10/Fresh-Crackers-Logo.png">
   <link rel="apple-touch-icon" href="https://www.freshcrackers.cz/wp-content/uploads/2026/10/fresh-hub.png">
   <link rel="manifest" href="{{ url_for('pwa_manifest') }}">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -23,6 +23,8 @@
   <script src="{{ url_for('static', filename='pwa-install-v2.js') }}" defer></script>
   <script src="{{ url_for('static', filename='mail-ui.js') }}" defer></script>
   <script src="{{ url_for('static', filename='mail-pager-v11.js') }}" defer></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='mail-actions-v12.css') }}">
+  <script src="{{ url_for('static', filename='mail-actions-v12.js') }}" defer></script>
 </head>
 <body class="ema-screen-{{ section|default('other') }}">
 {% if me is defined and me %}
