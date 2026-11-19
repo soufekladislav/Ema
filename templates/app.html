@@ -26,6 +26,18 @@
           <button class="btn" type="submit">Vybrat</button>
         </form>
       </div>
+      <nav class="ema-thread-history" aria-label="Historie rozhovorů">
+        <div class="ema-thread-history-head"><strong>Rozhovory</strong><span>{{ assistant_threads|length }}</span></div>
+        <div class="ema-thread-history-list">
+          {% for item in assistant_threads %}
+            <a class="ema-thread-link {{ 'active' if current_thread and current_thread.id == item.id else '' }}"
+               href="{{ url_for('home', project=selected_project.id, thread=item.id) if selected_project else url_for('home', thread=item.id) }}">
+              {{ item.title }}
+            </a>
+          {% else %}<small>První rozhovor teprve založíš.</small>{% endfor %}
+        </div>
+        <a class="btn ema-thread-new" href="{{ url_for('home', project=selected_project.id, new=1) if selected_project else url_for('home', new=1) }}">+ Nový rozhovor</a>
+      </nav>
       <div class="ema-assistant-thread" aria-live="polite">
         {% for item in assistant_turns %}
           <article class="ema-assistant-message {{ 'from-me' if item.role == 'user' else 'from-ema' }}">
@@ -42,10 +54,12 @@
         {% endfor %}
       </div>
       <div class="ema-chat-compose-wrap">
-        {% if not ai_ready %}<p class="ema-ai-notice"><strong>AI zatím není připojena.</strong> Správce musí povolit účet a nastavit přístupový klíč Fresh AI Engine. Historii původních projektových poznámek to neovlivňuje.</p>{% endif %}
+        {% if not ai_ready %}<p class="ema-ai-notice"><strong>AI zatím není připojena.</strong> Správce musí v Superadminu uložit a ověřit klíč Fresh AI Engine. Historii původních projektových poznámek to neovlivňuje.</p>{% endif %}
         <form class="ema-chat-compose" method="post" action="{{ url_for('ask_assistant') }}">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <input type="hidden" name="project_id" value="{{ selected_project.id if selected_project else '' }}">
+          <input type="hidden" name="thread_id" value="{{ current_thread.id if current_thread else '' }}">
+          <input type="hidden" name="nonce" value="{{ new_nonce() }}">
           <label class="sr-only" for="ema-user-message">Zpráva pro Emu</label>
           <textarea id="ema-user-message" name="body" rows="3" maxlength="4000" placeholder="{{ 'Zeptej se Emy na projekt ' ~ selected_project.name ~ '…' if selected_project else 'Na čem bychom dnes měli pracovat?…' }}" required {{ 'disabled' if not ai_ready else '' }}></textarea>
           <button class="btn primary" type="submit" {{ 'disabled' if not ai_ready else '' }}>Odeslat Emě</button>
