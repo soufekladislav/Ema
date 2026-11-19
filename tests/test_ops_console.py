@@ -18,6 +18,9 @@ def test_protected_manifest_requires_superadmin_or_bearer(web_client):
     login(client, "owner")
     assert client.get("/superadmin").status_code == 403
     assert client.get("/internal/ops/manifest").status_code == 403
+    with client.session_transaction() as sess:
+        csrf_token = sess["csrf"]
+    assert client.post("/logout", data={"csrf_token":csrf_token}).status_code == 302
     login(client, "admin")
     response = client.get("/internal/ops/manifest")
     assert response.status_code == 200
