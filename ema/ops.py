@@ -166,7 +166,11 @@ def collect_ops(db, root, environment=None):
     stamp = _utc(now())
     health = {"status": "unknown", "missing_tables": [], "missing_columns": [],
               "migration_required": False}
-    stats = {}
+    stats = {name: None for name in (
+        "users", "organizations", "projects", "crm_companies",
+        "crm_contacts", "opportunities", "tasks", "mailboxes",
+        "indexed_mail_headers", "outbound_attempts",
+    )}
     mailbox = {"total": None, "sync_error": None, "not_synced": None,
                "last_success_at": None, "connection_checked": None,
                "imap_failed": None, "smtp_failed": None}
