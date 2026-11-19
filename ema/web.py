@@ -513,7 +513,7 @@ def create_app(test_config=None):
             if active_thread.project_id != pid:
                 abort(404)
         else:
-            active_thread = threads[0] if threads else None
+            active_thread = None if request.args.get("new") == "1" else (threads[0] if threads else None)
         turns = assistant_thread_messages(active_thread) if active_thread else []
         visible = base_context()["accessible_projects"]
         try:
@@ -2213,7 +2213,7 @@ def create_app(test_config=None):
     @admin_required
     def test_intelligence_key():
         row = engine_connector()
-        if not row:
+        if not row or not row.secret_ciphertext:
             flash("Nejdřív ulož klíč aplikace EMA.", "error")
             return redirect(url_for("superadmin") + "#ops-intelligence")
         try:
@@ -2236,12 +2236,14 @@ def create_app(test_config=None):
         if request.form.get("confirm") != "disconnect":
             abort(400)
         row = engine_connector()
-        if row:
-            g.db.delete(row)
-            audit("ai.connector.disconnected", "ema", None)
-            g.db.commit()
-        # Explicit disconnected state must not silently enable an old .env key.
-        app.config["EMA_AI_ENGINE_API_KEY"] = ""
+        if row is None:
+            row = AiEngineConnector(id=1, secret_ciphertext="")
+            g.db.add(row)
+        row.secret_ciphertext, row.state = "", "disconnected"
+        row.http_status, row.checked_at, row.updated_at = None, None, now()
+        audit("ai.connector.disconnected", "ema", None)
+        g.db.commit()
+        # The tombstone blocks old .env fallback even after Passenger restart.
         flash("Konektor odpojen. Starší nastavení v .env je potřeba případně odstranit.", "success")
         return redirect(url_for("superadmin") + "#ops-intelligence")
 
@@ -2258,7 +2260,7 @@ def create_app(test_config=None):
         # Shared DB storage cannot be accurately attributed per tenant.
         connector = engine_connector()
         ai_status = {
-            "configured": bool(connector or app.config["EMA_AI_ENGINE_API_KEY"]),
+            "configured": bool((connector and connector.secret_ciphertext) or app.config["EMA_AI_ENGINE_API_KEY"]),
             "source": "superadmin" if connector else ("environment" if app.config["EMA_AI_ENGINE_API_KEY"] else "none"),
             "state": connector.state if connector else ("legacy_env_unverified" if app.config["EMA_AI_ENGINE_API_KEY"] else "disconnected"),
             "checked_at": connector.checked_at if connector else None,
