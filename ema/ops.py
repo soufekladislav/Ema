@@ -14,7 +14,7 @@ import secrets
 
 from sqlalchemy import func, inspect, select, text
 
-from .models import (Base, Audit, Company, Contact, Mailbox,
+from .models import (Base, Audit, AIEngineConnection, Company, Contact, Mailbox,
                      MailboxConnectionCheck, MailMessage, Opportunity,
                      OpsIncident, OpsJobRun, OpsDeployment, Organization, Outbound,
                      Project, Task, User, now)
@@ -171,6 +171,7 @@ def collect_ops(db, root, environment=None):
         "crm_contacts", "opportunities", "tasks", "mailboxes",
         "indexed_mail_headers", "outbound_attempts",
     )}
+    intelligence = {"configured": False, "verified": False, "checked_at": None, "check_status": "not_configured"}
     mailbox = {"total": None, "sync_error": None, "not_synced": None,
                "last_success_at": None, "connection_checked": None,
                "imap_failed": None, "smtp_failed": None}
@@ -204,6 +205,15 @@ def collect_ops(db, root, environment=None):
             ("indexed_mail_headers", MailMessage), ("outbound_attempts", Outbound),
         ):
             stats[label] = _safe_count(db, model, present)
+        if "ai_engine_connections" in present:
+            connection = db.get(AIEngineConnection, 1)
+            if connection is not None:
+                intelligence = {
+                    "configured": bool(connection.encrypted_key),
+                    "verified": bool(connection.verified),
+                    "checked_at": _utc(connection.checked_at),
+                    "check_status": connection.check_status,
+                }
         if "mailboxes" in present:
             mailbox["total"] = stats["mailboxes"]
             mailbox["sync_error"] = int(db.scalar(select(func.count()).select_from(Mailbox)
@@ -255,6 +265,7 @@ def collect_ops(db, root, environment=None):
         "database": health,
         "counts": stats,
         "mail": mailbox,
+        "intelligence": intelligence,
         "sync_jobs": jobs,
         "recorded_deployments": deployments,
         "recent_incidents": incidents,
