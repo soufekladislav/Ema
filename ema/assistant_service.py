@@ -34,7 +34,7 @@ def run_assistant(*, key, base_url, user_id, project_id, question, projects, sel
     payload = {
         "source": "ema",
         "operation": "assistant.project.chat",
-        "task_type": "general",
+        "task_type": "chat",
         "quality": "balanced",
         "user_id": f"ema-user-{user_id}",
         "project_id": str(project_id) if project_id else None,
