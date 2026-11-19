@@ -359,6 +359,19 @@
       <p class="ema-ops-warning" role="status">Server neobsahuje čitelná Git metadata ani zadané EMA_DEPLOY_SHA. Nelze pravdivě tvrdit, která verze je nasazená. Otisky souborů jsou k dispozici v chráněném manifestu.</p>
       {% endif %}
       <p class="small muted">SHA samo neznamená shodu s GitHubem. Porovnání aktuálního obsahu GitHubu a serveru musí provést externí kontrola.</p>
+      <h3>Skutečně zaznamenaná nasazení</h3>
+      {% if ops.recorded_deployments %}
+      <div class="table-wrap">
+        <table><thead><tr><th>Čas</th><th>SHA / zdroj</th><th>Otisk</th></tr></thead>
+        <tbody>{% for item in ops.recorded_deployments %}
+          <tr><td>{{ item.recorded_at[:16].replace('T',' ') if item.recorded_at else '—' }}</td>
+          <td><code>{{ item.sha[:9] if item.sha else 'Neznámé' }}</code><small>{{ item.source }} {{ item.label }}</small></td>
+          <td><code title="{{ item.fingerprint }}">{{ item.fingerprint[:12] }}…</code></td></tr>
+        {% endfor %}</tbody></table>
+      </div>
+      {% else %}
+        <p class="ema-ops-warning">Ještě není zaznamenané žádné skutečné nasazení. Po dokončení instalace na Exon spustit příkaz <code>ops-record-deploy</code>.</p>
+      {% endif %}
     </section>
 
     <section class="card panel ema-ops-panel" id="ops-database">
