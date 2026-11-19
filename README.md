@@ -2,7 +2,7 @@
 
 AI obchodní a projektová asistentka Fresh Crackers: **chat-first pracovní prostor pro firmy, klienty, e-maily, obchodní příležitosti, nabídky a projekty.**
 
-**Stav produktu (19. 11. 2026):** EMA běží na `hub.freshcrackers.cz`, ale přesná revize nasazená na Exonu **zatím není ověřená**. Uživatel otestoval poštovní rozhraní a potvrdil **úspěšnou instalaci PWA**. **Jednotný release EMA Mail V1.3 je sloučený do `main`** (squash commit `5653800`, [PR #84](https://github.com/soufekladislav/Ema/pull/84)); poslední společná vývojová větev prošla **109 automatickými testy**. V1.3 obsahuje šest finálních úprav pošty. Vyžaduje jednorázovou aditivní migraci `upgrade-db` pro výsledky IMAP/SMTP. PWA instalace neznamená automatické potvrzení všech mailových operací, Gmail OAuth, bezpečného vysypání Koše ani kompletní mobilní přejímky. **[Podrobný aktuální stav a plán](docs/EMA_STATUS_2026-11-18.md)**.
+**Stav produktu (19. 11. 2026):** EMA běží na `hub.freshcrackers.cz`, ale přesná revize nasazená na Exonu **zatím není ověřená**. **Ops V1 je v GitHub main** ([PR #85](https://github.com/soufekladislav/Ema/pull/85), automatické testy prošly), ovšem produkční nasazení vyžaduje zálohu, aditivní migraci a restart Passenger. Uživatel otestoval poštovní rozhraní a potvrdil **úspěšnou instalaci PWA**. **Jednotný release EMA Mail V1.3 je sloučený do `main`** (squash commit `5653800`, [PR #84](https://github.com/soufekladislav/Ema/pull/84)); poslední společná vývojová větev prošla **109 automatickými testy**. V1.3 obsahuje šest finálních úprav pošty. Vyžaduje jednorázovou aditivní migraci `upgrade-db` pro výsledky IMAP/SMTP. PWA instalace neznamená automatické potvrzení všech mailových operací, Gmail OAuth, bezpečného vysypání Koše ani kompletní mobilní přejímky. **[Podrobný aktuální stav a plán](docs/EMA_STATUS_2026-11-18.md)**.
 
 ## Zdrojový kód a instalace
 
@@ -13,6 +13,7 @@ AI obchodní a projektová asistentka Fresh Crackers: **chat-first pracovní pro
 - [PR #77 – sloučený poštovní základ](https://github.com/soufekladislav/Ema/pull/77)
 - [PR #81 – sloučený EMA Mail V1.2 + mobil + PWA, provozní přejímka zbývá](https://github.com/soufekladislav/Ema/pull/81)
 - **[PR #84 – sloučený EMA Mail V1.3 (šest závěrečných úprav)](https://github.com/soufekladislav/Ema/pull/84)**
+- **[PR #85 – Ops V1: Superadmin, chráněný manifest, skutečný release audit](https://github.com/soufekladislav/Ema/pull/85)**
 - **Potvrzená doména:** `hub.freshcrackers.cz`
 
 ## Dokumentace a řízení
