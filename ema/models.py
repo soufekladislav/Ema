@@ -149,6 +149,18 @@ class AssistantThread(Base):
     __table_args__ = (Index("ix_assistant_thread_user", "user_id", "updated_at"),)
 
 
+class AssistantSubmission(Base):
+    """One attempt per browser nonce; prevents duplicate billable requests."""
+    __tablename__ = "assistant_submissions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    thread_id: Mapped[int] = mapped_column(ForeignKey("assistant_threads.id", ondelete="CASCADE"), nullable=False)
+    nonce: Mapped[str] = mapped_column(String(80), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), default="running", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now, nullable=False)
+    __table_args__ = (Index("ix_assistant_submission_once", "user_id", "nonce", unique=True),)
+
+
 class AssistantTurn(Base):
     """Personal AI conversation. Kept separate from shared project/team notes."""
     __tablename__ = "assistant_turns"
