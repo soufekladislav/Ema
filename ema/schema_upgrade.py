@@ -1,6 +1,6 @@
 """Idempotent, additive schema upgrade for Ema pilot. Backup DB before running."""
 from sqlalchemy import inspect, text
-from .models import AssistantTurn, MailboxView, MailUserState, MailboxConnectionCheck, OpsIncident, OpsJobRun, OpsDeployment, Base
+from .models import AssistantTurn, AssistantThread, AiEngineConnector, MailboxView, MailUserState, MailboxConnectionCheck, OpsIncident, OpsJobRun, OpsDeployment, Base
 
 
 def upgrade_schema(engine):
@@ -9,15 +9,26 @@ def upgrade_schema(engine):
     if not inspector.has_table("users"):
         raise RuntimeError("Database is not initialized; run init-db first.")
     # New tables are created separately, never drop or rebuild existing tables.
-    Base.metadata.create_all(engine, tables=[AssistantTurn.__table__, MailboxView.__table__,
+    Base.metadata.create_all(engine, tables=[AssistantThread.__table__, AiEngineConnector.__table__, AssistantTurn.__table__, MailboxView.__table__,
                                                      MailUserState.__table__, MailboxConnectionCheck.__table__,
                                                      OpsIncident.__table__, OpsJobRun.__table__,
                                                      OpsDeployment.__table__], checkfirst=True)
     inspector = inspect(engine)
+    if inspector.has_table("assistant_turns"):
+        columns = {col["name"] for col in inspector.get_columns("assistant_turns")}
+        if "thread_id" not in columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE assistant_turns ADD COLUMN thread_id INTEGER NULL"))
+            applied_chat = ["assistant_turns.thread_id"]
+        else:
+            applied_chat = []
+    else:
+        applied_chat = []
+    inspector = inspect(engine)
     if not inspector.has_table("mailboxes"):
         raise RuntimeError("The mailboxes table is missing.")
     existing = {col["name"] for col in inspector.get_columns("mailboxes")}
-    applied = []
+    applied = list(applied_chat)
     with engine.begin() as conn:
         if "smtp_username" not in existing:
             conn.execute(text("ALTER TABLE mailboxes ADD COLUMN smtp_username VARCHAR(190) NOT NULL DEFAULT ''"))
