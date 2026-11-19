@@ -1,5 +1,5 @@
 /* EMA offline shell v2: never serve stale application JS/CSS, authenticated data stays network-only. */
-const VERSION = "ema-shell-20261119-original-ema";
+const VERSION = "ema-shell-20261119-ai-chat-v1";
 const SHELL = [
   "/static/offline.html",
   "/static/icons/ema-192.png",
