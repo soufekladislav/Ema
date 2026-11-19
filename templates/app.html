@@ -335,6 +335,44 @@
     </div>
   </div>
 
+  <section class="card panel ema-ops-panel ema-intelligence-settings" id="ops-intelligence">
+    <div class="ema-aside-top">
+      <div><span class="eyebrow">INTELIGENCE</span>
+        <h2>Fresh AI Engine · připojení Emy</h2>
+        <p>Jedno univerzální API pro Emu. Klíč zůstává šifrovaný na serveru, nikdy se nevkládá do HTML ani exportu.</p></div>
+      <span class="ema-ops-status {{ 'is-ok' if ai_settings and ai_settings.verified else 'is-warning' }}">
+        {{ 'Ověřeno' if ai_settings and ai_settings.verified else 'Nepřipojeno / neověřeno' }}
+      </span>
+    </div>
+    <div class="ema-ai-config-grid">
+      <form method="post" action="{{ url_for('intelligence_connect') }}" autocomplete="off">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label>API adresa (pevná, přes HTTPS)
+          <input value="https://aiengine.freshcrackers.cz" readonly>
+        </label>
+        <label>Samostatný API klíč aplikace EMA
+          <input type="password" name="api_key" minlength="20" maxlength="512"
+                 placeholder="{{ 'Vložit nový klíč pro nahrazení stávajícího' if ai_settings else 'Vlož klíč z AI Engine → API konektory' }}"
+                 autocomplete="new-password" required>
+        </label>
+        <button class="btn primary" type="submit">Bezpečně uložit klíč</button>
+        <small>Uložení zneplatní předchozí ověření, dokud neproběhne nový test. Aktuální klíč se nikde nezobrazuje.</small>
+      </form>
+      <div class="ema-intelligence-status">
+        <h3>Stav a ověření</h3>
+        <p>Stav: <strong>{{ 'Připojeno' if ai_settings and ai_settings.verified else 'Zatím neověřeno' }}</strong></p>
+        <p>Poslední ověření: <strong>{{ ai_settings.checked_at.strftime('%d.%m.%Y %H:%M') if ai_settings and ai_settings.checked_at else 'Neproběhlo' }}</strong></p>
+        <p>Výsledek: <strong>{{ ai_settings.check_status if ai_settings else 'Klíč není uložen' }}</strong></p>
+        <p class="small muted">Test provede jeden autorizovaný požadavek <code>POST /v1/engine/run</code>. Může spotřebovat kredity. Při timeoutu se automaticky neopakuje. Samotné <code>GET /v1/health</code> nepotvrzuje platnost klíče.</p>
+        <form method="post" action="{{ url_for('intelligence_verify') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="btn" type="submit" {{ 'disabled' if not ai_settings else '' }}>Ověřit spojení a kredity</button>
+        </form>
+        <a href="https://aiengine.freshcrackers.cz/account/developer-api"
+           target="_blank" rel="noopener noreferrer" class="small">Dokumentace Developer API</a>
+      </div>
+    </div>
+  </section>
   <div class="ema-ops-summary" aria-label="Zdraví aplikace">
     <article class="card metric">
       <span>Nasazený kód</span>
