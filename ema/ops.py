@@ -16,7 +16,7 @@ from sqlalchemy import func, inspect, select, text
 
 from .models import (Base, Audit, Company, Contact, Mailbox,
                      MailboxConnectionCheck, MailMessage, Opportunity,
-                     OpsIncident, OpsJobRun, Organization, Outbound,
+                     OpsIncident, OpsJobRun, OpsDeployment, Organization, Outbound,
                      Project, Task, User, now)
 
 
@@ -136,7 +136,7 @@ def collect_ops(db, root, environment=None):
     mailbox = {"total": None, "sync_error": None, "not_synced": None,
                "last_success_at": None, "connection_checked": None,
                "imap_failed": None, "smtp_failed": None}
-    jobs, incidents, audit = [], [], {"last_24h_events": None, "recent_actions": []}
+    jobs, incidents, deployments, audit = [], [], [], {"last_24h_events": None, "recent_actions": []}
     try:
         db.execute(text("SELECT 1"))
         inspector = inspect(db.get_bind())
@@ -186,6 +186,10 @@ def collect_ops(db, root, environment=None):
                          "finished_at": _utc(entry.finished_at),
                          "processed": int(entry.processed or 0),
                          "failed": int(entry.failed or 0)})
+        for entry in _latest(db, OpsDeployment, present, OpsDeployment.recorded_at, 12):
+            deployments.append({"sha": entry.sha or None, "source": entry.source,
+                                "fingerprint": entry.fingerprint,
+                                "label": entry.label, "recorded_at": _utc(entry.recorded_at)})
         for entry in _latest(db, OpsIncident, present, OpsIncident.occurred_at, 12):
             incidents.append({"request_id": entry.request_id, "endpoint": entry.endpoint,
                               "category": entry.category, "at": _utc(entry.occurred_at)})
@@ -214,6 +218,7 @@ def collect_ops(db, root, environment=None):
         "counts": stats,
         "mail": mailbox,
         "sync_jobs": jobs,
+        "recorded_deployments": deployments,
         "recent_incidents": incidents,
         "audit_summary": audit,
         "release_milestones": list(RELEASE_STEPS),
