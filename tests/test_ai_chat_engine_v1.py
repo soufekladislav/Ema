@@ -103,6 +103,9 @@ def test_unverified_saved_connector_never_bills_chat(web_client, monkeypatch):
     login(client,"admin")
     client.post("/superadmin/intelligence/connect",data={
         "csrf_token":csrf(client), "api_key":"connector-" + "a"*64})
+    with client.session_transaction() as sess:
+        token = sess["csrf"]
+    assert client.post("/logout", data={"csrf_token": token}).status_code == 302
     login(client,"owner")
     called=[]
     monkeypatch.setattr("ema.web.run_assistant",lambda **kwargs:called.append(kwargs))
