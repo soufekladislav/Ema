@@ -1,0 +1,50 @@
+/* EMA chat: minimal, responsive and consistent with Poppins / Fresh HUB */
+.ema-chat-fab{position:fixed;right:22px;bottom:21px;z-index:150;border:1px solid #99ba48;
+ background:#101812;color:#fff;display:flex;align-items:center;gap:9px;border-radius:48px;
+ padding:6px 17px 6px 6px;cursor:pointer;font:700 13px Poppins,sans-serif;
+ box-shadow:0 8px 30px #0003}
+.ema-chat-fab img{border-radius:50%;object-fit:cover}
+.ema-chat-backdrop{position:fixed;inset:0;background:#0008;z-index:159}
+.ema-global-chat{position:fixed;right:0;top:0;bottom:0;width:min(460px,100vw);z-index:160;
+ background:#f7f9f4;display:flex;flex-direction:column;transform:translateX(102%);
+ transition:transform .2s ease;box-shadow:-12px 0 35px #0003;
+ font-family:Poppins,sans-serif;color:#152017;visibility:hidden}
+.ema-global-chat.open{transform:translateX(0);visibility:visible}
+.ema-global-chat-head{padding:16px;background:#111914;color:white;display:flex;align-items:center;gap:12px}
+.ema-global-chat-head img{border-radius:50%;object-fit:cover}
+.ema-global-chat-head strong,.ema-global-chat-head small{display:block}
+.ema-global-chat-head small{opacity:.75;font-size:10px}
+.ema-global-chat-head button{margin-left:auto;color:#fff;background:none;border:0;font-size:25px;cursor:pointer}
+.ema-global-chat-controls{padding:10px 14px;display:flex;gap:7px;align-items:center;background:#edf3e8}
+.ema-global-chat-controls label{font-size:11px;font-weight:600}
+.ema-global-chat-controls select{min-width:0;flex:1;max-width:220px;font:12px Poppins,sans-serif;border:1px solid #ceddc6;border-radius:7px;padding:8px}
+.ema-global-chat-controls button{font:600 12px Poppins,sans-serif;cursor:pointer;border-radius:7px;border:1px solid #cbd9c4;background:white;padding:8px}
+.ema-global-chat-messages{padding:14px;flex:1;overflow-y:auto;min-height:0;display:flex;flex-direction:column;gap:12px}
+.ema-global-chat-bubble{max-width:93%;padding:11px 13px;border-radius:13px;border:1px solid #e2eade;background:#fff;overflow-wrap:anywhere;font-size:13px;white-space:pre-wrap}
+.ema-global-chat-bubble.user{align-self:flex-end;background:#eaf6d5;border-color:#bfda8e}
+.ema-global-chat-bubble small{display:block;color:#56704c;font-size:10px;margin-bottom:7px}
+.ema-global-chat-form{padding:12px 14px 8px;background:#fff;border-top:1px solid #dce6d6}
+.ema-global-chat-form textarea{width:100%;box-sizing:border-box;border:1px solid #d3dfcd;border-radius:8px;padding:10px;resize:vertical;font:13px Poppins,sans-serif}
+.ema-global-chat-actions{display:flex;align-items:center;justify-content:space-between;gap:10px;padding-top:7px}
+.ema-global-chat-actions span{font-size:11px;color:#516b47;line-height:1.4}
+.ema-global-chat-main-link{display:block;text-align:center;padding:9px;background:#fff;font-size:11px;color:#385e2e;text-decoration:underline}
+.ema-thread-history{margin:10px 12px;padding:11px;border-radius:10px;border:1px solid #e2eadb;background:#fafdf7}
+.ema-thread-history-head{display:flex;justify-content:space-between;gap:8px;font-size:12px;margin-bottom:8px}
+.ema-thread-history-list{display:flex;gap:6px;flex-wrap:wrap;max-height:110px;overflow-y:auto}
+.ema-thread-link{color:#4b6545;text-decoration:none;font-size:11px;background:#fff;border-radius:8px;padding:7px;border:1px solid #dce8d4}
+.ema-thread-link.active{background:#e6f3d0;border-color:#9ac158;font-weight:700}
+.ema-thread-new{font-size:11px!important;margin-top:9px}
+.ema-ai-config-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.ema-ai-config-grid form,.ema-intelligence-status{display:grid;gap:11px;align-content:start}
+.ema-ai-config-grid label{display:grid;gap:5px;font-size:12px;font-weight:600}
+.ema-ai-config-grid input{width:100%;padding:10px;border:1px solid #d5dfd0;border-radius:8px;box-sizing:border-box}
+.ema-intelligence-settings{width:100%}
+.ema-intelligence-status{background:#f6faf2;border-radius:10px;padding:14px}
+.ema-intelligence-status p{font-size:12px;margin:0}
+@media(max-width:760px){
+ .ema-chat-fab{right:12px;bottom:12px;padding:6px 10px 6px 6px}
+ .ema-chat-fab span{display:none}
+ .ema-global-chat{width:100vw}
+ .ema-ai-config-grid{grid-template-columns:1fr}
+ .ema-global-chat-messages{padding:9px}
+}
