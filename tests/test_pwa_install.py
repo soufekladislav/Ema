@@ -133,5 +133,5 @@ def test_updated_pwa_manifest_reuses_install_id_and_busts_icon_cache(web_client)
     assert all("ema-original-20261119" in x["src"] for x in manifest["icons"])
     assert all(x["src"].startswith("/static/icons/ema-") for x in manifest["icons"])
     worker = web_client.get("/service-worker.js").get_data(as_text=True)
-    assert "ema-shell-20261119-original-ema" in worker
+    assert "ema-shell-20261119-ai-chat-v1" in worker
     assert "ema-avatar.png" in worker and "ema-source.jpg" in worker
