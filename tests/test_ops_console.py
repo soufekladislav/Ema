@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ema.models import Audit, Base, Mailbox, OpsIncident, OpsJobRun
+from ema.models import Audit, Base, Mailbox, OpsIncident, OpsJobRun, OpsDeployment
 from ema.ops import code_identity, collect_ops, verify_bearer
 from tests.test_navigation import web_client, login
 
@@ -156,3 +156,32 @@ def test_unhandled_exception_stores_only_redacted_incident(web_client, monkeypat
         assert item.endpoint == "superadmin"
         assert item.category == "unexpected_error"
         assert not hasattr(item, "traceback") and not hasattr(item, "message")
+
+
+
+def test_actual_deployment_record_is_explicit_and_deduplicated(web_client):
+    client=web_client
+    runner=client.application.test_cli_runner()
+    first=runner.invoke(args=["ops-record-deploy","--label","main"])
+    assert first.exit_code == 0, first.output
+    assert "Nasazení zaznamenáno" in first.output
+    again=runner.invoke(args=["ops-record-deploy","--label","main"])
+    assert again.exit_code == 0
+    assert "již je evidován" in again.output
+    with Session(client.application.extensions["ema_engine"]) as db:
+        records=db.scalars(select(OpsDeployment)).all()
+        assert len(records)==1
+        assert records[0].fingerprint
+    login(client,"admin")
+    manifest=client.get("/internal/ops/manifest").json
+    assert len(manifest["recorded_deployments"])==1
+    assert manifest["recorded_deployments"][0]["fingerprint"] == records[0].fingerprint
+    assert "Skutečně zaznamenaná nasazení".encode() in client.get("/superadmin").data
+
+
+def test_deployment_record_rejects_freeform_sensitive_label(web_client):
+    runner=web_client.application.test_cli_runner()
+    bad=runner.invoke(args=["ops-record-deploy","--label","secret@example.cz"])
+    assert bad.exit_code != 0
+    with Session(web_client.application.extensions["ema_engine"]) as db:
+        assert db.scalar(select(OpsDeployment.id)) is None
