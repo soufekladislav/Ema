@@ -21,6 +21,7 @@ Surový token uložit pouze do trezoru, otisk přidat na Exon do .env. Po nastav
 - counts: agregované počty projektů, organizací, uživatelů, CRM, úkolů, schránek a indexovaných hlaviček pošty, bez identifikace klientů
 - mail: poslední synchonizace, počty chyb, poslední IMAP/SMTP kontroly; žádné automatické přihlášení k IMAP při čtení manifestu
 - sync_jobs: reálně zapsané provedené pokusy od nasazení evidence; nedokazuje, že je v cPanelu nakonfigurován cron
+- recorded_deployments: pouze skutečně spuštěný záznam instalace na Exonu, s otiskem obsahu a časem; GitHub PR žádný záznam nevytváří
 - recent_incidents: pouze ID, čas, endpoint a bezpečná kategorie nových HTTP chyb
 - audit_summary: počty auditovaných akcí za posledních 24 hodin, bez textu auditovaných záznamů
 - release_milestones: popis změn V1.2/V1.3/Ops V1; neoznačuje je za provozně potvrzené
@@ -34,11 +35,17 @@ Surový token uložit pouze do trezoru, otisk přidat na Exon do .env. Po nastav
 ```bash
 python -m flask --app 'ema.web:create_app' upgrade-db
 ```
-Přidávají se pouze nové tabulky ops_incidents a ops_job_runs; data pošty ani CRM se nepřepisují. Pokud migrace neproběhne, manifest zobrazí chybějící tabulky a nedojde k automatickému mazání či opravě.
-4. Restartovat Passenger. Otevřít /health, /superadmin a /internal/ops/manifest pod přihlášeným superadminem. Zkontrolovat HTTP 403 při nepřihlášeném přístupu i se špatným tokenem.
-5. Při nasazování bez .git lze správcem zadat EMA_DEPLOY_SHA a EMA_DEPLOYED_AT, při každém vydání znovu. Chybějící nebo neověřený SHA se nezastírá; souborové otisky zůstávají dostupné pro porovnání.
-6. Pro ověření synchronizace testovací pošty lze jednorázově spustit sync-mailboxes --limit 1 a pak zkontrolovat skutečný záznam v admin konzoli. Samostatně ověřit cron v cPanelu.
-7. Provést provozní přejímku poštovních funkcí a teprve poté změnit stav Issues. Vysypání produkčního Koše zde netestovat.
+Přidávají se pouze nové tabulky ops_incidents, ops_job_runs a ops_deployments; data pošty ani CRM se nepřepisují. Pokud migrace neproběhne, manifest zobrazí chybějící tabulky a nedojde k automatickému mazání či opravě.
+4. Po aktualizaci aplikace a migraci zaznamenat skutečně přítomný kód:
+```bash
+python -m flask --app 'ema.web:create_app' ops-record-deploy --label main
+```
+Tento krok zjišťuje SHA a SHA-256 otisky přímo z právě nasazených souborů. Nedokončené vydání se nesmí označit za nasazené. Nový záznam nevzniká při opakování stejného fingerprintu.
+
+5. Restartovat Passenger. Otevřít /health, /superadmin a /internal/ops/manifest pod přihlášeným superadminem. Zkontrolovat HTTP 403 při nepřihlášeném přístupu i se špatným tokenem.
+6. Při nasazování bez .git lze správcem zadat EMA_DEPLOY_SHA a EMA_DEPLOYED_AT, při každém vydání znovu. Chybějící nebo neověřený SHA se nezastírá; souborové otisky zůstávají dostupné pro porovnání.
+7. Pro ověření synchronizace testovací pošty lze jednorázově spustit sync-mailboxes --limit 1 a pak zkontrolovat skutečný záznam v admin konzoli. Samostatně ověřit cron v cPanelu.
+8. Provést provozní přejímku poštovních funkcí a teprve poté změnit stav Issues. Vysypání produkčního Koše zde netestovat.
 
 ## Bezpečnost a rollback
 Každý neočekávaný HTTP 500 má anonymizované ID a endpoint. Detaily jsou jen v chráněných serverových logách; do manifestu se nevkládají e-maily, SQL, hesla ani obsah zpráv. Nové záznamy se sbírají až od aktivace funkce.
