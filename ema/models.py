@@ -148,6 +148,17 @@ class AssistantThread(Base):
     __table_args__ = (Index("ix_assistant_thread_user_date", "user_id", "updated_at"),)
 
 
+class AssistantMessageAttempt(Base):
+    """One attempt per nonce: no automatic second billable call on timeout."""
+    __tablename__ = "assistant_message_attempts"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    nonce: Mapped[str] = mapped_column(String(80), unique=True, nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    thread_id: Mapped[int] = mapped_column(ForeignKey("assistant_threads.id", ondelete="CASCADE"), nullable=False)
+    state: Mapped[str] = mapped_column(String(24), default="pending", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now, nullable=False)
+
+
 class AssistantTurn(Base):
     """Personal AI conversation. Kept separate from shared project/team notes."""
     __tablename__ = "assistant_turns"
