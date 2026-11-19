@@ -408,6 +408,19 @@ def create_app(test_config=None):
         session.clear()
         return redirect(url_for("login"))
 
+    def assistant_schema_ready():
+        try:
+            tables = inspect(g.db.get_bind())
+            if not all(tables.has_table(name) for name in
+                       ("assistant_threads", "assistant_submissions", "ai_engine_connectors",
+                        "assistant_turns")):
+                return False
+            fields = {c["name"] for c in tables.get_columns("assistant_turns")}
+            return "thread_id" in fields
+        except Exception:
+            g.db.rollback()
+            return False
+
     def parse_assistant_project(value):
         raw = str(value or "").strip()
         if not raw:
@@ -436,6 +449,8 @@ def create_app(test_config=None):
             g.db.commit()
 
     def list_assistant_threads(project_id):
+        if not assistant_schema_ready():
+            return []
         restore_legacy_threads(project_id)
         return g.db.scalars(select(AssistantThread).where(
             AssistantThread.user_id == g.user.id,
@@ -445,6 +460,8 @@ def create_app(test_config=None):
             .limit(60)).all()
 
     def assistant_thread_or_404(thread_id):
+        if not assistant_schema_ready():
+            abort(503, description="Nejprve proveďte upgrade-db.")
         thread = g.db.get(AssistantThread, thread_id)
         if not thread or thread.user_id != g.user.id or thread.archived:
             abort(404)
@@ -464,6 +481,8 @@ def create_app(test_config=None):
     @app.get("/assistant/threads")
     @login_required
     def assistant_threads_list():
+        if not assistant_schema_ready():
+            return jsonify({"error": "Databázové schéma chatu čeká na upgrade-db."}), 503
         pid, _ = parse_assistant_project(request.args.get("project_id"))
         return jsonify({"threads": [thread_json(t) for t in list_assistant_threads(pid)]})
 
@@ -479,6 +498,8 @@ def create_app(test_config=None):
     @app.post("/assistant/threads")
     @login_required
     def assistant_thread_create():
+        if not assistant_schema_ready():
+            return jsonify({"error": "Databázové schéma chatu čeká na upgrade-db."}), 503
         pid, _ = parse_assistant_project(request.form.get("project_id"))
         thread = AssistantThread(user_id=g.user.id, project_id=pid, title="Nová konverzace")
         g.db.add(thread)
@@ -1541,6 +1562,8 @@ def create_app(test_config=None):
             flash(message, "error")
             url = url_for("home", thread=thread_id) if thread_id else url_for("home")
             return redirect(url)
+        if not assistant_schema_ready():
+            return fail("Chat čeká na jednorázovou databázovou migraci upgrade-db.")
         try:
             key = engine_key()
         except EngineConfigError as exc:
@@ -2171,6 +2194,9 @@ def create_app(test_config=None):
         return response
 
     def engine_connector():
+        # Prevent code-first Exon deploy from making the whole Superadmin 500.
+        if not inspect(g.db.get_bind()).has_table("ai_engine_connectors"):
+            return None
         return g.db.get(AiEngineConnector, 1)
 
     def engine_key():
@@ -2189,6 +2215,9 @@ def create_app(test_config=None):
     @app.post("/superadmin/intelligence/key")
     @admin_required
     def save_intelligence_key():
+        if not assistant_schema_ready():
+            flash("Nejdřív spusť upgrade-db. Klíč nebyl uložen.", "error")
+            return redirect(url_for("superadmin") + "#ops-intelligence")
         key = request.form.get("engine_api_key", "").strip()
         if not key:
             flash("Zadej nový přístupový klíč. Prázdné pole stávající klíč nemění.", "error")
@@ -2212,6 +2241,9 @@ def create_app(test_config=None):
     @app.post("/superadmin/intelligence/verify")
     @admin_required
     def test_intelligence_key():
+        if not assistant_schema_ready():
+            flash("Nejdřív proveď upgrade-db. Ověření se nespustilo.", "error")
+            return redirect(url_for("superadmin") + "#ops-intelligence")
         row = engine_connector()
         if not row or not row.secret_ciphertext:
             flash("Nejdřív ulož klíč aplikace EMA.", "error")
@@ -2233,6 +2265,9 @@ def create_app(test_config=None):
     @app.post("/superadmin/intelligence/disconnect")
     @admin_required
     def disconnect_intelligence():
+        if not assistant_schema_ready():
+            flash("Nejdřív proveď upgrade-db.", "error")
+            return redirect(url_for("superadmin") + "#ops-intelligence")
         if request.form.get("confirm") != "disconnect":
             abort(400)
         row = engine_connector()
