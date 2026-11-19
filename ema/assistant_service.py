@@ -82,12 +82,17 @@ def run_assistant(*, key, base_url, user_id, project_id, question, projects, sel
     except (ValueError, UnicodeDecodeError):
         raise AssistantError("AI Engine vrátil neplatný formát odpovědi.") from None
     if not isinstance(result, dict) or result.get("status") != "completed":
-        raise AssistantError("AI Engine úlohu nedokončil. " + str(result.get("error") or "")[:150] if isinstance(result, dict) else "AI Engine nevrátil výsledek.")
+        raise AssistantError("AI Engine úlohu nedokončil. Zkontroluj dostupnost a kredity; požadavek automaticky neopakujeme.")
     output = result.get("output")
     if not isinstance(output, str):
         output = result.get("result")
     if isinstance(output, dict):
-        output = json.dumps(output, ensure_ascii=False)
+        for name in ("answer", "text", "message", "content"):
+            if isinstance(output.get(name), str):
+                output = output[name]
+                break
+        else:
+            output = json.dumps(output, ensure_ascii=False)
     if not isinstance(output, str) or not output.strip():
         raise AssistantError("AI Engine nevrátil textovou odpověď.")
     return output[:12000].strip()
