@@ -273,6 +273,18 @@ class OpsIncident(Base):
     __table_args__ = (Index("ix_ops_incidents_time", "occurred_at"),)
 
 
+class OpsDeployment(Base):
+    """Actual operator-recorded deployment fingerprint, never a GitHub merge."""
+    __tablename__ = "ops_deployments"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    sha: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    source: Mapped[str] = mapped_column(String(32), default="unknown", nullable=False)
+    fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    label: Mapped[str] = mapped_column(String(120), default="", nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime, default=now, nullable=False)
+    __table_args__ = (Index("ix_ops_deployments_time", "recorded_at"),)
+
+
 class OpsJobRun(Base):
     """Non-sensitive summary of explicit CLI sync job execution."""
     __tablename__ = "ops_job_runs"
