@@ -36,13 +36,13 @@ Surový token uložit pouze do trezoru, otisk přidat na Exon do .env. Po nastav
 python -m flask --app 'ema.web:create_app' upgrade-db
 ```
 Přidávají se pouze nové tabulky ops_incidents, ops_job_runs a ops_deployments; data pošty ani CRM se nepřepisují. Pokud migrace neproběhne, manifest zobrazí chybějící tabulky a nedojde k automatickému mazání či opravě.
-4. Po aktualizaci aplikace a migraci zaznamenat skutečně přítomný kód:
+4. Nejprve restartovat Passenger a ověřit, že odpovídá skutečně nová aplikace (Superadmin a chráněný /internal/ops/manifest). Až po kontrole běžící aplikace zaznamenat nasazení:
 ```bash
 python -m flask --app 'ema.web:create_app' ops-record-deploy --label main
 ```
 Tento krok zjišťuje SHA a SHA-256 otisky přímo z právě nasazených souborů. Nedokončené vydání se nesmí označit za nasazené. Nový záznam nevzniká při opakování stejného fingerprintu.
 
-5. Restartovat Passenger. Otevřít /health, /superadmin a /internal/ops/manifest pod přihlášeným superadminem. Zkontrolovat HTTP 403 při nepřihlášeném přístupu i se špatným tokenem.
+5. Ověřit /health a HTTP 403 při nepřihlášeném přístupu i se špatným tokenem. Pokud restart ještě nebyl úspěšný, nasazení NEZAZNAMENÁVAT.
 6. Při nasazování bez .git lze správcem zadat EMA_DEPLOY_SHA a EMA_DEPLOYED_AT, při každém vydání znovu. Chybějící nebo neověřený SHA se nezastírá; souborové otisky zůstávají dostupné pro porovnání.
 7. Pro ověření synchronizace testovací pošty lze jednorázově spustit sync-mailboxes --limit 1 a pak zkontrolovat skutečný záznam v admin konzoli. Samostatně ověřit cron v cPanelu.
 8. Provést provozní přejímku poštovních funkcí a teprve poté změnit stav Issues. Vysypání produkčního Koše zde netestovat.
