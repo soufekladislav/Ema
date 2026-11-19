@@ -458,7 +458,9 @@ def create_app(test_config=None):
         requested = request.args.get("thread", "")
         if requested and (not requested.isdigit() or not any(t.id == int(requested) for t in threads)):
             abort(403)
-        current_thread = next((t for t in threads if str(t.id) == requested), None) if requested else (threads[0] if threads else None)
+        current_thread = (None if request.args.get("new") == "1" else
+                          next((t for t in threads if str(t.id) == requested), None)
+                          if requested else (threads[0] if threads else None))
         turns = g.db.scalars(select(AssistantTurn).where(
             AssistantTurn.user_id == g.user.id, AssistantTurn.thread_id == current_thread.id
         ).order_by(AssistantTurn.id.desc()).limit(60)).all() if current_thread else []
