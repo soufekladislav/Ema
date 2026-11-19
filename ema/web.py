@@ -2037,10 +2037,12 @@ def create_app(test_config=None):
     def superadmin():
         users = g.db.scalars(select(User).order_by(User.id.desc()).limit(100)).all()
         orgs = g.db.scalars(select(Organization).order_by(Organization.id.desc()).limit(100)).all()
-        total_messages = g.db.scalar(select(func.count(MailMessage.id)))
-        total_mailboxes = g.db.scalar(select(func.count(Mailbox.id)))
-        # Shared DB storage cannot be accurately attributed per tenant.
+        # A partial schema upgrade must not make the console itself crash
+        # before it can display which diagnostic tables are missing.
         ops = collect_ops(g.db, Path(__file__).resolve().parent.parent)
+        total_messages = ops["counts"].get("indexed_mail_headers")
+        total_mailboxes = ops["counts"].get("mailboxes")
+        # Shared DB storage cannot be accurately attributed per tenant.
         return render("superadmin", users=users, all_orgs=orgs, total_messages=total_messages,
                       total_mailboxes=total_mailboxes, ops=ops,
                       database_size="Není dostupné bez samostatného měření")
