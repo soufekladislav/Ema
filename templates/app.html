@@ -307,19 +307,210 @@
 <div class="card panel"><h3>Připojit poštovní schránku</h3><p class="small muted">Heslo/token se ukládá výhradně šifrovaně (Fernet). Poštovní server musí mít platný TLS certifikát.</p><form class="formstack" method="post" action="{{ url_for('add_mailbox', org_id=active_org.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label>Označení schránky<input name="label" required maxlength="120" placeholder="Obchod / info@..."></label><label>E-mail<input type="email" name="address" required></label><label>Login IMAP<input name="username" required></label><label>Login SMTP (pokud se liší)<input name="smtp_username" placeholder="Jinak použijeme IMAP login"></label><label>IMAP server (TLS 993)<input name="imap_host" required placeholder="imap.example.cz"></label><label>SMTP server<input name="smtp_host" required placeholder="smtp.example.cz"></label><label>SMTP port<select name="smtp_port"><option value="465">465 – SSL</option><option value="587">587 – STARTTLS</option></select></label><label>Heslo / aplikační heslo<input name="password" type="password" required autocomplete="new-password"></label><button class="btn primary">Uložit schránku</button></form></div></div>
 <div class="card panel"><h3>Připojené schránky</h3>{% for b in boxes %}<div class="list-row"><span><strong>{{ b.label }}</strong> · {{ b.address }}</span><div class="ema-card-actions"><span class="status">{{ b.status }}</span><a class="btn" href="{{ url_for('edit_mailbox', org_id=active_org.id, box_id=b.id) }}">Upravit</a><a class="btn" href="{{ url_for('mail_hub', box=b.id) }}">Otevřít</a></div></div>{% else %}<p class="muted">Zatím žádné schránky</p>{% endfor %}</div>{% else %}<div class="card panel">Nemáte oprávnění měnit firemní účty a schránky.</div>{% endif %}
 {% elif section == 'superadmin' %}
-<div class="page-head"><div><span class="eyebrow">Platforma</span><h1>Superadmin konzole</h1><p>Provoz, účty, pracovní prostory a základní diagnostika — bez čtení klientské pošty.</p></div></div>
-<div class="card panel ema-pwa-admin-card">
-  <h3>EMA PWA – instalace a manifest</h3>
-  <p>Kontrola instalovatelnosti v aktuálním prohlížeči. Pokud Chrome nevydá instalační dialog, zkontrolujeme HTTPS, manifest, ikony a Service Worker. Diagnostika neobsahuje poštu ani přístupové údaje.</p>
-  <div class="ema-card-actions">
-    <button type="button" class="btn" data-ema-pwa-diagnose>Otestovat PWA</button>
-    <a class="btn" href="{{ url_for('pwa_manifest') }}" target="_blank" rel="noopener noreferrer">Zobrazit manifest</a>
-    <a class="btn" href="{{ url_for('pwa_worker') }}" target="_blank" rel="noopener noreferrer">Service Worker</a>
+<div class="ema-ops" id="ema-ops-console">
+  <div class="page-head ema-ops-heading">
+    <div>
+      <span class="eyebrow">Platforma · provoz a bezpečnost</span>
+      <h1>Administrace Emy</h1>
+      <p>Skutečné údaje z běžící aplikace, databáze a posledních úloh. Bez čtení obsahu zákaznické pošty.</p>
+    </div>
+    <div class="ema-ops-heading-actions">
+      <a class="btn primary" href="{{ url_for('ops_manifest', download=1) }}" aria-label="Stáhnout chráněný provozní manifest">↓ Stáhnout manifest</a>
+      <a class="btn" href="{{ url_for('ops_manifest') }}" target="_blank" rel="noopener noreferrer">JSON přehled</a>
+      <a class="btn" href="{{ url_for('superadmin') }}">↻ Obnovit</a>
+    </div>
   </div>
+
+  <div class="ema-ops-summary" aria-label="Zdraví aplikace">
+    <article class="card metric">
+      <span>Nasazený kód</span>
+      <strong>{{ ops.deployed_code.deployed_commit[:9] if ops.deployed_code.deployed_commit else 'Neověřeno' }}</strong>
+      <small>{{ 'SHA z Git checkoutu' if ops.deployed_code.commit_source == 'git_checkout' else ('SHA uvedené správcem' if ops.deployed_code.commit_source == 'operator_declared' else 'Chybí Git metadata i EMA_DEPLOY_SHA') }}</small>
+    </article>
+    <article class="card metric">
+      <span>Databáze</span>
+      <strong>{{ {'ok':'V pořádku','warning':'Migrace','error':'Chyba'}.get(ops.database.status,'Neznámý') }}</strong>
+      <small>{{ 'Aktivní SQL spojení a kompletní schéma' if ops.database.status == 'ok' else 'Zkontrolujte schéma a upgrade-db' }}</small>
+    </article>
+    <article class="card metric">
+      <span>Poslední synchronizace</span>
+      <strong>{{ ops.mail.last_success_at[:16].replace('T',' ') if ops.mail.last_success_at else 'Bez údaje' }}</strong>
+      <small>Neznamená potvrzení běhu serverového cronu</small>
+    </article>
+    <article class="card metric">
+      <span>Incidenty</span>
+      <strong>{{ ops.recent_incidents|length }}</strong>
+      <small>Posledních 12 záznamů od aktivace diagnostiky</small>
+    </article>
+  </div>
+
+  <div class="ema-ops-grid">
+    <section class="card panel ema-ops-panel" id="ops-release">
+      <h2>Verze a nasazení</h2>
+      <p class="small muted">Zdroj pravdy o serveru je běžící kód, nikoli poslední commit v GitHubu.</p>
+      <dl class="ema-ops-data">
+        <div><dt>Git commit</dt><dd><code>{{ ops.deployed_code.deployed_commit or 'Nelze zjistit' }}</code></dd></div>
+        <div><dt>Původ SHA</dt><dd>{{ ops.deployed_code.commit_source }}</dd></div>
+        <div><dt>Datum nasazení</dt><dd>{{ ops.deployed_code.deployed_at or 'Není evidováno' }}</dd></div>
+        <div><dt>Otisk skutečných souborů</dt><dd><code title="{{ ops.deployed_code.source_fingerprint }}">{{ ops.deployed_code.source_fingerprint[:18] }}…</code></dd></div>
+        <div><dt>Souborová kontrola</dt><dd>{{ 'Chybí ' ~ (ops.deployed_code.missing_files|length) ~ ' souborů' if ops.deployed_code.missing_files else 'Všechny kontrolované soubory existují' }}</dd></div>
+      </dl>
+      {% if not ops.deployed_code.deployed_commit %}
+      <p class="ema-ops-warning" role="status">Server neobsahuje čitelná Git metadata ani zadané EMA_DEPLOY_SHA. Nelze pravdivě tvrdit, která verze je nasazená. Otisky souborů jsou k dispozici v chráněném manifestu.</p>
+      {% endif %}
+      <p class="small muted">SHA samo neznamená shodu s GitHubem. Porovnání aktuálního obsahu GitHubu a serveru musí provést externí kontrola.</p>
+    </section>
+
+    <section class="card panel ema-ops-panel" id="ops-database">
+      <h2>Databáze a migrace</h2>
+      <div class="ema-ops-status {{ 'is-ok' if ops.database.status == 'ok' else 'is-warning' }}">
+        {{ 'Schéma zkontrolováno' if ops.database.status == 'ok' else 'Potřebuje kontrolu' }}
+      </div>
+      {% if ops.database.missing_tables %}
+      <p><strong>Chybějící tabulky:</strong></p>
+      <p class="small">{{ ops.database.missing_tables|join(', ') }}</p>
+      {% endif %}
+      {% if ops.database.missing_columns %}
+      <p><strong>Chybějící sloupce:</strong></p>
+      <p class="small">{{ ops.database.missing_columns|join(', ') }}</p>
+      {% endif %}
+      {% if ops.database.status == 'ok' %}
+        <p class="small">Všechny očekávané tabulky a kontrolované sloupce jsou přítomné.</p>
+      {% else %}
+        <p class="ema-ops-warning">Před nasazením další změny zkontrolujte migraci <code>upgrade-db</code>. Konzole nic nemaže ani neopravuje automaticky.</p>
+      {% endif %}
+      <p class="small muted">Databázová velikost: {{ database_size }}</p>
+    </section>
+
+    <section class="card panel ema-ops-panel" id="ops-mail">
+      <h2>Poštovní konektory</h2>
+      <div class="ema-ops-mini-metrics">
+        <div><strong>{{ ops.mail.total if ops.mail.total is not none else '—' }}</strong><span>Schránek</span></div>
+        <div><strong>{{ ops.mail.sync_error if ops.mail.sync_error is not none else '—' }}</strong><span>Chyba synchronizace</span></div>
+        <div><strong>{{ ops.mail.not_synced if ops.mail.not_synced is not none else '—' }}</strong><span>Nesynchronizováno</span></div>
+        <div><strong>{{ ops.mail.connection_checked if ops.mail.connection_checked is not none else '—' }}</strong><span>Test spojení proveden</span></div>
+      </div>
+      <p class="small">Neúspěšné poslední testy: IMAP <strong>{{ ops.mail.imap_failed if ops.mail.imap_failed is not none else 'neověřeno' }}</strong>,
+         SMTP <strong>{{ ops.mail.smtp_failed if ops.mail.smtp_failed is not none else 'neověřeno' }}</strong>.</p>
+      <p class="small muted">Žádný živý IMAP/SMTP test se pouhým otevřením konzole nespouští. Diagnostika čte pouze metadata posledních testů.</p>
+    </section>
+
+    <section class="card panel ema-ops-panel" id="ops-summary">
+      <h2>Data platformy</h2>
+      <div class="ema-ops-mini-metrics">
+        <div><strong>{{ ops.counts.users if ops.counts.users is not none else '—' }}</strong><span>Účty</span></div>
+        <div><strong>{{ ops.counts.organizations if ops.counts.organizations is not none else '—' }}</strong><span>Firmy</span></div>
+        <div><strong>{{ ops.counts.projects if ops.counts.projects is not none else '—' }}</strong><span>Projekty</span></div>
+        <div><strong>{{ ops.counts.crm_contacts if ops.counts.crm_contacts is not none else '—' }}</strong><span>Kontakty</span></div>
+        <div><strong>{{ ops.counts.tasks if ops.counts.tasks is not none else '—' }}</strong><span>Úkoly</span></div>
+        <div><strong>{{ ops.counts.indexed_mail_headers if ops.counts.indexed_mail_headers is not none else '—' }}</strong><span>Hlavičky pošty</span></div>
+      </div>
+      <p class="small muted">Souhrnné počty bez jmen, e-mailových adres, obsahu zpráv či příloh.</p>
+    </section>
+  </div>
+
+  <div class="ema-ops-grid">
+    <section class="card panel ema-ops-panel" id="ops-jobs">
+      <h2>Fronty a úlohy</h2>
+      {% if ops.sync_jobs %}
+        <div class="table-wrap"><table><thead><tr><th>Úloha</th><th>Stav</th><th>Spuštění</th><th>Výsledek</th></tr></thead>
+          <tbody>{% for job in ops.sync_jobs %}
+            <tr><td>{{ job.name }}</td><td>{{ job.status }}</td>
+                <td>{{ job.started_at[:16].replace('T',' ') if job.started_at else '—' }}</td>
+                <td>{{ job.processed }} zpracováno · {{ job.failed }} chyb</td></tr>
+          {% endfor %}</tbody></table></div>
+      {% else %}
+        <p class="ema-ops-warning">Zatím není uložen žádný běh serverové úlohy. To samo nepotvrzuje ani nevyvrací nastavení cronu.</p>
+      {% endif %}
+      <p class="small muted">Zobrazuje doložené pokusy od instalace evidence. Plánovač cronu na Exonu je nutné samostatně ověřit.</p>
+    </section>
+
+    <section class="card panel ema-ops-panel" id="ops-errors">
+      <h2>Poslední chyby</h2>
+      {% if ops.recent_incidents %}
+      <div class="table-wrap"><table><thead><tr><th>ID</th><th>Endpoint</th><th>Čas</th></tr></thead>
+        <tbody>{% for incident in ops.recent_incidents %}
+          <tr><td><code>{{ incident.request_id }}</code></td><td>{{ incident.endpoint }}</td>
+              <td>{{ incident.at[:16].replace('T',' ') if incident.at else '—' }}</td></tr>
+        {% endfor %}</tbody></table></div>
+      {% else %}
+        <p class="small muted">Žádný uložený incident od zapnutí evidence, nebo ještě není dostupná tabulka. Historické serverové logy tím nejsou zpětně načtené.</p>
+      {% endif %}
+      <p class="small muted">Pouze ID, endpoint a čas. Traceback, hesla, SQL parametry a e-mailový obsah nejsou součástí manifestu.</p>
+    </section>
+  </div>
+
+  <div class="ema-ops-grid">
+    <section class="card panel ema-ops-panel" id="ops-audit">
+      <h2>Aktivita a audit</h2>
+      <p>Za 24 hodin: <strong>{{ ops.audit_summary.last_24h_events if ops.audit_summary.last_24h_events is not none else 'Neověřeno' }}</strong> auditovaných událostí</p>
+      {% for item in ops.audit_summary.recent_actions %}
+        <div class="ema-ops-action"><span>{{ item.action }}</span><strong>{{ item.count }}</strong></div>
+      {% else %}
+        <p class="small muted">Bez dostupných auditovaných událostí.</p>
+      {% endfor %}
+    </section>
+    <section class="card panel ema-ops-panel" id="ops-access">
+      <h2>Chráněný manifest</h2>
+      <p>Adresa <code>/internal/ops/manifest</code> vyžaduje přihlášeného superadmina nebo samostatný read-only Bearer token v HTTP hlavičce. <strong>Samotný odkaz nestačí.</strong></p>
+      <p class="small muted">Pro Karla nebo externí AI použijte integraci s bezpečným úložištěm tokenů. Token nesmí být v URL, GitHubu, screenshotu ani běžném chatu.</p>
+      <div class="ema-card-actions">
+        <a class="btn" href="{{ url_for('ops_manifest') }}" target="_blank" rel="noopener">Otevřít manifest</a>
+        <a class="btn" href="{{ url_for('ops_manifest', download=1) }}">Stáhnout JSON</a>
+      </div>
+      <p class="small muted">Stav GitHub Issues se z manifestu neodhaduje; GitHub zůstává zdrojem stavu vývoje.</p>
+    </section>
+  </div>
+
+  <details class="card panel ema-ops-advanced">
+    <summary>Technická diagnostika PWA</summary>
+    <p>Instalace a service worker jsou oddělené od provozního manifestu.</p>
+    <div class="ema-card-actions">
+      <button type="button" class="btn" data-ema-pwa-diagnose>Otestovat PWA</button>
+      <a class="btn" href="{{ url_for('pwa_manifest') }}" target="_blank" rel="noopener">PWA manifest</a>
+      <a class="btn" href="{{ url_for('pwa_worker') }}" target="_blank" rel="noopener">Service Worker</a>
+    </div>
+  </details>
+
+  <details class="card panel ema-ops-advanced" id="ops-accounts">
+    <summary>Uživatelé a správa účtů</summary>
+    <div class="ema-ops-admin-section">
+      <form method="post" class="ema-ops-create-user" action="{{ url_for('add_user') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label>Jméno<input name="name" required></label>
+        <label>E-mail<input name="email" type="email" required></label>
+        <label>Dočasné heslo (min. 12 znaků)<input name="password" type="password" required minlength="12" autocomplete="new-password"></label>
+        <button class="btn primary">Vytvořit účet</button>
+      </form>
+      <p class="small muted">Registrace i pozvánky jsou nadále oddělené úkoly; vytváření účtu není automatické.</p>
+      <div class="table-wrap">
+        <table><thead><tr><th>Jméno</th><th>E-mail</th><th>Role</th><th>Stav</th><th>Akce</th></tr></thead>
+          <tbody>{% for u in users %}<tr><td>{{ u.name }}</td><td>{{ u.email }}</td>
+            <td>{{ 'superadmin' if u.superadmin else 'uživatel' }}</td>
+            <td>{{ 'aktivní' if u.active else 'pozastaven' }}</td>
+            <td>{% if u.id != me.id %}
+              <form method="post" action="{{ url_for('toggle_user', user_id=u.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn small-btn">{{ 'Pozastavit' if u.active else 'Aktivovat' }}</button>
+              </form>{% endif %}</td></tr>{% endfor %}</tbody>
+        </table>
+      </div>
+    </div>
+  </details>
+
+  <details class="card panel ema-ops-advanced" id="ops-organizations">
+    <summary>Firmy a pracovní prostory</summary>
+    <div class="ema-ops-admin-section">
+      {% for o in all_orgs %}
+        <div class="list-row"><strong>{{ o.name }}</strong>
+          <form method="post" action="{{ url_for('toggle_org', org_id=o.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="btn small-btn">{{ 'Pozastavit' if o.active else 'Aktivovat' }}</button>
+          </form>
+        </div>
+      {% else %}<p>Bez firem.</p>{% endfor %}
+    </div>
+  </details>
 </div>
-<div class="grid metrics"><div class="card metric"><span>Účty</span><strong>{{ users|length }}</strong></div><div class="card metric"><span>Firmy</span><strong>{{ all_orgs|length }}</strong></div><div class="card metric"><span>Schránky</span><strong>{{ total_mailboxes }}</strong></div><div class="card metric"><span>Indexované e-maily</span><strong>{{ total_messages }}</strong></div></div>
-<div class="notice">Fyzická velikost databáze: {{ database_size }}. Pro přesné měření produkční MariaDB bude potřeba samostatný monitorovací modul. Údaje za firmy jsou logické počty, nikoliv fyzická spotřeba.</div>
-<div class="grid two-col"><div class="card panel"><h3>Vytvořit uživatelský účet</h3><form method="post" class="formstack" action="{{ url_for('add_user') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label>Jméno<input name="name" required></label><label>E-mail<input name="email" type="email" required></label><label>Dočasné heslo (min. 12 znaků)<input name="password" type="password" required minlength="12" autocomplete="new-password"></label><button class="btn primary">Vytvořit účet</button></form><p class="small muted">Pilotní účty vytváří superadmin. Pozvánky a reset hesla budou přidány další etapou.</p></div><div class="card panel"><h3>Firmy a provoz</h3>{% for o in all_orgs %}<div class="list-row"><strong>{{ o.name }}</strong><form method="post" action="{{ url_for('toggle_org', org_id=o.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn small-btn">{{ 'Pozastavit' if o.active else 'Aktivovat' }}</button></form></div>{% else %}<p>Bez firem</p>{% endfor %}</div></div>
-<div class="card panel"><h3>Uživatelské účty</h3><div class="table-wrap"><table><thead><tr><th>Jméno</th><th>E-mail</th><th>Role</th><th>Stav</th><th>Akce</th></tr></thead><tbody>{% for u in users %}<tr><td>{{ u.name }}</td><td>{{ u.email }}</td><td>{{ 'superadmin' if u.superadmin else 'uživatel' }}</td><td>{{ 'aktivní' if u.active else 'pozastaven' }}</td><td>{% if u.id != me.id %}<form method="post" action="{{ url_for('toggle_user', user_id=u.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn small-btn">{{ 'Pozastavit' if u.active else 'Aktivovat' }}</button></form>{% endif %}</td></tr>{% endfor %}</tbody></table></div></div>
 {% endif %}
 {% endblock %}
