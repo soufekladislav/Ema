@@ -125,12 +125,37 @@ class ChatMessage(Base):
     __table_args__ = (Index("ix_chat_scope", "organization_id", "project_id", "id"),)
 
 
+class AiEngineConnector(Base):
+    """Platform-wide Ema-only connector; encrypted at rest, never exposed in UI."""
+    __tablename__ = "ai_engine_connectors"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    secret_ciphertext: Mapped[str] = mapped_column(Text, nullable=False)
+    state: Mapped[str] = mapped_column(String(24), default="untested", nullable=False)
+    checked_at: Mapped[datetime | None] = mapped_column(DateTime)
+    http_status: Mapped[int | None] = mapped_column(Integer)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=now, nullable=False)
+
+
+class AssistantThread(Base):
+    """Private personal conversation with independently verified project context."""
+    __tablename__ = "assistant_threads"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
+    title: Mapped[str] = mapped_column(String(160), default="Nová konverzace", nullable=False)
+    archived: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=now, nullable=False)
+    __table_args__ = (Index("ix_assistant_thread_user", "user_id", "updated_at"),)
+
+
 class AssistantTurn(Base):
     """Personal AI conversation. Kept separate from shared project/team notes."""
     __tablename__ = "assistant_turns"
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
+    thread_id: Mapped[int | None] = mapped_column(ForeignKey("assistant_threads.id", ondelete="SET NULL"))
     role: Mapped[str] = mapped_column(String(16), nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
