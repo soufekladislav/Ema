@@ -24,6 +24,8 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='mail-layout-v13.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='mail-final-v13.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='ops-console-v1.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='ema-chat-drawer-v1.css') }}">
+  <script src="{{ url_for('static', filename='ema-chat-drawer-v1.js') }}" defer></script>
   <script src="{{ url_for('static', filename='mail-layout-v13.js') }}" defer></script>
   <script src="{{ url_for('static', filename='mail-pager-v11.js') }}" defer></script>
   <link rel="stylesheet" href="{{ url_for('static', filename='mail-actions-v12.css') }}">
@@ -94,6 +96,40 @@
     </main>
   </div>
 </div>
+  <button type="button" class="ema-chat-fab" data-ema-chat-open
+          aria-controls="ema-global-chat" aria-expanded="false"
+          aria-label="Otevřít chat s Emou">
+    <img src="{{ url_for('static', filename='icons/ema-avatar.png') }}" width="40" height="40" alt="">
+    <span>Chat s Emou</span>
+  </button>
+  <div class="ema-chat-backdrop" data-ema-chat-backdrop hidden></div>
+  <aside id="ema-global-chat" class="ema-global-chat" aria-label="Chat s Emou"
+        data-ema-chat-drawer data-csrf="{{ csrf_token() }}"
+        data-project="{{ selected_project.id if selected_project else '' }}" aria-hidden="true">
+    <header class="ema-global-chat-head">
+      <img src="{{ url_for('static', filename='icons/ema-avatar.png') }}" alt="" width="43" height="43">
+      <div><strong>Ema · asistentka</strong><small>Stejná historie jako na nástěnce</small></div>
+      <button type="button" data-ema-chat-close aria-label="Zavřít chat">×</button>
+    </header>
+    <div class="ema-global-chat-controls">
+      <label for="ema-global-chat-thread">Historie rozhovorů</label>
+      <select id="ema-global-chat-thread" data-ema-chat-threads aria-label="Vyber rozhovor">
+        <option value="">Načítám...</option>
+      </select>
+      <button type="button" data-ema-chat-new>+ Nový</button>
+    </div>
+    <div class="ema-global-chat-messages" data-ema-chat-messages aria-live="polite"></div>
+    <form class="ema-global-chat-form" data-ema-chat-form>
+      <label for="ema-global-chat-message" class="sr-only">Zpráva Emě</label>
+      <textarea id="ema-global-chat-message" data-ema-chat-input rows="3" maxlength="4000"
+                placeholder="Napiš Emě, co potřebuješ..." required></textarea>
+      <div class="ema-global-chat-actions">
+        <span data-ema-chat-status role="status"></span>
+        <button type="submit" class="btn primary" data-ema-chat-send>Odeslat</button>
+      </div>
+    </form>
+    <a class="ema-global-chat-main-link" href="{{ url_for('home') }}">Otevřít velký chat a projekty</a>
+  </aside>
   <dialog id="ema-install-dialog" class="ema-install-dialog" aria-labelledby="ema-install-heading">
     <div class="ema-install-dialog-head">
       <h2 id="ema-install-heading">EMA do mobilu</h2>
