@@ -22,7 +22,7 @@ def test_mobile_drawer_and_ema_artwork_on_all_primary_pages(web_client):
         assert 'id="ema-app-main-nav"' in body, path
         assert 'id="ema-appmenu-close"' in body, path
         assert 'id="ema-appmenu-backdrop"' in body, path
-        assert "2026/10/fresh-hub.png" in body, path
+        assert "icons/ema-source.jpg" in body, path
         assert "Chat / Nástěnka" in body, path
         assert "Databáze / CRM" in body, path
 
@@ -71,7 +71,7 @@ def test_mobile_shell_is_shared_by_secondary_company_and_project_pages(web_clien
         assert b'id="ema-app-main-nav"' in result.data, path
         assert b'id="ema-mobile-nav-toggle"' in result.data, path
         assert b'id="ema-appmenu-backdrop"' in result.data, path
-        assert b"2026/10/fresh-hub.png" in result.data, path
+        assert b"icons/ema-source.jpg" in result.data, path
 
 
 
