@@ -1475,43 +1475,132 @@ def create_app(test_config=None):
                           account_mailboxes=sorted(boxes, key=lambda b: b.address.lower()),
                           editable_mailbox_ids={b.id for b in boxes if b.organization_id in admin_org_ids})
 
-    @app.post("/assistant")
-    @login_required
-    def ask_assistant():
-        allowed = {e.strip().lower() for e in app.config["EMA_AI_ALLOWED_EMAILS"].split(",") if e.strip()}
-        if not app.config["EMA_AI_ENGINE_API_KEY"] or g.user.email.lower() not in allowed:
-            flash("AI chat ještě není pro tento účet připojen. Správce musí nastavit Fresh AI Engine.", "error")
-            return redirect(url_for("home"))
-        pid = positive_id("project_id")
-        if field("project_id") and not pid:
-            abort(400, description="Neplatné ID projektu")
+    def send_ema_turn(thread, question, nonce):
+        # Record a unique attempt before a single billable request. Never repeat
+        # an uncertain request when the browser double-submits or times out.
+        if not re.fullmatch(r"[A-Za-z0-9_-]{16,80}", nonce):
+            abort(400, description="Neplatné ID zprávy")
+        attempt = AssistantMessageAttempt(nonce=nonce, user_id=g.user.id,
+                                          thread_id=thread.id, state="pending")
+        g.db.add(attempt)
+        try:
+            g.db.commit()
+        except IntegrityError:
+            g.db.rollback()
+            raise AssistantError("Tento požadavek již byl přijat; automatické opakování není povoleno.")
+        pid = thread.project_id
         selected = project_or_403(pid) if pid else None
-        question = required("body", 4000)
-        scope = AssistantTurn.project_id == pid if pid else AssistantTurn.project_id.is_(None)
         recent = g.db.scalars(select(AssistantTurn).where(
-            AssistantTurn.user_id == g.user.id, scope
+            AssistantTurn.user_id == g.user.id, AssistantTurn.thread_id == thread.id
         ).order_by(AssistantTurn.id.desc()).limit(8)).all()
         visible = base_context()["scoped_projects"]
         tasks_for_context = g.db.scalars(select(Task).where(
             Task.project_id == pid, Task.organization_id == selected.organization_id
         ).order_by(Task.id.desc()).limit(30)).all() if selected else []
-        g.db.add(AssistantTurn(user_id=g.user.id, project_id=pid, role="user", body=question))
+        g.db.add(AssistantTurn(user_id=g.user.id, thread_id=thread.id, project_id=pid,
+                               role="user", body=question))
+        if thread.title == "Nový rozhovor":
+            thread.title = question.replace("\n", " ")[:95]
+        thread.updated_at = now()
         g.db.commit()
         try:
             answer = run_assistant(
-                key=app.config["EMA_AI_ENGINE_API_KEY"],
-                base_url=app.config["EMA_AI_ENGINE_BASE_URL"],
+                key=active_engine_key(), base_url=app.config["EMA_AI_ENGINE_BASE_URL"],
                 user_id=g.user.id, project_id=pid, question=question,
                 projects=[selected] if selected else visible,
                 selected_project=selected, tasks=tasks_for_context,
                 recent_turns=list(reversed(recent)),
             )
-            g.db.add(AssistantTurn(user_id=g.user.id, project_id=pid, role="assistant", body=answer))
-            audit("assistant.reply", f"project:{pid or 'all'}", selected.organization_id if selected else None)
+        except AssistantError:
+            attempt.state = "failed"
             g.db.commit()
-        except AssistantError as exc:
-            flash(str(exc), "error")
-        return redirect(url_for("home", project=pid) if pid else url_for("home"))
+            raise
+        g.db.add(AssistantTurn(user_id=g.user.id, thread_id=thread.id, project_id=pid,
+                               role="assistant", body=answer))
+        attempt.state = "completed"
+        thread.updated_at = now()
+        audit("assistant.reply", f"thread:{thread.id}", selected.organization_id if selected else None)
+        g.db.commit()
+        return answer
+
+    @app.get("/assistant/threads")
+    @login_required
+    def assistant_threads_api():
+        threads = g.db.scalars(select(AssistantThread).where(
+            AssistantThread.user_id == g.user.id
+        ).order_by(AssistantThread.updated_at.desc(), AssistantThread.id.desc()).limit(80)).all()
+        accessible = {p.id for p in base_context()["accessible_projects"]}
+        visible = [t for t in threads if not t.project_id or t.project_id in accessible]
+        response = app.json.response({
+            "threads": [{"id": t.id, "project_id": t.project_id,
+                         "title": t.title, "updated_at": t.updated_at.isoformat()} for t in visible],
+            "ready": engine_available(),
+        })
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+    @app.get("/assistant/threads/<int:thread_id>")
+    @login_required
+    def assistant_thread_api(thread_id):
+        thread = user_thread(thread_id)
+        messages = g.db.scalars(select(AssistantTurn).where(
+            AssistantTurn.user_id == g.user.id, AssistantTurn.thread_id == thread.id
+        ).order_by(AssistantTurn.id.desc()).limit(80)).all()
+        return app.json.response({
+            "thread": {"id": thread.id, "title": thread.title, "project_id": thread.project_id},
+            "messages": [{"role": item.role, "text": item.body,
+                          "created_at": item.created_at.isoformat()}
+                         for item in reversed(messages)],
+        })
+
+    @app.post("/assistant/threads")
+    @login_required
+    def assistant_thread_create():
+        pid = positive_id("project_id")
+        if field("project_id") and not pid:
+            abort(400)
+        if pid:
+            project_or_403(pid)
+        thread = AssistantThread(user_id=g.user.id, project_id=pid, title="Nový rozhovor")
+        g.db.add(thread)
+        g.db.commit()
+        return app.json.response({"id": thread.id, "project_id": pid}), 201
+
+    @app.post("/assistant/api/message")
+    @login_required
+    def assistant_chat_api():
+        thread = user_thread(positive_id("thread_id"))
+        question = required("body", 4000)
+        try:
+            answer = send_ema_turn(thread, question, field("nonce", 80))
+            return app.json.response({"thread_id": thread.id, "answer": answer})
+        except AssistantError as ex:
+            return app.json.response({"error": str(ex), "thread_id": thread.id}), 422
+
+    @app.post("/assistant")
+    @login_required
+    def ask_assistant():
+        pid = positive_id("project_id")
+        if field("project_id") and not pid:
+            abort(400)
+        if pid:
+            project_or_403(pid)
+        tid = positive_id("thread_id")
+        if tid:
+            thread = user_thread(tid)
+            if thread.project_id != pid:
+                abort(403)
+        else:
+            thread = AssistantThread(user_id=g.user.id, project_id=pid, title="Nový rozhovor")
+            g.db.add(thread)
+            g.db.commit()
+        question = required("body", 4000)
+        try:
+            send_ema_turn(thread, question, field("nonce", 80))
+        except AssistantError as ex:
+            flash(str(ex), "error")
+        return redirect(url_for("home", project=pid, thread=thread.id)
+                        if pid else url_for("home", thread=thread.id))
 
     @app.post("/projects")
     @login_required
