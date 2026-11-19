@@ -87,7 +87,11 @@ def test_shared_chat_history_is_private_and_nonce_prevents_duplicate_billing(web
         assert attempt.state == "completed"
         assert db.scalar(select(AssistantThread).where(
             AssistantThread.id == thread_id)).title.startswith("Zkontroluj")
-    # Switch identity with logout: history must stay private.
+    # Switch identity with an explicit logout: login page does not switch
+    # already authenticated users automatically.
+    with client.session_transaction() as sess:
+        token = sess["csrf"]
+    assert client.post("/logout", data={"csrf_token":token}).status_code == 302
     login(client, "guest")
     assert client.get(f"/assistant/threads/{thread_id}").status_code == 404
 
