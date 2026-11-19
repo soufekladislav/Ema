@@ -26,6 +26,20 @@
           <button class="btn" type="submit">Vybrat</button>
         </form>
       </div>
+      <nav class="ema-ai-thread-nav" aria-label="Historie konverzací s Emou">
+        <div class="ema-ai-thread-heading"><strong>Historie konverzací</strong>
+          <a class="btn small-btn" href="{{ url_for('home', project=selected_project.id, new=1) if selected_project else url_for('home', new=1) }}">+ Nový chat</a>
+        </div>
+        <div class="ema-ai-thread-list">
+          {% for t in assistant_threads %}
+            <a class="{{ 'active' if active_thread and active_thread.id == t.id else '' }}"
+               href="{{ url_for('home', project=selected_project.id, thread=t.id) if selected_project else url_for('home', thread=t.id) }}"
+               title="{{ t.title }}">{{ t.title }}</a>
+          {% else %}
+            <span class="small muted">Zatím žádné konverzace pro tento kontext.</span>
+          {% endfor %}
+        </div>
+      </nav>
       <div class="ema-assistant-thread" aria-live="polite">
         {% for item in assistant_turns %}
           <article class="ema-assistant-message {{ 'from-me' if item.role == 'user' else 'from-ema' }}">
@@ -41,11 +55,16 @@
           </div>
         {% endfor %}
       </div>
+      {% if active_thread %}
+      <div class="ema-ai-thread-tools"><button class="btn small-btn" type="button" data-ema-archive-thread="{{ active_thread.id }}" data-ema-csrf="{{ csrf_token() }}">Archivovat tuto konverzaci</button></div>
+      {% endif %}
       <div class="ema-chat-compose-wrap">
         {% if not ai_ready %}<p class="ema-ai-notice"><strong>AI zatím není připojena.</strong> Správce musí povolit účet a nastavit přístupový klíč Fresh AI Engine. Historii původních projektových poznámek to neovlivňuje.</p>{% endif %}
         <form class="ema-chat-compose" method="post" action="{{ url_for('ask_assistant') }}">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <input type="hidden" name="project_id" value="{{ selected_project.id if selected_project else '' }}">
+          <input type="hidden" name="thread_id" value="{{ active_thread.id if active_thread else '' }}">
+          <input type="hidden" name="nonce" value="{{ new_nonce() }}">
           <label class="sr-only" for="ema-user-message">Zpráva pro Emu</label>
           <textarea id="ema-user-message" name="body" rows="3" maxlength="4000" placeholder="{{ 'Zeptej se Emy na projekt ' ~ selected_project.name ~ '…' if selected_project else 'Na čem bychom dnes měli pracovat?…' }}" required {{ 'disabled' if not ai_ready else '' }}></textarea>
           <button class="btn primary" type="submit" {{ 'disabled' if not ai_ready else '' }}>Odeslat Emě</button>
@@ -463,6 +482,42 @@
         <p class="small muted">Bez dostupných auditovaných událostí.</p>
       {% endfor %}
     </section>
+    <section class="card panel ema-ops-panel" id="ops-intelligence">
+      <h2>Inteligence · Fresh AI Engine</h2>
+      <p class="small muted">Jeden API konektor pro Emu. Stejné univerzální REST API jako u Bobana, žádný nový endpoint v Engine.</p>
+      <div class="ema-ops-status {{ 'is-ok' if ai_status.state == 'verified' else 'is-warning' }}">
+        {{ 'Ověřeno – AI chat připraven' if ai_status.state == 'verified' else 'Není ověřeno: ' ~ ai_status.state }}
+      </div>
+      <dl class="ema-ops-data">
+        <div><dt>Konfigurace</dt><dd>{{ ai_status.source }}</dd></div>
+        <div><dt>Poslední test</dt><dd>{{ ai_status.checked_at.strftime('%d.%m.%Y %H:%M') if ai_status.checked_at else 'Neproběhl' }}</dd></div>
+        <div><dt>HTTP výsledek</dt><dd>{{ ai_status.http_status if ai_status.http_status else '—' }}</dd></div>
+      </dl>
+      <form method="post" action="{{ url_for('save_intelligence_key') }}" class="ema-ai-settings-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label>Klíč pro konektor aplikace EMA
+          <input type="password" name="engine_api_key" autocomplete="new-password"
+                 minlength="24" maxlength="512" placeholder="Vlož samostatný API konektor klíč" required>
+        </label>
+        <button class="btn primary" type="submit">Šifrovaně uložit klíč</button>
+        <p class="small muted">Uložený klíč se nikdy nevypisuje. Změna klíče zruší předchozí ověření.</p>
+      </form>
+      <form method="post" action="{{ url_for('test_intelligence_key') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="btn" type="submit" {{ 'disabled' if ai_status.source != 'superadmin' else '' }}>
+          Ověřit přístup a kredity
+        </button>
+        <p class="small muted">Použije skutečné autorizované POST /v1/engine/run a může odečíst malé množství kreditů. Veřejný /v1/health klíč neověřuje. Bez automatického opakování.</p>
+      </form>
+      {% if ai_status.source == 'superadmin' %}
+      <form method="post" action="{{ url_for('disconnect_intelligence') }}" onsubmit="return confirm('Odpojit Emu od AI Engine?')">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="confirm" value="disconnect">
+        <button class="btn small-btn" type="submit">Odpojit konektor</button>
+      </form>
+      {% endif %}
+    </section>
+
     <section class="card panel ema-ops-panel" id="ops-access">
       <h2>Chráněný manifest</h2>
       <p>Adresa <code>/internal/ops/manifest</code> vyžaduje přihlášeného superadmina nebo samostatný read-only Bearer token v HTTP hlavičce. <strong>Samotný odkaz nestačí.</strong></p>
