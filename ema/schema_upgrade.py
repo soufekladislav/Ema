@@ -1,7 +1,7 @@
 """Idempotent, additive schema upgrade for Ema pilot. Backup DB before running."""
 from sqlalchemy import inspect, text, select
 from sqlalchemy.orm import Session
-from .models import AssistantTurn, AssistantThread, AIEngineConnection, MailboxView, MailUserState, MailboxConnectionCheck, OpsIncident, OpsJobRun, OpsDeployment, Base
+from .models import AssistantTurn, AssistantThread, AIEngineConnection, AssistantMessageAttempt, MailboxView, MailUserState, MailboxConnectionCheck, OpsIncident, OpsJobRun, OpsDeployment, Base
 
 
 def upgrade_schema(engine):
@@ -10,7 +10,7 @@ def upgrade_schema(engine):
     if not inspector.has_table("users"):
         raise RuntimeError("Database is not initialized; run init-db first.")
     # New tables are created separately, never drop or rebuild existing tables.
-    Base.metadata.create_all(engine, tables=[AssistantTurn.__table__, AssistantThread.__table__, AIEngineConnection.__table__, MailboxView.__table__,
+    Base.metadata.create_all(engine, tables=[AssistantTurn.__table__, AssistantThread.__table__, AIEngineConnection.__table__, AssistantMessageAttempt.__table__, MailboxView.__table__,
                                                      MailUserState.__table__, MailboxConnectionCheck.__table__,
                                                      OpsIncident.__table__, OpsJobRun.__table__,
                                                      OpsDeployment.__table__], checkfirst=True)
