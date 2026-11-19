@@ -14,7 +14,7 @@ import secrets
 
 from sqlalchemy import func, inspect, select, text
 
-from .models import (Base, Audit, Company, Contact, Mailbox,
+from .models import (Base, Audit, Company, Contact, Mailbox, AiEngineConnector,
                      MailboxConnectionCheck, MailMessage, Opportunity,
                      OpsIncident, OpsJobRun, OpsDeployment, Organization, Outbound,
                      Project, Task, User, now)
@@ -171,6 +171,7 @@ def collect_ops(db, root, environment=None):
         "crm_contacts", "opportunities", "tasks", "mailboxes",
         "indexed_mail_headers", "outbound_attempts",
     )}
+    intelligence = {"configured": False, "status": "not_configured", "last_checked_at": None, "http_status": None}
     mailbox = {"total": None, "sync_error": None, "not_synced": None,
                "last_success_at": None, "connection_checked": None,
                "imap_failed": None, "smtp_failed": None}
@@ -218,6 +219,15 @@ def collect_ops(db, root, environment=None):
                                                   .where(MailboxConnectionCheck.imap_ok.is_(False))) or 0)
             mailbox["smtp_failed"] = int(db.scalar(select(func.count()).select_from(MailboxConnectionCheck)
                                                   .where(MailboxConnectionCheck.smtp_ok.is_(False))) or 0)
+        if "ai_engine_connectors" in present:
+            connector = db.get(AiEngineConnector, 1)
+            if connector:
+                intelligence = {
+                    "configured": bool(connector.secret_ciphertext),
+                    "status": connector.state,
+                    "last_checked_at": _utc(connector.checked_at),
+                    "http_status": connector.http_status,
+                }
         for entry in _latest(db, OpsJobRun, present, OpsJobRun.started_at, 12):
             jobs.append({"name": entry.name, "status": entry.state,
                          "started_at": _utc(entry.started_at),
@@ -255,6 +265,7 @@ def collect_ops(db, root, environment=None):
         "database": health,
         "counts": stats,
         "mail": mailbox,
+        "intelligence": intelligence,
         "sync_jobs": jobs,
         "recorded_deployments": deployments,
         "recent_incidents": incidents,
