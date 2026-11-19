@@ -27,11 +27,13 @@ from .mail_folders import (
     append_sent_copy, empty_trash_batch, preview_trash_all, empty_trash_all, is_trash_folder, set_server_flags,
 )
 from .assistant_service import AssistantError, run_assistant
+from .engine_config import (EngineConfigError, encrypt_engine_key, decrypt_engine_key,
+                            verify_engine_key)
 from .contact_import import ImportErrorCSV, extract_contacts
 from .schema_upgrade import upgrade_schema
 from .ops import code_identity, collect_ops, verify_bearer
 from .models import (
-    Audit, AssistantTurn, Base, ChatMessage, Company, Contact, MailFolder, Mailbox, MailboxGrant, MailboxView, MailboxConnectionCheck, MailMessage, MailUserState,
+    Audit, AssistantTurn, AssistantThread, AssistantSubmission, AiEngineConnector, Base, ChatMessage, Company, Contact, MailFolder, Mailbox, MailboxGrant, MailboxView, MailboxConnectionCheck, MailMessage, MailUserState,
     Membership, Opportunity, Organization, Outbound, OpsIncident, OpsJobRun, OpsDeployment, Project, ProjectGrant,
     Task, User, make_session, now,
 )
@@ -2032,6 +2034,81 @@ def create_app(test_config=None):
             response.headers["Content-Disposition"] = 'attachment; filename="ema-ops-manifest.json"'
         return response
 
+    def engine_connector():
+        return g.db.get(AiEngineConnector, 1)
+
+    def engine_key():
+        row = engine_connector()
+        if row:
+            if row.state != "verified":
+                return ""
+            return decrypt_engine_key(row.secret_ciphertext, app.config["MAIL_ENCRYPTION_KEY"])
+        return app.config["EMA_AI_ENGINE_API_KEY"].strip()
+
+    def assistant_allowed():
+        allowed = {e.strip().lower() for e in app.config["EMA_AI_ALLOWED_EMAILS"].split(",") if e.strip()}
+        # Optional allowlist controls rollout. Empty = authenticated permitted users.
+        return not allowed or g.user.email.lower() in allowed
+
+    @app.post("/superadmin/intelligence/key")
+    @admin_required
+    def save_intelligence_key():
+        key = request.form.get("engine_api_key", "").strip()
+        if not key:
+            flash("Zadej nový přístupový klíč. Prázdné pole stávající klíč nemění.", "error")
+            return redirect(url_for("superadmin") + "#ops-intelligence")
+        try:
+            cipher = encrypt_engine_key(key, app.config["MAIL_ENCRYPTION_KEY"])
+        except EngineConfigError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("superadmin") + "#ops-intelligence")
+        row = engine_connector()
+        if row is None:
+            row = AiEngineConnector(id=1, secret_ciphertext=cipher)
+            g.db.add(row)
+        row.secret_ciphertext, row.state = cipher, "untested"
+        row.checked_at, row.http_status, row.updated_at = None, None, now()
+        audit("ai.connector.key_changed", "ema", None)
+        g.db.commit()
+        flash("Klíč byl šifrovaně uložen. Ověř připojení tlačítkem níže.", "success")
+        return redirect(url_for("superadmin") + "#ops-intelligence")
+
+    @app.post("/superadmin/intelligence/verify")
+    @admin_required
+    def test_intelligence_key():
+        row = engine_connector()
+        if not row:
+            flash("Nejdřív ulož klíč aplikace EMA.", "error")
+            return redirect(url_for("superadmin") + "#ops-intelligence")
+        try:
+            key = decrypt_engine_key(row.secret_ciphertext, app.config["MAIL_ENCRYPTION_KEY"])
+            ok, http_code, category = verify_engine_key(key, app.config["EMA_AI_ENGINE_BASE_URL"])
+        except EngineConfigError:
+            ok, http_code, category = False, None, "config_error"
+        row.state = "verified" if ok else category[:24]
+        row.http_status, row.checked_at = http_code, now()
+        audit("ai.connector.verified" if ok else "ai.connector.failed", category, None)
+        g.db.commit()
+        flash("AI Engine je ověřen autentizovaným požadavkem." if ok else
+              ("Ověření selhalo (" + category + "). Zkontroluj klíč, kredity a dostupnost služby."),
+              "success" if ok else "error")
+        return redirect(url_for("superadmin") + "#ops-intelligence")
+
+    @app.post("/superadmin/intelligence/disconnect")
+    @admin_required
+    def disconnect_intelligence():
+        if request.form.get("confirm") != "disconnect":
+            abort(400)
+        row = engine_connector()
+        if row:
+            g.db.delete(row)
+            audit("ai.connector.disconnected", "ema", None)
+            g.db.commit()
+        # Explicit disconnected state must not silently enable an old .env key.
+        app.config["EMA_AI_ENGINE_API_KEY"] = ""
+        flash("Konektor odpojen. Starší nastavení v .env je potřeba případně odstranit.", "success")
+        return redirect(url_for("superadmin") + "#ops-intelligence")
+
     @app.route("/superadmin")
     @admin_required
     def superadmin():
@@ -2043,8 +2120,16 @@ def create_app(test_config=None):
         total_messages = ops["counts"].get("indexed_mail_headers")
         total_mailboxes = ops["counts"].get("mailboxes")
         # Shared DB storage cannot be accurately attributed per tenant.
+        connector = engine_connector()
+        ai_status = {
+            "configured": bool(connector or app.config["EMA_AI_ENGINE_API_KEY"]),
+            "source": "superadmin" if connector else ("environment" if app.config["EMA_AI_ENGINE_API_KEY"] else "none"),
+            "state": connector.state if connector else ("legacy_env_unverified" if app.config["EMA_AI_ENGINE_API_KEY"] else "disconnected"),
+            "checked_at": connector.checked_at if connector else None,
+            "http_status": connector.http_status if connector else None,
+        }
         return render("superadmin", users=users, all_orgs=orgs, total_messages=total_messages,
-                      total_mailboxes=total_mailboxes, ops=ops,
+                      total_mailboxes=total_mailboxes, ops=ops, ai_status=ai_status,
                       database_size="Není dostupné bez samostatného měření")
 
     @app.post("/superadmin/users")
