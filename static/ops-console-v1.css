@@ -1,0 +1,53 @@
+/* EMA Operations console v1; Poppins inherited from Fresh HUB design system */
+.ema-ops{display:grid;gap:17px;min-width:0}
+.ema-ops-heading{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between}
+.ema-ops-heading-actions{display:flex;gap:9px;flex-wrap:wrap}
+.ema-ops-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.ema-ops-summary>.card{min-width:0;padding:18px;display:flex;flex-direction:column;gap:6px}
+.ema-ops-summary .metric>span{font-size:12px;color:#617160}
+.ema-ops-summary .metric>strong{font-size:23px;line-height:1.25;overflow-wrap:anywhere}
+.ema-ops-summary .metric>small{font-size:11px;color:#657365;line-height:1.5}
+.ema-ops-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:stretch}
+.ema-ops-panel{min-width:0;padding:20px}
+.ema-ops-panel h2{font-size:19px;margin:0 0 10px}
+.ema-ops-data{margin:16px 0 5px}
+.ema-ops-data>div{display:grid;grid-template-columns:140px minmax(0,1fr);gap:12px;padding:10px 0;border-bottom:1px solid #e6ebe4}
+.ema-ops-data dt{color:#63735e;font-size:12px}
+.ema-ops-data dd{margin:0;overflow-wrap:anywhere;font-size:12px;font-weight:600}
+.ema-ops-data code,.ema-ops-panel code{font-size:11px;overflow-wrap:anywhere}
+.ema-ops-warning{font-size:12px;border-radius:9px;padding:12px 14px;border:1px solid #e9d6ac;background:#fdf7e9;color:#71552c;line-height:1.55}
+.ema-ops-status{display:inline-flex;padding:6px 12px;border-radius:100px;font-size:11px;font-weight:700}
+.ema-ops-status.is-ok{background:#e5f2d9;color:#416827}
+.ema-ops-status.is-warning{background:#fbefdc;color:#885a20}
+.ema-ops-mini-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:13px 0}
+.ema-ops-mini-metrics>div{min-width:0;display:flex;flex-direction:column;gap:4px;padding:12px;background:#f7faf5;border:1px solid #e5ebdf;border-radius:10px}
+.ema-ops-mini-metrics strong{font-size:21px;line-height:1.2}
+.ema-ops-mini-metrics span{font-size:11px;color:#617061}
+.ema-ops-panel .table-wrap{max-width:100%;overflow-x:auto}
+.ema-ops-panel table{min-width:420px;width:100%}
+.ema-ops-panel th,.ema-ops-panel td{font-size:11px;padding:9px 8px}
+.ema-ops-action{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid #e5ebe3;font-size:12px;overflow-wrap:anywhere}
+.ema-ops-action strong{flex:none}
+.ema-ops-advanced{margin:0;min-width:0;padding:18px}
+.ema-ops-advanced>summary{cursor:pointer;font-weight:750;font-size:16px;list-style-position:inside}
+.ema-ops-admin-section{padding-top:17px}
+.ema-ops-create-user{display:grid;grid-template-columns:repeat(3,minmax(0,1fr)) auto;gap:12px;align-items:end}
+.ema-ops-create-user label{display:grid;gap:6px;font-size:12px}
+.ema-ops-create-user input{width:100%;min-width:0}
+.ema-ops-advanced .table-wrap{margin-top:14px;overflow:auto}
+.ema-ops-advanced form button{white-space:nowrap}
+@media(max-width:1100px){
+ .ema-ops-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .ema-ops-create-user{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:760px){
+ .ema-ops-heading-actions{width:100%;display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+ .ema-ops-heading-actions .btn{text-align:center}
+ .ema-ops-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .ema-ops-grid{grid-template-columns:1fr}
+ .ema-ops-mini-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .ema-ops-summary .metric>strong{font-size:18px}
+ .ema-ops-data>div{grid-template-columns:minmax(0,1fr);gap:4px}
+ .ema-ops-panel{padding:14px}
+ .ema-ops-create-user{grid-template-columns:1fr}
+}
