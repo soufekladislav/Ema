@@ -29,10 +29,10 @@ from .mail_folders import (
 from .assistant_service import AssistantError, run_assistant
 from .contact_import import ImportErrorCSV, extract_contacts
 from .schema_upgrade import upgrade_schema
-from .ops import collect_ops, verify_bearer
+from .ops import code_identity, collect_ops, verify_bearer
 from .models import (
     Audit, AssistantTurn, Base, ChatMessage, Company, Contact, MailFolder, Mailbox, MailboxGrant, MailboxView, MailboxConnectionCheck, MailMessage, MailUserState,
-    Membership, Opportunity, Organization, Outbound, OpsIncident, OpsJobRun, Project, ProjectGrant,
+    Membership, Opportunity, Organization, Outbound, OpsIncident, OpsJobRun, OpsDeployment, Project, ProjectGrant,
     Task, User, make_session, now,
 )
 from .security import Forbidden, mailbox_access, organization_access, project_access
@@ -2116,6 +2116,39 @@ def create_app(test_config=None):
             db.add(User(email=email, name="Superadmin", superadmin=True, password_hash=generate_password_hash(password)))
             db.commit()
             click.echo("Superadmin vytvořen")
+        finally:
+            db.close()
+
+    @app.cli.command("ops-record-deploy")
+    @click.option("--label", default="", type=str)
+    def ops_record_deploy(label):
+        """Record the actual currently deployed file fingerprint after Exon restart.
+
+        No GitHub PR merge is auto-counted as deployment. One explicit CLI action
+        on the real production application creates an auditable, deduplicated row.
+        """
+        if len(label) > 60 or (label and not re.fullmatch(r"[A-Za-z0-9 _.-]+", label)):
+            raise click.ClickException("Povolena je krátká veřejná release poznámka bez tajných údajů.")
+        db = SessionLocal()
+        try:
+            if not inspect(db.get_bind()).has_table("ops_deployments"):
+                raise click.ClickException("Nejdříve spusťte upgrade-db.")
+            identity = code_identity(Path(__file__).resolve().parent.parent)
+            if identity["missing_files"]:
+                raise click.ClickException("Na serveru chybí kontrolované zdrojové soubory; release neoznačuji jako nasazený.")
+            latest = db.scalar(select(OpsDeployment).order_by(OpsDeployment.id.desc()).limit(1))
+            if latest and latest.fingerprint == identity["source_fingerprint"]:
+                click.echo("Nasazený obsah již je evidován, žádný nový záznam.")
+                return
+            row = OpsDeployment(
+                sha=identity["deployed_commit"] or "",
+                source=identity["commit_source"],
+                fingerprint=identity["source_fingerprint"],
+                label=label.strip(),
+            )
+            db.add(row)
+            db.commit()
+            click.echo("Nasazení zaznamenáno (otisk " + identity["source_fingerprint"][:16] + "…).")
         finally:
             db.close()
 
