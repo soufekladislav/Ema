@@ -34,8 +34,9 @@ def run_assistant(*, key, base_url, user_id, project_id, question, projects, sel
     payload = {
         "source": "ema",
         "operation": "assistant.project.chat",
-        "task_type": "general",
+        "task_type": "chat",
         "quality": "balanced",
+        "max_cost_usd": 0.20,  # Per-attempt budget, subject to AI Engine support.
         "user_id": f"ema-user-{user_id}",
         "project_id": str(project_id) if project_id else None,
         "max_output_tokens": 1200,
@@ -81,12 +82,21 @@ def run_assistant(*, key, base_url, user_id, project_id, question, projects, sel
         result = json.loads(raw)
     except (ValueError, UnicodeDecodeError):
         raise AssistantError("AI Engine vrátil neplatný formát odpovědi.") from None
-    if not isinstance(result, dict) or result.get("status") != "completed":
-        raise AssistantError("AI Engine úlohu nedokončil. " + str(result.get("error") or "")[:150] if isinstance(result, dict) else "AI Engine nevrátil výsledek.")
-    output = result.get("output")
-    if not isinstance(output, str):
-        output = result.get("result")
-    if isinstance(output, dict):
+    if not isinstance(result, dict):
+        raise AssistantError("AI Engine nevrátil platnou odpověď.")
+    if result.get("status") not in ("completed", "success"):
+        # Never echo arbitrary service-provided errors into UI or diagnostic logs.
+        raise AssistantError("AI Engine nedokončil úlohu. Pokud je výsledek nejistý, neposílej ji znovu automaticky.")
+    output = result
+    for _ in range(4):
+        if isinstance(output, str) or not isinstance(output, dict):
+            break
+        next_value = next((output[k] for k in ("output", "result", "answer", "text", "response", "content")
+                           if k in output and output[k] is not None), None)
+        if next_value is None:
+            break
+        output = next_value
+    if isinstance(output, (dict, list)):
         output = json.dumps(output, ensure_ascii=False)
     if not isinstance(output, str) or not output.strip():
         raise AssistantError("AI Engine nevrátil textovou odpověď.")
