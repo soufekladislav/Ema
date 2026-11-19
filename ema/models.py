@@ -125,12 +125,36 @@ class ChatMessage(Base):
     __table_args__ = (Index("ix_chat_scope", "organization_id", "project_id", "id"),)
 
 
+class AIEngineConnection(Base):
+    """One platform-wide encrypted API credential; never visible in GET responses."""
+    __tablename__ = "ai_engine_connections"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    encrypted_key: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=now, nullable=False)
+    checked_at: Mapped[datetime | None] = mapped_column(DateTime)
+    verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    check_status: Mapped[str] = mapped_column(String(40), default="not_tested", nullable=False)
+
+
+class AssistantThread(Base):
+    """Private per-user conversation, optionally scoped to a permitted project."""
+    __tablename__ = "assistant_threads"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id", ondelete="SET NULL"))
+    title: Mapped[str] = mapped_column(String(120), default="Nový rozhovor", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=now, nullable=False)
+    __table_args__ = (Index("ix_assistant_thread_user_date", "user_id", "updated_at"),)
+
+
 class AssistantTurn(Base):
     """Personal AI conversation. Kept separate from shared project/team notes."""
     __tablename__ = "assistant_turns"
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
+    thread_id: Mapped[int | None] = mapped_column(ForeignKey("assistant_threads.id", ondelete="SET NULL"))
     role: Mapped[str] = mapped_column(String(16), nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
