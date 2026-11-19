@@ -40,7 +40,8 @@ def test_engine_contract_uses_only_supplied_project_context(monkeypatch):
     payload = sent["payload"]
     assert payload["source"] == "ema"
     assert payload["operation"] == "assistant.project.chat"
-    assert payload["task_type"] == "general"
+    assert payload["task_type"] == "chat"
+    assert payload["max_cost_usd"] == 0.20
     assert payload["project_id"] == "41"
     assert payload["context"]["projects"] == [
         {"id": 41, "name": "Důvěrný projekt", "status": "active", "description": "Interní plán"}
