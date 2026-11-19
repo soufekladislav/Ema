@@ -14,7 +14,7 @@ import secrets
 
 from sqlalchemy import func, inspect, select, text
 
-from .models import (Base, Audit, Company, Contact, Mailbox,
+from .models import (Base, Audit, AIEngineConnection, Company, Contact, Mailbox,
                      MailboxConnectionCheck, MailMessage, Opportunity,
                      OpsIncident, OpsJobRun, OpsDeployment, Organization, Outbound,
                      Project, Task, User, now)
@@ -25,6 +25,7 @@ FINGERPRINT_PATHS = (
     "ema/models.py",
     "ema/security.py",
     "ema/assistant_service.py",
+    "ema/ai_connection.py",
     "ema/contact_import.py",
     "ema/mail_service.py",
     "ema/mail_folders.py",
@@ -53,6 +54,8 @@ FINGERPRINT_PATHS = (
     "static/mail-layout-v13.css",
     "static/mail-final-v13.css",
     "static/ops-console-v1.css",
+    "static/ema-chat-drawer-v1.js",
+    "static/ema-chat-drawer-v1.css",
     "static/mobile-shell-v2.js",
     "static/mobile-shell-v2.css",
     "static/pwa-install-v2.js",
@@ -69,6 +72,8 @@ RELEASE_STEPS = (
      "scope": "HTML, Trash, pořadí, šířka, odpovědi, podpisy"},
     {"release": "Ops V1", "github": "admin/manifest",
      "scope": "verze, health, worker, incidents, audit, redigovaný manifest"},
+    {"release": "AI Chat V1", "github": "AI Engine / unified chat",
+     "scope": "privátní rozhovory, globální drawer, šifrovaný API konektor"},
 )
 
 
@@ -171,6 +176,7 @@ def collect_ops(db, root, environment=None):
         "crm_contacts", "opportunities", "tasks", "mailboxes",
         "indexed_mail_headers", "outbound_attempts",
     )}
+    intelligence = {"configured": False, "verified": False, "checked_at": None, "check_status": "not_configured"}
     mailbox = {"total": None, "sync_error": None, "not_synced": None,
                "last_success_at": None, "connection_checked": None,
                "imap_failed": None, "smtp_failed": None}
@@ -204,6 +210,15 @@ def collect_ops(db, root, environment=None):
             ("indexed_mail_headers", MailMessage), ("outbound_attempts", Outbound),
         ):
             stats[label] = _safe_count(db, model, present)
+        if "ai_engine_connections" in present:
+            connection = db.get(AIEngineConnection, 1)
+            if connection is not None:
+                intelligence = {
+                    "configured": bool(connection.encrypted_key),
+                    "verified": bool(connection.verified),
+                    "checked_at": _utc(connection.checked_at),
+                    "check_status": connection.check_status,
+                }
         if "mailboxes" in present:
             mailbox["total"] = stats["mailboxes"]
             mailbox["sync_error"] = int(db.scalar(select(func.count()).select_from(Mailbox)
@@ -255,6 +270,7 @@ def collect_ops(db, root, environment=None):
         "database": health,
         "counts": stats,
         "mail": mailbox,
+        "intelligence": intelligence,
         "sync_jobs": jobs,
         "recorded_deployments": deployments,
         "recent_incidents": incidents,

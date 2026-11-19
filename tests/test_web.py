@@ -161,7 +161,7 @@ def test_assistant_conversation_uses_selected_project_and_persists_personally(cl
     monkeypatch.setattr("ema.web.run_assistant", fake_engine)
     response = client.post("/assistant", data={
         "csrf_token": csrf(client), "project_id": str(project_id),
-        "body": "Na čem pracujeme?"
+        "body": "Na čem pracujeme?", "nonce": "test-chat-nonce-12345"
     })
     assert response.status_code == 302
     assert "project=" in response.headers["Location"]
