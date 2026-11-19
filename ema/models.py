@@ -261,6 +261,43 @@ class Audit(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
 
 
+
+class OpsIncident(Base):
+    """Redacted exception occurrence, never paths, payloads or traceback."""
+    __tablename__ = "ops_incidents"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    request_id: Mapped[str] = mapped_column(String(40), unique=True, nullable=False)
+    endpoint: Mapped[str] = mapped_column(String(90), default="unknown", nullable=False)
+    category: Mapped[str] = mapped_column(String(32), default="unexpected_error", nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime, default=now, nullable=False)
+    __table_args__ = (Index("ix_ops_incidents_time", "occurred_at"),)
+
+
+class OpsDeployment(Base):
+    """Actual operator-recorded deployment fingerprint, never a GitHub merge."""
+    __tablename__ = "ops_deployments"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    sha: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    source: Mapped[str] = mapped_column(String(32), default="unknown", nullable=False)
+    fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    label: Mapped[str] = mapped_column(String(120), default="", nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime, default=now, nullable=False)
+    __table_args__ = (Index("ix_ops_deployments_time", "recorded_at"),)
+
+
+class OpsJobRun(Base):
+    """Non-sensitive summary of explicit CLI sync job execution."""
+    __tablename__ = "ops_job_runs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    state: Mapped[str] = mapped_column(String(20), default="running", nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=now, nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime)
+    processed: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    failed: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    __table_args__ = (Index("ix_ops_jobs_name_time", "name", "started_at"),)
+
+
 def make_session(database_url):
     engine = create_engine(database_url, pool_pre_ping=True, pool_recycle=1800)
     return engine, sessionmaker(bind=engine, expire_on_commit=False)

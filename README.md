@@ -2,7 +2,7 @@
 
 AI obchodní a projektová asistentka Fresh Crackers: **chat-first pracovní prostor pro firmy, klienty, e-maily, obchodní příležitosti, nabídky a projekty.**
 
-**Aktuální stav (18. 11. 2026):** EMA běží na `hub.freshcrackers.cz`, uživatel otestoval poštovní rozhraní a potvrdil **úspěšnou instalaci PWA**. **Jednotný release EMA Mail V1.3 je sloučený do `main`** (squash commit `5653800`, [PR #84](https://github.com/soufekladislav/Ema/pull/84)); poslední společná vývojová větev prošla **109 automatickými testy**. V1.3 obsahuje šest finálních úprav pošty. Vyžaduje jednorázovou aditivní migraci `upgrade-db` pro výsledky IMAP/SMTP. PWA instalace neznamená automatické potvrzení všech mailových operací, Gmail OAuth, bezpečného vysypání Koše ani kompletní mobilní přejímky. **[Podrobný aktuální stav a plán](docs/EMA_STATUS_2026-11-18.md)**.
+**Stav produktu (19. 11. 2026):** EMA běží na `hub.freshcrackers.cz`, ale přesná revize nasazená na Exonu **zatím není ověřená**. Uživatel otestoval poštovní rozhraní a potvrdil **úspěšnou instalaci PWA**. **Jednotný release EMA Mail V1.3 je sloučený do `main`** (squash commit `5653800`, [PR #84](https://github.com/soufekladislav/Ema/pull/84)); poslední společná vývojová větev prošla **109 automatickými testy**. V1.3 obsahuje šest finálních úprav pošty. Vyžaduje jednorázovou aditivní migraci `upgrade-db` pro výsledky IMAP/SMTP. PWA instalace neznamená automatické potvrzení všech mailových operací, Gmail OAuth, bezpečného vysypání Koše ani kompletní mobilní přejímky. **[Podrobný aktuální stav a plán](docs/EMA_STATUS_2026-11-18.md)**.
 
 ## Zdrojový kód a instalace
 
@@ -17,7 +17,9 @@ AI obchodní a projektová asistentka Fresh Crackers: **chat-first pracovní pro
 
 ## Dokumentace a řízení
 
-- **[Aktuální revize – hotové / částečné / neověřené / backlog (18. 11. 2026)](docs/EMA_STATUS_2026-11-18.md)**
+- **[Aktuální revize Emy – co existuje / co čeká na test / co chybí (19. 11. 2026)](docs/EMA_AUDIT_2026-11-19.md)**
+- **[Provozní konzole a chráněný manifest – nasazení a bezpečnost](docs/EMA_OPS_V1_DEPLOY.md)**
+- [Historická revize (18. 11. 2026)](docs/EMA_STATUS_2026-11-18.md)
 - **[EMA Mail V1.3 – aktuální postup nasazení a závěrečné přejímky](docs/EMA_MAIL_V13_DEPLOY.md)**
 - [EMA Mail V1.2 – předchozí historická verze](docs/EMA_MAIL_V12_DEPLOY.md)
 - [Master produktové zadání / mapa v1.3](docs/EMA_PROJECT_MAP.md)
@@ -38,4 +40,4 @@ AI obchodní a projektová asistentka Fresh Crackers: **chat-first pracovní pro
 
 Nikdy neukládat do GitHubu historické produkční konfigurace, hesla, soubory .env, error logy ani klientskou poštu. Doména D-01 je potvrzena: `hub.freshcrackers.cz`. Před nasazením zajistit zálohu původní PHP Emy na stejné doméně.
 
-**GitHub Project #10:** Issues jsou propojené v epikách, ale skutečný stav položek boardu není v této revizi ověřený. Z aktuálního obsahu repozitáře je ověřeno 47 otevřených a 20 uzavřených Issues; 18 budoucích podúkolů bylo archivováno pro tuto etapu, nikoliv označeno za hotové. Průběžně udržovat stavový dokument a po přejímce PR #81 synchronizovat board.
+**GitHub Project #10:** Issues jsou propojené v epikách, ale skutečný stav položek boardu není v této revizi ověřený. Z aktuálního obsahu repozitáře je ověřeno 47 otevřených a 20 uzavřených Issues; 18 budoucích podúkolů bylo archivováno pro tuto etapu, nikoliv označeno za hotové. Průběžně aktualizovat dnešní revizi a synchronizovat board až na základě skutečné provozní přejímky.

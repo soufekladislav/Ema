@@ -29,9 +29,10 @@ from .mail_folders import (
 from .assistant_service import AssistantError, run_assistant
 from .contact_import import ImportErrorCSV, extract_contacts
 from .schema_upgrade import upgrade_schema
+from .ops import code_identity, collect_ops, verify_bearer
 from .models import (
     Audit, AssistantTurn, Base, ChatMessage, Company, Contact, MailFolder, Mailbox, MailboxGrant, MailboxView, MailboxConnectionCheck, MailMessage, MailUserState,
-    Membership, Opportunity, Organization, Outbound, Project, ProjectGrant,
+    Membership, Opportunity, Organization, Outbound, OpsIncident, OpsJobRun, OpsDeployment, Project, ProjectGrant,
     Task, User, make_session, now,
 )
 from .security import Forbidden, mailbox_access, organization_access, project_access
@@ -277,6 +278,7 @@ def create_app(test_config=None):
         "EMA_AI_ENGINE_BASE_URL": os.getenv("EMA_AI_ENGINE_BASE_URL", "https://aiengine.freshcrackers.cz"),
         "EMA_AI_ENGINE_API_KEY": os.getenv("EMA_AI_ENGINE_API_KEY", ""),
         "EMA_AI_ALLOWED_EMAILS": os.getenv("EMA_AI_ALLOWED_EMAILS", ""),
+        "EMA_OPS_MANIFEST_TOKEN_SHA256": os.getenv("EMA_OPS_MANIFEST_TOKEN_SHA256", ""),
     }
     if test_config:
         config.update(test_config)
@@ -334,6 +336,28 @@ def create_app(test_config=None):
         resp.headers["Cache-Control"] = ("public, max-age=3600" if request.path.startswith("/static/") else "no-store")
         return resp
 
+    @app.errorhandler(Exception)
+    def record_unhandled_exception(exc):
+        from werkzeug.exceptions import HTTPException
+        if isinstance(exc, HTTPException):
+            return exc
+        if app.testing:
+            raise exc
+        incident_id = secrets.token_hex(12)
+        endpoint = (request.endpoint or "unknown")[:90]
+        app.logger.exception("EMA incident id=%s endpoint=%s", incident_id, endpoint)
+        try:
+            g.db.rollback()
+            if inspect(g.db.get_bind()).has_table("ops_incidents"):
+                g.db.add(OpsIncident(request_id=incident_id, endpoint=endpoint,
+                                     category="unexpected_error"))
+                g.db.commit()
+        except Exception:
+            g.db.rollback()
+        return ("Interní chyba aplikace. ID incidentu: " + incident_id, 500,
+                {"Content-Type": "text/plain; charset=utf-8",
+                 "Cache-Control": "no-store"})
+
     @app.errorhandler(403)
     @app.errorhandler(404)
     @app.errorhandler(400)
@@ -358,7 +382,7 @@ def create_app(test_config=None):
     @app.route("/health")
     def health():
         g.db.execute(text("SELECT 1"))
-        return {"service": "ema", "version": "0.1.0", "status": "ok"}
+        return {"service": "ema", "status": "ok"}
 
     @app.route("/login", methods=["GET", "POST"])
     def login():
@@ -1991,16 +2015,37 @@ def create_app(test_config=None):
         g.db.commit()
         return redirect(url_for("settings", org_id=org_id))
 
+    @app.get("/internal/ops/manifest")
+    def ops_manifest():
+        """Authenticated, redacted operational manifest; URL alone grants no access."""
+        admin_session = bool(g.user and g.user.superadmin)
+        machine = verify_bearer(request.headers.get("Authorization", ""),
+                                app.config.get("EMA_OPS_MANIFEST_TOKEN_SHA256", ""))
+        if not admin_session and not machine:
+            abort(403)
+        report = collect_ops(g.db, Path(__file__).resolve().parent.parent)
+        response = app.json.response(report)
+        response.headers["Cache-Control"] = "private, no-store, max-age=0"
+        response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive"
+        response.headers["Vary"] = "Cookie, Authorization"
+        if admin_session and request.args.get("download") == "1":
+            response.headers["Content-Disposition"] = 'attachment; filename="ema-ops-manifest.json"'
+        return response
+
     @app.route("/superadmin")
     @admin_required
     def superadmin():
         users = g.db.scalars(select(User).order_by(User.id.desc()).limit(100)).all()
         orgs = g.db.scalars(select(Organization).order_by(Organization.id.desc()).limit(100)).all()
-        total_messages = g.db.scalar(select(func.count(MailMessage.id)))
-        total_mailboxes = g.db.scalar(select(func.count(Mailbox.id)))
+        # A partial schema upgrade must not make the console itself crash
+        # before it can display which diagnostic tables are missing.
+        ops = collect_ops(g.db, Path(__file__).resolve().parent.parent)
+        total_messages = ops["counts"].get("indexed_mail_headers")
+        total_mailboxes = ops["counts"].get("mailboxes")
         # Shared DB storage cannot be accurately attributed per tenant.
         return render("superadmin", users=users, all_orgs=orgs, total_messages=total_messages,
-                      total_mailboxes=total_mailboxes, database_size="Není dostupné bez samostatného měření")
+                      total_mailboxes=total_mailboxes, ops=ops,
+                      database_size="Není dostupné bez samostatného měření")
 
     @app.post("/superadmin/users")
     @admin_required
@@ -2074,21 +2119,79 @@ def create_app(test_config=None):
         finally:
             db.close()
 
+    @app.cli.command("ops-record-deploy")
+    @click.option("--label", default="", type=str)
+    def ops_record_deploy(label):
+        """Record the actual currently deployed file fingerprint after Exon restart.
+
+        No GitHub PR merge is auto-counted as deployment. One explicit CLI action
+        on the real production application creates an auditable, deduplicated row.
+        """
+        if len(label) > 60 or (label and not re.fullmatch(r"[A-Za-z0-9 _.-]+", label)):
+            raise click.ClickException("Povolena je krátká veřejná release poznámka bez tajných údajů.")
+        db = SessionLocal()
+        try:
+            if not inspect(db.get_bind()).has_table("ops_deployments"):
+                raise click.ClickException("Nejdříve spusťte upgrade-db.")
+            identity = code_identity(Path(__file__).resolve().parent.parent)
+            if identity["missing_files"]:
+                raise click.ClickException("Na serveru chybí kontrolované zdrojové soubory; release neoznačuji jako nasazený.")
+            latest = db.scalar(select(OpsDeployment).order_by(OpsDeployment.id.desc()).limit(1))
+            if latest and latest.fingerprint == identity["source_fingerprint"]:
+                click.echo("Nasazený obsah již je evidován, žádný nový záznam.")
+                return
+            row = OpsDeployment(
+                sha=identity["deployed_commit"] or "",
+                source=identity["commit_source"],
+                fingerprint=identity["source_fingerprint"],
+                label=label.strip(),
+            )
+            db.add(row)
+            db.commit()
+            click.echo("Nasazení zaznamenáno (otisk " + identity["source_fingerprint"][:16] + "…).")
+        finally:
+            db.close()
+
     @app.cli.command("sync-mailboxes")
     @click.option("--limit", default=20, type=int)
     def sync_mailboxes(limit):
-        """Cron-driven bounded mail sync; no long-running web request."""
+        """Bounded cron sync with a redacted attempt/result ledger."""
         db = SessionLocal()
-        processed = 0
+        processed, failures = 0, 0
+        run = None
         try:
-            boxes = db.scalars(select(Mailbox).join(Organization).where(Organization.active.is_(True)).order_by(Mailbox.id).limit(50)).all()
+            if inspect(db.get_bind()).has_table("ops_job_runs"):
+                run = OpsJobRun(name="sync-mailboxes", state="running")
+                db.add(run)
+                db.commit()
+            boxes = db.scalars(
+                select(Mailbox).join(Organization)
+                .where(Organization.active.is_(True))
+                .order_by(Mailbox.id).limit(50)
+            ).all()
             for box in boxes:
                 try:
                     processed += sync_inbox(db, box, app.config["MAIL_ENCRYPTION_KEY"], limit=limit)
                     click.echo(f"Mailbox {box.id}: OK")
                 except MailError:
-                    click.echo(f"Mailbox {box.id}: ERROR (see admin console)")
-            click.echo(f"New headers: {processed}")
+                    failures += 1
+                    db.rollback()
+                    click.echo(f"Mailbox {box.id}: ERROR (no private details in logs)")
+            click.echo(f"New headers: {processed}; failed mailboxes: {failures}")
+            if run is not None:
+                run.state = "partial" if failures else "ok"
+                run.finished_at = now()
+                run.processed, run.failed = processed, failures
+                db.commit()
+        except Exception:
+            db.rollback()
+            if run is not None:
+                run = db.get(OpsJobRun, run.id)
+                if run is not None:
+                    run.state, run.finished_at = "failed", now()
+                    run.processed, run.failed = processed, failures
+                    db.commit()
+            raise
         finally:
             db.close()
 
