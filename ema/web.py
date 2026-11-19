@@ -2209,8 +2209,13 @@ def create_app(test_config=None):
 
     def assistant_allowed():
         allowed = {e.strip().lower() for e in app.config["EMA_AI_ALLOWED_EMAILS"].split(",") if e.strip()}
-        # Optional allowlist controls rollout. Empty = authenticated permitted users.
-        return not allowed or g.user.email.lower() in allowed
+        # A verified Superadmin connector grants normal authenticated users
+        # their OWN scoped context. Legacy environment keys keep the old
+        # allowlist-only behavior, preventing accidental rollout and billing.
+        if allowed:
+            return g.user.email.lower() in allowed
+        connector = engine_connector()
+        return bool(connector and connector.state == "verified")
 
     @app.post("/superadmin/intelligence/key")
     @admin_required
