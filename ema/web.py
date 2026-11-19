@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 import click
-from flask import Flask, abort, flash, g, redirect, render_template, request, session, url_for, send_from_directory, send_file
+from flask import Flask, abort, flash, g, redirect, render_template, request, session, url_for, send_from_directory, send_file, jsonify
 from sqlalchemy import func, select, text, or_, and_, case, inspect
 from sqlalchemy.exc import IntegrityError
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -408,36 +408,126 @@ def create_app(test_config=None):
         session.clear()
         return redirect(url_for("login"))
 
+    def parse_assistant_project(value):
+        raw = str(value or "").strip()
+        if not raw:
+            return None, None
+        if not raw.isdigit() or int(raw) < 1:
+            abort(400, description="Neplatné ID projektu")
+        project = project_or_403(int(raw))
+        return project.id, project
+
+    def restore_legacy_threads(project_id):
+        # Old user/project messages remain readable after the additive migration.
+        legacy = g.db.scalar(select(AssistantTurn.id).where(
+            AssistantTurn.user_id == g.user.id,
+            AssistantTurn.project_id == project_id,
+            AssistantTurn.thread_id.is_(None)).limit(1))
+        if legacy:
+            row = AssistantThread(user_id=g.user.id, project_id=project_id,
+                                  title="Původní konverzace")
+            g.db.add(row)
+            g.db.flush()
+            for turn in g.db.scalars(select(AssistantTurn).where(
+                AssistantTurn.user_id == g.user.id,
+                AssistantTurn.project_id == project_id,
+                AssistantTurn.thread_id.is_(None))).all():
+                turn.thread_id = row.id
+            g.db.commit()
+
+    def list_assistant_threads(project_id):
+        restore_legacy_threads(project_id)
+        return g.db.scalars(select(AssistantThread).where(
+            AssistantThread.user_id == g.user.id,
+            AssistantThread.project_id == project_id,
+            AssistantThread.archived.is_(False))
+            .order_by(AssistantThread.updated_at.desc(), AssistantThread.id.desc())
+            .limit(60)).all()
+
+    def assistant_thread_or_404(thread_id):
+        thread = g.db.get(AssistantThread, thread_id)
+        if not thread or thread.user_id != g.user.id or thread.archived:
+            abort(404)
+        if thread.project_id is not None:
+            project_or_403(thread.project_id)
+        return thread
+
+    def assistant_thread_messages(thread):
+        return list(reversed(g.db.scalars(select(AssistantTurn).where(
+            AssistantTurn.user_id == g.user.id, AssistantTurn.thread_id == thread.id)
+            .order_by(AssistantTurn.id.desc()).limit(80)).all()))
+
+    def thread_json(row):
+        return {"id": row.id, "title": row.title, "project_id": row.project_id,
+                "updated_at": row.updated_at.isoformat() if row.updated_at else None}
+
+    @app.get("/assistant/threads")
+    @login_required
+    def assistant_threads_list():
+        pid, _ = parse_assistant_project(request.args.get("project_id"))
+        return jsonify({"threads": [thread_json(t) for t in list_assistant_threads(pid)]})
+
+    @app.get("/assistant/threads/<int:thread_id>")
+    @login_required
+    def assistant_thread_detail(thread_id):
+        thread = assistant_thread_or_404(thread_id)
+        return jsonify({"thread": thread_json(thread),
+                        "messages": [{"role": x.role, "body": x.body,
+                                      "created_at": x.created_at.isoformat() if x.created_at else None}
+                                     for x in assistant_thread_messages(thread)]})
+
+    @app.post("/assistant/threads")
+    @login_required
+    def assistant_thread_create():
+        pid, _ = parse_assistant_project(request.form.get("project_id"))
+        thread = AssistantThread(user_id=g.user.id, project_id=pid, title="Nová konverzace")
+        g.db.add(thread)
+        g.db.commit()
+        return jsonify({"thread": thread_json(thread)}), 201
+
+    @app.post("/assistant/threads/<int:thread_id>/archive")
+    @login_required
+    def assistant_thread_archive(thread_id):
+        row = assistant_thread_or_404(thread_id)
+        row.archived = True
+        row.updated_at = now()
+        g.db.commit()
+        return jsonify({"archived": True, "id": row.id})
+
     @app.route("/")
     @login_required
     def home():
-        # One conversational workspace with optional project context; never cross project ACLs.
-        raw_project = request.args.get("project")
-        selected = None
-        if raw_project is not None:
-            if not raw_project.isdigit() or int(raw_project) < 1:
-                abort(400, description="Neplatný projekt")
-            selected = project_or_403(int(raw_project))
+        pid, selected = parse_assistant_project(request.args.get("project"))
+        if selected:
             g.project = selected
             if g.db.scalar(select(Membership.id).where(
                 Membership.organization_id == selected.organization_id,
                 Membership.user_id == g.user.id)):
                 g.org = g.db.get(Organization, selected.organization_id)
-        project_scope = AssistantTurn.project_id == selected.id if selected else AssistantTurn.project_id.is_(None)
-        turns = g.db.scalars(select(AssistantTurn).where(
-            AssistantTurn.user_id == g.user.id, project_scope
-        ).order_by(AssistantTurn.id.desc()).limit(60)).all()
+        threads = list_assistant_threads(pid)
+        raw_thread_id = request.args.get("thread", "")
+        if raw_thread_id:
+            if not raw_thread_id.isdigit():
+                abort(400)
+            active_thread = assistant_thread_or_404(int(raw_thread_id))
+            if active_thread.project_id != pid:
+                abort(404)
+        else:
+            active_thread = threads[0] if threads else None
+        turns = assistant_thread_messages(active_thread) if active_thread else []
         visible = base_context()["accessible_projects"]
-        allowed = {e.strip().lower() for e in app.config["EMA_AI_ALLOWED_EMAILS"].split(",") if e.strip()}
-        ai_ready = bool(app.config["EMA_AI_ENGINE_API_KEY"] and g.user.email.lower() in allowed)
+        try:
+            ai_ready = bool(engine_key() and assistant_allowed())
+        except EngineConfigError:
+            ai_ready = False
         selected_tasks = g.db.scalars(select(Task).where(
             Task.project_id == selected.id, Task.organization_id == selected.organization_id
         ).order_by(Task.id.desc()).limit(20)).all() if selected else []
         ctx, scope_orgs, scoped_projects = current_scope()
         reminders = [t for t in visible_tasks(g.db, scope_orgs, scoped_projects) if not t.done][:8]
         return render("home", projects=scoped_projects, selected_project=selected,
-                      assistant_turns=list(reversed(turns)),
-                      ai_ready=ai_ready, selected_tasks=selected_tasks,
+                      assistant_turns=turns, assistant_threads=threads,
+                      active_thread=active_thread, ai_ready=ai_ready, selected_tasks=selected_tasks,
                       reminders=reminders, reminder_projects={p.id: p.name for p in visible},
                       today=now().date(), is_first_setup=not bool(ctx["orgs"]))
 
@@ -1444,40 +1534,86 @@ def create_app(test_config=None):
     @app.post("/assistant")
     @login_required
     def ask_assistant():
-        allowed = {e.strip().lower() for e in app.config["EMA_AI_ALLOWED_EMAILS"].split(",") if e.strip()}
-        if not app.config["EMA_AI_ENGINE_API_KEY"] or g.user.email.lower() not in allowed:
-            flash("AI chat ještě není pro tento účet připojen. Správce musí nastavit Fresh AI Engine.", "error")
-            return redirect(url_for("home"))
-        pid = positive_id("project_id")
-        if field("project_id") and not pid:
-            abort(400, description="Neplatné ID projektu")
-        selected = project_or_403(pid) if pid else None
+        ajax = "application/json" in request.headers.get("Accept", "")
+        def fail(message, status=503, thread_id=None):
+            if ajax:
+                return jsonify({"ok": False, "error": message, "thread_id": thread_id}), status
+            flash(message, "error")
+            url = url_for("home", thread=thread_id) if thread_id else url_for("home")
+            return redirect(url)
+        try:
+            key = engine_key()
+        except EngineConfigError as exc:
+            return fail(str(exc))
+        if not key or not assistant_allowed():
+            return fail("AI chat není ověřen nebo povolen. Superadmin musí připojit a ověřit Fresh AI Engine.")
+        pid, selected = parse_assistant_project(request.form.get("project_id"))
         question = required("body", 4000)
-        scope = AssistantTurn.project_id == pid if pid else AssistantTurn.project_id.is_(None)
+        raw_thread = request.form.get("thread_id", "").strip()
+        if raw_thread:
+            if not raw_thread.isdigit():
+                abort(400)
+            thread = assistant_thread_or_404(int(raw_thread))
+            if thread.project_id != pid:
+                abort(403)
+        else:
+            thread = AssistantThread(user_id=g.user.id, project_id=pid,
+                                     title=question[:105].replace("\n", " "))
+            g.db.add(thread)
+            g.db.flush()
+        nonce = request.form.get("nonce", "").strip() or secrets.token_urlsafe(24)
+        if len(nonce) > 80 or len(nonce) < 12 or not re.fullmatch(r"[A-Za-z0-9_-]+", nonce):
+            abort(400, description="Neplatné ID požadavku")
+        # Commit a globally unique user/nonce attempt BEFORE the billable call.
+        duplicate = g.db.scalar(select(AssistantSubmission.id).where(
+            AssistantSubmission.user_id == g.user.id, AssistantSubmission.nonce == nonce))
+        if duplicate:
+            g.db.rollback()
+            return fail("Tento AI požadavek již byl přijat. Zkontroluj historii, než odešleš nový.", 409, thread.id)
         recent = g.db.scalars(select(AssistantTurn).where(
-            AssistantTurn.user_id == g.user.id, scope
-        ).order_by(AssistantTurn.id.desc()).limit(8)).all()
+            AssistantTurn.user_id == g.user.id,
+            AssistantTurn.thread_id == thread.id)
+            .order_by(AssistantTurn.id.desc()).limit(8)).all()
         visible = base_context()["scoped_projects"]
         tasks_for_context = g.db.scalars(select(Task).where(
-            Task.project_id == pid, Task.organization_id == selected.organization_id
-        ).order_by(Task.id.desc()).limit(30)).all() if selected else []
-        g.db.add(AssistantTurn(user_id=g.user.id, project_id=pid, role="user", body=question))
-        g.db.commit()
+            Task.project_id == pid, Task.organization_id == selected.organization_id)
+            .order_by(Task.id.desc()).limit(30)).all() if selected else []
+        attempt = AssistantSubmission(user_id=g.user.id, thread_id=thread.id,
+                                      nonce=nonce, status="running")
+        g.db.add(attempt)
+        g.db.add(AssistantTurn(user_id=g.user.id, project_id=pid,
+                               thread_id=thread.id, role="user", body=question))
+        if thread.title == "Nová konverzace":
+            thread.title = question[:105].replace("\n", " ")
+        thread.updated_at = now()
+        try:
+            g.db.commit()
+        except IntegrityError:
+            g.db.rollback()
+            return fail("Požadavek již byl přijat. Neodesílej ho automaticky znovu.", 409, thread.id)
         try:
             answer = run_assistant(
-                key=app.config["EMA_AI_ENGINE_API_KEY"],
-                base_url=app.config["EMA_AI_ENGINE_BASE_URL"],
+                key=key, base_url=app.config["EMA_AI_ENGINE_BASE_URL"],
                 user_id=g.user.id, project_id=pid, question=question,
                 projects=[selected] if selected else visible,
                 selected_project=selected, tasks=tasks_for_context,
                 recent_turns=list(reversed(recent)),
             )
-            g.db.add(AssistantTurn(user_id=g.user.id, project_id=pid, role="assistant", body=answer))
-            audit("assistant.reply", f"project:{pid or 'all'}", selected.organization_id if selected else None)
+            g.db.add(AssistantTurn(user_id=g.user.id, project_id=pid, thread_id=thread.id,
+                                   role="assistant", body=answer))
+            attempt.status = "completed"
+            thread.updated_at = now()
+            audit("assistant.reply", f"thread:{thread.id}", selected.organization_id if selected else None)
             g.db.commit()
+            if ajax:
+                return jsonify({"ok": True, "thread": thread_json(thread),
+                                "answer": answer, "status": "completed"})
         except AssistantError as exc:
-            flash(str(exc), "error")
-        return redirect(url_for("home", project=pid) if pid else url_for("home"))
+            attempt.status = "uncertain"
+            g.db.commit()
+            return fail(str(exc) + " Požadavek nebyl automaticky opakován.", 502, thread.id)
+        return redirect(url_for("home", project=pid, thread=thread.id)
+                        if pid else url_for("home", thread=thread.id))
 
     @app.post("/projects")
     @login_required
