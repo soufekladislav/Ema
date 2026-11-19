@@ -1,5 +1,6 @@
 """Idempotent, additive schema upgrade for Ema pilot. Backup DB before running."""
-from sqlalchemy import inspect, text
+from sqlalchemy import inspect, text, select
+from sqlalchemy.orm import Session
 from .models import AssistantTurn, AssistantThread, AIEngineConnection, MailboxView, MailUserState, MailboxConnectionCheck, OpsIncident, OpsJobRun, OpsDeployment, Base
 
 
@@ -20,6 +21,29 @@ def upgrade_schema(engine):
         if "thread_id" not in turns:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE assistant_turns ADD COLUMN thread_id INTEGER NULL"))
+    # Preserve pre-V1 conversation: migrate unthreaded turns into one private
+    # historic conversation per user/project. Repeatable and non-destructive.
+    with Session(engine) as db:
+        pairs = db.execute(text(
+            "SELECT DISTINCT user_id, project_id FROM assistant_turns WHERE thread_id IS NULL"
+        )).all()
+        for uid, pid in pairs:
+            existing = db.scalar(select(AssistantThread).where(
+                AssistantThread.user_id == uid,
+                AssistantThread.project_id == pid,
+                AssistantThread.title == "Původní konverzace"))
+            thread = existing or AssistantThread(user_id=uid, project_id=pid,
+                                                 title="Původní konverzace")
+            if not existing:
+                db.add(thread)
+                db.flush()
+            rows = db.scalars(select(AssistantTurn).where(
+                AssistantTurn.user_id == uid,
+                AssistantTurn.project_id == pid,
+                AssistantTurn.thread_id.is_(None))).all()
+            for row in rows:
+                row.thread_id = thread.id
+        db.commit()
     inspector = inspect(engine)
     if not inspector.has_table("mailboxes"):
         raise RuntimeError("The mailboxes table is missing.")
