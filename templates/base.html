@@ -24,6 +24,8 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='mail-layout-v13.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='mail-final-v13.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='ops-console-v1.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='ema-ai-chat-v1.css') }}">
+  <script src="{{ url_for('static', filename='ema-ai-chat-v1.js') }}" defer></script>
   <script src="{{ url_for('static', filename='mail-layout-v13.js') }}" defer></script>
   <script src="{{ url_for('static', filename='mail-pager-v11.js') }}" defer></script>
   <link rel="stylesheet" href="{{ url_for('static', filename='mail-actions-v12.css') }}">
@@ -94,6 +96,52 @@
     </main>
   </div>
 </div>
+  <aside class="ema-ai-float" data-ema-ai-widget>
+    <button class="ema-ai-launcher" type="button" data-ema-chat-open
+            aria-haspopup="dialog" aria-controls="ema-ai-chat-drawer" aria-label="Chat s Emou">
+      <img src="{{ url_for('static', filename='icons/ema-avatar.png', v='ema-original-20261119') }}"
+           width="44" height="44" alt="">
+      <span>Zeptat se Emy</span>
+    </button>
+    <section class="ema-ai-drawer" id="ema-ai-chat-drawer" role="dialog"
+             aria-modal="false" aria-label="Chat s Emou" hidden
+             data-ema-chat-drawer data-csrf="{{ csrf_token() }}"
+             data-context="{{ selected_project.id if selected_project else '' }}">
+      <header class="ema-ai-drawer-head">
+        <img src="{{ url_for('static', filename='icons/ema-avatar.png', v='ema-original-20261119') }}" width="38" height="38" alt="">
+        <div><strong>Ema</strong><small>Obchodní a projektová asistentka</small></div>
+        <button class="ema-ai-icon-button" type="button" data-ema-chat-close aria-label="Zavřít chat">×</button>
+      </header>
+      <div class="ema-ai-drawer-options">
+        <label>Kontext projektu
+          <select data-ema-chat-project aria-label="Kontext chatu">
+            <option value="">Všechny dostupné projekty</option>
+            {% for p in accessible_projects %}
+            <option value="{{ p.id }}" {{ 'selected' if selected_project and selected_project.id == p.id else '' }}>{{ p.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <button class="btn small-btn" type="button" data-ema-chat-new>+ Nový</button>
+      </div>
+      <details class="ema-ai-drawer-history">
+        <summary>Historie konverzací</summary>
+        <div data-ema-chat-thread-list class="ema-ai-drawer-history-list"></div>
+      </details>
+      <div class="ema-ai-drawer-messages" data-ema-chat-messages role="log" aria-live="polite" aria-relevant="additions">
+        <p class="small muted">Vyber konverzaci nebo napiš nový dotaz. Změny nic samy neprovádějí.</p>
+      </div>
+      <p class="ema-ai-drawer-status small" data-ema-chat-status role="status"></p>
+      <form class="ema-ai-drawer-form" data-ema-chat-form>
+        <label class="sr-only" for="ema-ai-quick-question">Zpráva pro Emu</label>
+        <textarea id="ema-ai-quick-question" name="body" rows="2" maxlength="4000"
+                  placeholder="Co dnes vyřešíme?" required></textarea>
+        <button class="btn primary" type="submit">Odeslat</button>
+      </form>
+      <div class="ema-ai-drawer-footer"><a href="{{ url_for('home') }}">Otevřít celé pracovní prostředí</a>
+        <button type="button" class="ema-ai-history-archive" data-ema-chat-archive hidden>Archivovat chat</button>
+      </div>
+    </section>
+  </aside>
   <dialog id="ema-install-dialog" class="ema-install-dialog" aria-labelledby="ema-install-heading">
     <div class="ema-install-dialog-head">
       <h2 id="ema-install-heading">EMA do mobilu</h2>
