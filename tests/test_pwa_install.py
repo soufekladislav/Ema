@@ -34,7 +34,7 @@ def test_pwa_install_link_after_account_settings_on_all_primary_pages(web_client
         assert "Nainstalovat EMA" in html, path
         assert html.index("Nastavení účtu") < html.index("Nainstalovat EMA"), path
         assert 'id="ema-pwa-splash"' in html, path
-        assert "2026/10/fresh-hub.png" in html, path
+        assert "icons/ema-source.jpg" in html, path
         assert "apple-mobile-web-app-title\" content=\"EMA" in html
         assert "pwa-install-v2.js" in html
         assert "pwa-install-v2.css" in html
@@ -63,7 +63,7 @@ def test_pwa_start_screen_uses_ema_image_and_no_fresh_crackers_logo(web_client):
     marker = '<div id="ema-pwa-splash"'
     assert marker in html
     area = html.split(marker, 1)[1].split("</div>", 2)[0]
-    assert "2026/10/fresh-hub.png" in area
+    assert "icons/ema-source.jpg" in area
     assert "Fresh-Crackers-Logo.png" not in area
     assert "<strong>EMA</strong>" in area
 
@@ -111,3 +111,27 @@ def test_manifest_uses_same_origin_installable_icons_not_external_url(web_client
     assert all(item["src"].startswith("/static/icons/") for item in data["icons"])
     assert "192x192" in {i["sizes"] for i in data["icons"]}
     assert "512x512" in {i["sizes"] for i in data["icons"]}
+
+
+def test_chat_uses_original_ema_avatar_not_a_letter(web_client):
+    client = web_client
+    login(client, "owner")
+    page = client.get("/").get_data(as_text=True)
+    assert 'class="ema-avatar"><img' in page
+    assert 'class="ema-welcome-mark"><img' in page
+    assert "icons/ema-avatar.png" in page
+    assert "icons/ema-source.jpg" in page
+    assert "fresh-hub.png" not in page
+
+
+def test_updated_pwa_manifest_reuses_install_id_and_busts_icon_cache(web_client):
+    manifest = web_client.get("/manifest.webmanifest").get_json()
+    assert manifest["id"] == "/mail"
+    assert manifest["name"] == "EMA"
+    assert manifest["short_name"] == "EMA"
+    assert {x["sizes"] for x in manifest["icons"]} == {"192x192", "512x512"}
+    assert all("ema-original-20261119" in x["src"] for x in manifest["icons"])
+    assert all(x["src"].startswith("/static/icons/ema-") for x in manifest["icons"])
+    worker = web_client.get("/service-worker.js").get_data(as_text=True)
+    assert "ema-shell-20261119-original-ema" in worker
+    assert "ema-avatar.png" in worker and "ema-source.jpg" in worker

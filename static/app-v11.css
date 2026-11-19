@@ -568,3 +568,8 @@
 @media(min-width:761px){
   .ema-mobile-nav-toggle,.ema-appmenu-close,.ema-appmenu-backdrop{display:none!important}
 }
+
+/* Original Ema portrait in chat: keep original drawing, only crop for avatar. */
+.ema-avatar,.ema-welcome-mark{overflow:hidden;flex-shrink:0}
+.ema-avatar img,.ema-welcome-mark img{display:block;width:100%;height:100%;object-fit:cover;border-radius:inherit}
+.ema-chat-title .ema-avatar img{width:42px;height:42px}

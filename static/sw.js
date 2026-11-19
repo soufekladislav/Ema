@@ -1,9 +1,11 @@
 /* EMA offline shell v2: never serve stale application JS/CSS, authenticated data stays network-only. */
-const VERSION = "ema-shell-20261117-3";
+const VERSION = "ema-shell-20261119-original-ema";
 const SHELL = [
   "/static/offline.html",
   "/static/icons/ema-192.png",
   "/static/icons/ema-512.png",
+  "/static/icons/ema-avatar.png",
+  "/static/icons/ema-source.jpg",
 ];
 const ALLOWED = new Set(SHELL);
 self.addEventListener("install",(event)=>{

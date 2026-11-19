@@ -131,12 +131,12 @@ def test_hero_art_in_sidebar_and_project_chat(client):
     project_id = client.application.test_ids["project"]
     index_html = client.get("/").data
     assert b'class="sidebar-hero"' in index_html
-    assert b"2026/10/fresh-hub.png" in index_html
+    assert b"icons/ema-source.jpg" in index_html
     assert b"2023/10/Fresh-Crackers-Logo.png" in index_html
     chat_html = client.get(f"/project/{project_id}/chat").data
     assert b'class="chat-hero-image"' in chat_html
     assert b'class="empty-state chat-empty-state"' in chat_html
-    assert b"2026/10/fresh-hub.png" in chat_html
+    assert b"icons/ema-source.jpg" in chat_html
 
 
 def test_assistant_home_is_primary_and_ai_is_explicitly_disabled(client):

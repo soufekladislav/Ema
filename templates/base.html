@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="icon" type="image/png" href="https://www.freshcrackers.cz/wp-content/uploads/2023/10/Fresh-Crackers-Logo.png">
-  <link rel="apple-touch-icon" sizes="192x192" href="{{ url_for('static', filename='icons/ema-192.png', v='ema-v12') }}">
+  <link rel="apple-touch-icon" sizes="192x192" href="{{ url_for('static', filename='icons/ema-192.png', v='ema-original-20261119') }}">
   <link rel="manifest" href="{{ url_for('pwa_manifest') }}">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -41,7 +41,7 @@
       <span><strong>EMA HUB</strong><small>Fresh Crackers · asistentka</small></span>
     </a>
     <a class="sidebar-hero" href="{{ url_for('home') }}" aria-label="EMA – chat a nástěnka">
-      <img src="https://www.freshcrackers.cz/wp-content/uploads/2026/10/fresh-hub.png" alt="Ema" loading="lazy" referrerpolicy="no-referrer">
+      <img src="{{ url_for('static', filename='icons/ema-source.jpg', v='ema-original-20261119') }}" alt="Ema" loading="lazy" referrerpolicy="no-referrer">
       <span>Chat a nástěnka</span>
     </a>
     <span class="label">PRACOVNÍ PROSTŘEDÍ</span>
@@ -116,7 +116,7 @@
 {% else %}{% block login %}{% endblock %}{% endif %}
   <div id="ema-pwa-splash" class="ema-pwa-splash" aria-hidden="true" hidden>
     <div class="ema-pwa-splash-inner">
-      <img src="https://www.freshcrackers.cz/wp-content/uploads/2026/10/fresh-hub.png"
+      <img src="{{ url_for('static', filename='icons/ema-source.jpg', v='ema-original-20261119') }}"
            alt="" width="268" height="180" decoding="async" referrerpolicy="no-referrer">
       <strong>EMA</strong>
       <span>Obchodní a projektová asistentka</span>
