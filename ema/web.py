@@ -27,11 +27,12 @@ from .mail_folders import (
     append_sent_copy, empty_trash_batch, preview_trash_all, empty_trash_all, is_trash_folder, set_server_flags,
 )
 from .assistant_service import AssistantError, run_assistant
+from .ai_connection import seal_connector_key, reveal_connector_key, verify_connector_key
 from .contact_import import ImportErrorCSV, extract_contacts
 from .schema_upgrade import upgrade_schema
 from .ops import code_identity, collect_ops, verify_bearer
 from .models import (
-    Audit, AssistantTurn, Base, ChatMessage, Company, Contact, MailFolder, Mailbox, MailboxGrant, MailboxView, MailboxConnectionCheck, MailMessage, MailUserState,
+    Audit, AssistantTurn, AssistantThread, AssistantMessageAttempt, AIEngineConnection, Base, ChatMessage, Company, Contact, MailFolder, Mailbox, MailboxGrant, MailboxView, MailboxConnectionCheck, MailMessage, MailUserState,
     Membership, Opportunity, Organization, Outbound, OpsIncident, OpsJobRun, OpsDeployment, Project, ProjectGrant,
     Task, User, make_session, now,
 )
@@ -406,6 +407,35 @@ def create_app(test_config=None):
         session.clear()
         return redirect(url_for("login"))
 
+    def engine_connection():
+        if not inspect(g.db.get_bind()).has_table("ai_engine_connections"):
+            return None
+        return g.db.get(AIEngineConnection, 1)
+
+    def active_engine_key():
+        row = engine_connection()
+        if row is not None:
+            return reveal_connector_key(row, app.config["MAIL_ENCRYPTION_KEY"])
+        allowed = {v.strip().lower() for v in app.config["EMA_AI_ALLOWED_EMAILS"].split(",") if v.strip()}
+        if app.config["EMA_AI_ENGINE_API_KEY"] and g.user.email.lower() in allowed:
+            return app.config["EMA_AI_ENGINE_API_KEY"]
+        raise AssistantError("Fresh AI Engine není ověřený v Superadminu.")
+
+    def engine_available():
+        try:
+            active_engine_key()
+            return True
+        except AssistantError:
+            return False
+
+    def user_thread(tid):
+        row = g.db.get(AssistantThread, tid) if tid else None
+        if row is None or row.user_id != g.user.id:
+            abort(404)
+        if row.project_id:
+            project_or_403(row.project_id)
+        return row
+
     @app.route("/")
     @login_required
     def home():
@@ -421,13 +451,19 @@ def create_app(test_config=None):
                 Membership.organization_id == selected.organization_id,
                 Membership.user_id == g.user.id)):
                 g.org = g.db.get(Organization, selected.organization_id)
-        project_scope = AssistantTurn.project_id == selected.id if selected else AssistantTurn.project_id.is_(None)
+        thread_scope = AssistantThread.project_id == selected.id if selected else AssistantThread.project_id.is_(None)
+        threads = g.db.scalars(select(AssistantThread).where(
+            AssistantThread.user_id == g.user.id, thread_scope
+        ).order_by(AssistantThread.updated_at.desc(), AssistantThread.id.desc()).limit(60)).all()
+        requested = request.args.get("thread", "")
+        if requested and (not requested.isdigit() or not any(t.id == int(requested) for t in threads)):
+            abort(403)
+        current_thread = next((t for t in threads if str(t.id) == requested), None) if requested else (threads[0] if threads else None)
         turns = g.db.scalars(select(AssistantTurn).where(
-            AssistantTurn.user_id == g.user.id, project_scope
-        ).order_by(AssistantTurn.id.desc()).limit(60)).all()
+            AssistantTurn.user_id == g.user.id, AssistantTurn.thread_id == current_thread.id
+        ).order_by(AssistantTurn.id.desc()).limit(60)).all() if current_thread else []
         visible = base_context()["accessible_projects"]
-        allowed = {e.strip().lower() for e in app.config["EMA_AI_ALLOWED_EMAILS"].split(",") if e.strip()}
-        ai_ready = bool(app.config["EMA_AI_ENGINE_API_KEY"] and g.user.email.lower() in allowed)
+        ai_ready = engine_available()
         selected_tasks = g.db.scalars(select(Task).where(
             Task.project_id == selected.id, Task.organization_id == selected.organization_id
         ).order_by(Task.id.desc()).limit(20)).all() if selected else []
@@ -435,7 +471,7 @@ def create_app(test_config=None):
         reminders = [t for t in visible_tasks(g.db, scope_orgs, scoped_projects) if not t.done][:8]
         return render("home", projects=scoped_projects, selected_project=selected,
                       assistant_turns=list(reversed(turns)),
-                      ai_ready=ai_ready, selected_tasks=selected_tasks,
+                      ai_ready=ai_ready, assistant_threads=threads, current_thread=current_thread, selected_tasks=selected_tasks,
                       reminders=reminders, reminder_projects={p.id: p.name for p in visible},
                       today=now().date(), is_first_setup=not bool(ctx["orgs"]))
 
@@ -2032,6 +2068,52 @@ def create_app(test_config=None):
             response.headers["Content-Disposition"] = 'attachment; filename="ema-ops-manifest.json"'
         return response
 
+    @app.post("/superadmin/intelligence/connect")
+    @admin_required
+    def intelligence_connect():
+        if not inspect(g.db.get_bind()).has_table("ai_engine_connections"):
+            flash("Nejdříve proveď upgrade-db.", "error")
+            return redirect(url_for("superadmin")+"#ops-intelligence")
+        try:
+            encrypted = seal_connector_key(request.form.get("api_key", ""),
+                                          app.config["MAIL_ENCRYPTION_KEY"])
+        except AssistantError as ex:
+            flash(str(ex), "error")
+            return redirect(url_for("superadmin")+"#ops-intelligence")
+        row = engine_connection()
+        if row is None:
+            row = AIEngineConnection(id=1, encrypted_key=encrypted)
+            g.db.add(row)
+        else:
+            row.encrypted_key = encrypted
+        row.verified, row.checked_at, row.check_status = False, None, "not_tested"
+        row.updated_at = now()
+        audit("ai_engine.key_saved", "platform")
+        g.db.commit()
+        flash("Klíč bezpečně uložen. Nyní jej ověř.", "success")
+        return redirect(url_for("superadmin")+"#ops-intelligence")
+
+    @app.post("/superadmin/intelligence/verify")
+    @admin_required
+    def intelligence_verify():
+        row = engine_connection()
+        if row is None:
+            flash("Nejdříve ulož přístupový klíč.", "error")
+            return redirect(url_for("superadmin")+"#ops-intelligence")
+        from .mail_service import decrypt_password
+        try:
+            key = decrypt_password(row.encrypted_key, app.config["MAIL_ENCRYPTION_KEY"])
+            verify_connector_key(key, app.config["EMA_AI_ENGINE_BASE_URL"])
+        except (AssistantError, MailError, ValueError):
+            row.verified, row.check_status = False, "failed"
+            flash("Ověření selhalo. Zkontroluj kredity, klíč a dostupnost AI Engine.", "error")
+        else:
+            row.verified, row.check_status = True, "ok"
+            flash("AI Engine ověřen skutečným autorizovaným požadavkem.", "success")
+        row.checked_at = now()
+        g.db.commit()
+        return redirect(url_for("superadmin")+"#ops-intelligence")
+
     @app.route("/superadmin")
     @admin_required
     def superadmin():
@@ -2040,11 +2122,12 @@ def create_app(test_config=None):
         # A partial schema upgrade must not make the console itself crash
         # before it can display which diagnostic tables are missing.
         ops = collect_ops(g.db, Path(__file__).resolve().parent.parent)
+        ai_settings = engine_connection()
         total_messages = ops["counts"].get("indexed_mail_headers")
         total_mailboxes = ops["counts"].get("mailboxes")
         # Shared DB storage cannot be accurately attributed per tenant.
         return render("superadmin", users=users, all_orgs=orgs, total_messages=total_messages,
-                      total_mailboxes=total_mailboxes, ops=ops,
+                      total_mailboxes=total_mailboxes, ops=ops, ai_settings=ai_settings,
                       database_size="Není dostupné bez samostatného měření")
 
     @app.post("/superadmin/users")
