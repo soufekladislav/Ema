@@ -18,6 +18,7 @@
   const csrf = drawer.dataset.csrf;
   let current = null;
   let busy = false;
+  let engineReady = false;
   const storedDraft = "ema:assistant:unsent";
   try { input.value = sessionStorage.getItem(storedDraft) || ""; } catch (_) {}
   input.addEventListener("input", () => {
@@ -25,7 +26,7 @@
   });
   function setBusy(value) {
     busy = value;
-    sendButton.disabled = value;
+    sendButton.disabled = value || !engineReady;
     newButton.disabled = value;
     picker.disabled = value;
     input.disabled = value;
@@ -78,13 +79,13 @@
     }
     const chosen = preferred || current || data.threads[0]?.id || null;
     picker.value = chosen ? String(chosen) : "";
-    if (!data.ready) {
+    engineReady = Boolean(data.ready);
+    if (!engineReady) {
       notice("AI Engine zatím není ověřen v Superadminu.");
-      sendButton.disabled = true;
     } else {
       notice("");
-      sendButton.disabled = false;
     }
+    sendButton.disabled = busy || !engineReady;
     await loadThread(chosen);
   }
   function close() {
