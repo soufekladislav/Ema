@@ -510,7 +510,7 @@
         <p class="small muted">Použije skutečné autorizované POST /v1/engine/run a může odečíst malé množství kreditů. Veřejný /v1/health klíč neověřuje. Bez automatického opakování.</p>
       </form>
       {% if ai_status.source == 'superadmin' %}
-      <form method="post" action="{{ url_for('disconnect_intelligence') }}" onsubmit="return confirm('Odpojit Emu od AI Engine?')">
+      <form method="post" action="{{ url_for('disconnect_intelligence') }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="confirm" value="disconnect">
         <button class="btn small-btn" type="submit">Odpojit konektor</button>
