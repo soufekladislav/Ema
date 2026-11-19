@@ -79,7 +79,7 @@ def code_identity(root, environment=None):
     raw_sha = (environment.get("EMA_DEPLOY_SHA") or "").strip()
     git_sha = _git_head(root)
     sha, source = (git_sha, "git_checkout") if git_sha else (None, "unknown")
-    if raw_sha and re.fullmatch(r"[a-fA-F0-9]{40,64}", raw_sha):
+    if sha is None and raw_sha and re.fullmatch(r"[a-fA-F0-9]{40,64}", raw_sha):
         sha, source = raw_sha.lower(), "operator_declared"
     files = {}
     for name in FINGERPRINT_PATHS:
@@ -221,7 +221,8 @@ def collect_ops(db, root, environment=None):
             "checks": "passive_only_no_live_imap_calls",
             "background_schedule_verified": False,
             "github_comparison_available": False,
-            "exon_deployment_verified": bool(identity["deployed_commit"]),
+            "exon_deployment_verified": False,
+            "server_snapshot_collected": True,
             "incident_history_since_feature_install": True,
         },
     }
