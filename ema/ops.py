@@ -25,6 +25,7 @@ FINGERPRINT_PATHS = (
     "ema/models.py",
     "ema/security.py",
     "ema/assistant_service.py",
+    "ema/ai_connection.py",
     "ema/contact_import.py",
     "ema/mail_service.py",
     "ema/mail_folders.py",
@@ -53,6 +54,8 @@ FINGERPRINT_PATHS = (
     "static/mail-layout-v13.css",
     "static/mail-final-v13.css",
     "static/ops-console-v1.css",
+    "static/ema-chat-drawer-v1.js",
+    "static/ema-chat-drawer-v1.css",
     "static/mobile-shell-v2.js",
     "static/mobile-shell-v2.css",
     "static/pwa-install-v2.js",
@@ -69,6 +72,8 @@ RELEASE_STEPS = (
      "scope": "HTML, Trash, pořadí, šířka, odpovědi, podpisy"},
     {"release": "Ops V1", "github": "admin/manifest",
      "scope": "verze, health, worker, incidents, audit, redigovaný manifest"},
+    {"release": "AI Chat V1", "github": "AI Engine / unified chat",
+     "scope": "privátní rozhovory, globální drawer, šifrovaný API konektor"},
 )
 
 
