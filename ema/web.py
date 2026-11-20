@@ -29,7 +29,7 @@ from .mail_folders import (
 )
 from .assistant_service import AssistantError, run_assistant
 from .ai_connection import seal_connector_key, reveal_connector_key, verify_connector_key
-from .contact_import import ImportErrorCSV, analyze_contacts
+from .contact_import import ImportErrorCSV, analyze_contacts, MAX_CSV_BYTES
 from .fresh_core_contacts import FreshCoreError, canonical_site, fetch_page, synchronize_source, update_csv_origin
 from .schema_upgrade import upgrade_schema
 from .ops import code_identity, collect_ops, verify_bearer
@@ -277,7 +277,7 @@ def create_app(test_config=None):
         "SESSION_COOKIE_HTTPONLY": True,
         "SESSION_COOKIE_SAMESITE": "Lax",
         "PERMANENT_SESSION_LIFETIME": timedelta(hours=12),
-        "MAX_CONTENT_LENGTH": 1024 * 1024,
+        "MAX_CONTENT_LENGTH": MAX_CSV_BYTES + 512 * 1024,
         "EMA_AI_ENGINE_BASE_URL": os.getenv("EMA_AI_ENGINE_BASE_URL", "https://aiengine.freshcrackers.cz"),
         "EMA_AI_ENGINE_API_KEY": os.getenv("EMA_AI_ENGINE_API_KEY", ""),
         "EMA_AI_ALLOWED_EMAILS": os.getenv("EMA_AI_ALLOWED_EMAILS", ""),
@@ -1636,7 +1636,7 @@ def create_app(test_config=None):
             flash("Vyber soubor CSV.", "error")
             return redirect(url_for("database_hub"))
         try:
-            entries, csv_report = analyze_contacts(uploaded.stream.read(950001))
+            entries, csv_report = analyze_contacts(uploaded.stream.read(MAX_CSV_BYTES + 1))
         except ImportErrorCSV as ex:
             flash(str(ex), "error")
             return redirect(url_for("database_hub"))
@@ -1653,9 +1653,12 @@ def create_app(test_config=None):
         contact_entries = [row for row in entries if row.get("entity_type") != "company"]
         company_entries = [row for row in entries if row.get("entity_type") == "company"]
         emails = {row["email"].lower() for row in contact_entries if row["email"]}
-        seen = set(g.db.scalars(select(func.lower(Contact.email)).where(
+        existing_contacts = g.db.scalars(select(Contact).where(
             Contact.organization_id == org_id, func.lower(Contact.email).in_(emails)
-        )).all()) if emails else set()
+        ).order_by(Contact.id)).all() if emails else []
+        # The oldest canonical contact wins when legacy records share an email.
+        existing_by_email = {c.email.lower(): c for c in reversed(existing_contacts)}
+        seen = set(existing_by_email)
         source_label = field("source_name", 170) or uploaded.filename[:170]
         duplicates = sum(1 for item in contact_entries if item["email"] and item["email"] in seen)
         company_names = {row["company_name"].casefold() for row in entries if row["company_name"]}
@@ -1682,6 +1685,25 @@ def create_app(test_config=None):
             return redirect(url_for("database_hub"))
         added = 0
         skipped = 0
+        pending = []
+        no_email_imported = set()
+
+        def flush_new_contacts():
+            # Avoid one SQL INSERT round-trip per new person; retain a single
+            # request transaction so a failed import does not become half-saved.
+            if not pending:
+                return
+            g.db.flush()
+            for contact, label, identity in pending:
+                g.db.add(ContactOrigin(
+                    organization_id=org_id, contact_id=contact.id,
+                    source_site="CSV: " + label, source_kind="csv",
+                    external_id=identity,
+                ))
+                if contact.email:
+                    existing_by_email[contact.email.lower()] = contact
+            pending.clear()
+
         for item in contact_entries:
             email = item["email"].lower()
             label = (str(item["attributes"].get("zdroj") or "").strip()[:170] or source_label)
@@ -1692,6 +1714,9 @@ def create_app(test_config=None):
             }, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
             identity = email or ("noemail:" + noemail_key)
             if not email:
+                if (label, identity) in no_email_imported:
+                    skipped += 1
+                    continue
                 old_origin = g.db.scalar(select(ContactOrigin).where(
                     ContactOrigin.organization_id == org_id,
                     ContactOrigin.source_site == "CSV: " + label,
@@ -1703,9 +1728,9 @@ def create_app(test_config=None):
                     skipped += 1
                     continue
             if email and email in seen:
-                existing = g.db.scalar(select(Contact).where(
-                    Contact.organization_id == org_id,
-                    func.lower(Contact.email) == email).order_by(Contact.id).limit(1))
+                if email not in existing_by_email:
+                    flush_new_contacts()
+                existing = existing_by_email.get(email)
                 if existing:
                     update_csv_origin(g.db, existing, label)
                 skipped += 1
@@ -1722,11 +1747,15 @@ def create_app(test_config=None):
                               name=item["name"], email=email, phone=item["phone"],
                               metadata_json=json.dumps(metadata, ensure_ascii=False))
             g.db.add(contact)
-            g.db.flush()
-            update_csv_origin(g.db, contact, label, identity)
+            pending.append((contact, label, identity))
             if email:
                 seen.add(email)
+            else:
+                no_email_imported.add((label, identity))
+            if len(pending) >= 200:
+                flush_new_contacts()
             added += 1
+        flush_new_contacts()
         company_added = company_linked = company_repeated = 0
         for item in company_entries:
             company_name = item["company_name"].strip()

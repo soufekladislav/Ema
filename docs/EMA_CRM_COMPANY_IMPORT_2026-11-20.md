@@ -8,7 +8,7 @@ Na skutečném souboru `Fresh_Crackers_akvizice_100_firem_2026-11-16 (1).xlsx - 
 ## 3 kontrolní brány standardu
 1. **Reuse:** Původní `Company` a `Contact`, jeden `analyze_contacts` parser, `/database/import`, `/org/<org_id>/clients` a CRM ACL. Žádná druhá databáze firem. Jedna malá `company_origins` tabulka navazuje na dosavadní `contact_origins`, protože firma musí mít vlastní historii zdrojů.
 2. **UX:** CSV bez kontaktní osoby vytvoří **firmu**, ne falešný kontakt. Soubor osob vytvoří kontakty, smíšený soubor oba typy. Statistiky oddělují osoby a klientské firmy. Preview uvádí oba typy a shody. Při zobrazení firem lze rozbalit zdrojová data a ručně upravit název, IČO, telefon, e-mail, poznámky; kontakty lze opravovat obdobně. Původní zdroj zůstává zachován.
-3. **Stabilita:** Původní 100 firem importovat do jedné vybrané vlastní firmy Emy, další import téhož souboru beze změny počtu firem; opakovaný import z jiného zdroje propojí nový původ. Metadata zachovávají původní české názvy sloupců a doslovné hodnoty včetně `neověřeno`. Oprávnění nelze obejít; marketingový souhlas se neodvozuje. Limity CSV 1 000 řádků a 950 kB zůstávají.
+3. **Stabilita:** Původní 100 firem importovat do jedné vybrané vlastní firmy Emy, další import téhož souboru beze změny počtu firem; opakovaný import z jiného zdroje propojí nový původ. Metadata zachovávají původní české názvy sloupců a doslovné hodnoty včetně `neověřeno`. Oprávnění nelze obejít; marketingový souhlas se neodvozuje. Nově po opravě z 21. 11. 2026: nejvýše 5 000 datových řádků a 5 MB na jeden CSV import; není třeba soubor s cca 2 500 kontakty dělit.
 
 ## Schéma a nasazení
 Po záloze MariaDB a nasazení Emy z `main` spustit jednou ve skutečném venv a pracovním adresáři:
@@ -34,3 +34,26 @@ Migrace pouze **přidá** `company_origins` s jedinečným zdrojem `(organizatio
 - Data se nedoplňují domyšleným jménem, telefonem či e-mailem; zůstávají prázdná do ověření.
 - Automatické vyhledávání telefonů, enrichment, čištění spamu a hromadné oslovení jsou samostatné kroky. Tato verze není nástroj na hromadnou rozesílku.
 - Produkční test neprováděl GitHub CI nad skutečným zákaznickým CSV; testuje syntetické 21sloupcové ekvivalenty, reálnou přejímku je nutné doložit odděleně.
+
+
+## Stabilizace 21. 11. 2026 — import cca 2 500 osob a chybějící tabulka
+
+**Výchozí stav produkčního manifestu 20. 11. 23:09 UTC:** `migration_required=true`; chybí pouze `company_origins`, počet uložených kontaktů 292. Nasazený commit v manifestu není identifikován. GitHub main sice obsahuje aditivní migraci, ale samotné nahrání Python souborů migraci neprovede.
+
+### Bezpečné nasazení a migrace
+1. V cPanelu/Exonu zálohovat **stávající MariaDB** (před migrací), zkontrolovat adresář aplikace a aktivní virtuální prostředí.
+2. Nasadit revizi až po schváleném PR a zelených CI testech. Příkaz spustit **v aktivním virtualenv aplikace ze složky s `ema/`**:
+   ```bash
+   python -m flask --app 'ema.web:create_app' upgrade-db
+   ```
+3. Příkaz je aditivní: `company_origins` je pomocná tabulka vazeb firem a zdrojů. Nikdy nespouštět `init-db` místo migrace ani nesmazat `contacts`, `companies` nebo `contact_origins`. Ověřit, že CLI vypíše `table company_origins` (pokud právě vznikla). Druhý běh nesmí vytvářet duplicity.
+4. Restartovat Passenger; na nové stránce Superadmin/Ops ověřit `database.status=ok`, `migration_required=false`, `missing_tables=[]`; původní kontakty stále přítomné.
+5. Ověřit nahrání 2 500 řádků v CRM přes **Zkontrolovat** (bez zápisu), potom **Importovat**. Očekávat počty nových a shodných řádků, ne přesný přírůstek +2 500 (mohou existovat duplikáty). Opakování téhož souboru se stejným názvem zdroje nesmí založit další kontakty.
+
+### Technické hranice nové implementace
+- `ema/contact_import.py`: limit 5 000 CSV řádků a 5 MiB; zachováno rozlišení firem/osob a varování pro neplatné e-maily.
+- `ema/web.py`: zvýšení Flask upload stropu pro multipart; nové kontakty se v rámci jediného požadavku flushují dávkově po nejvýše 200, ale **commit nastává až po kompletním importu**. Žádná samostatná druhá databáze, žádné vypnutí ACL/CSRF.
+- `ema/schema_upgrade.py`: nyní výslovně vypíše a ověří vytvořené tabulky. Na Exonu tento kód příkaz pouze **umožňuje**, sám ho nespouští.
+- Pokud HTTP import na Exonu přes nový limit přesto vyprší, nelze to vyřešit jen zvyšováním timeoutu: další etapa je resumovatelný serverový job ve stávající frontě, bez částečné či duplicitní evidence.
+
+**Stav ověření:** GitHub PR/CI a produkční příjem oddělené. Bez běhu na skutečném Exonu není nasazení ani migrace potvrzena.

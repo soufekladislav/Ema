@@ -11,10 +11,18 @@ def upgrade_schema(engine):
     if not inspector.has_table("users"):
         raise RuntimeError("Database is not initialized; run init-db first.")
     # New tables are created separately, never drop or rebuild existing tables.
-    Base.metadata.create_all(engine, tables=[AssistantTurn.__table__, AssistantThread.__table__, AIEngineConnection.__table__, AssistantMessageAttempt.__table__, MailboxView.__table__, MailFolderView.__table__,
+    before_tables = set(inspector.get_table_names())
+    new_tables = [AssistantTurn.__table__, AssistantThread.__table__, AIEngineConnection.__table__, AssistantMessageAttempt.__table__, MailboxView.__table__, MailFolderView.__table__,
                                                      MailUserState.__table__, MailboxConnectionCheck.__table__,
                                                      OpsIncident.__table__, OpsJobRun.__table__,
-                                                     OpsDeployment.__table__, ContactOrigin.__table__, CompanyOrigin.__table__, FreshCoreSource.__table__], checkfirst=True)
+                                                     OpsDeployment.__table__, ContactOrigin.__table__, CompanyOrigin.__table__, FreshCoreSource.__table__]
+    Base.metadata.create_all(engine, tables=new_tables, checkfirst=True)
+    existing_after = set(inspect(engine).get_table_names())
+    missing = sorted(table.name for table in new_tables if table.name not in existing_after)
+    if missing:
+        raise RuntimeError("Database migration incomplete; missing tables: " + ", ".join(missing))
+    applied = [f"table {table.name}" for table in new_tables
+               if table.name not in before_tables]
     # Older installations already contain assistant_turns but not thread_id.
     # Add only one nullable reference; no message is deleted or migrated blindly.
     if inspector.has_table("assistant_turns"):
@@ -49,7 +57,6 @@ def upgrade_schema(engine):
     if not inspector.has_table("mailboxes"):
         raise RuntimeError("The mailboxes table is missing.")
     existing = {col["name"] for col in inspector.get_columns("mailboxes")}
-    applied = []
     with engine.begin() as conn:
         if "smtp_username" not in existing:
             conn.execute(text("ALTER TABLE mailboxes ADD COLUMN smtp_username VARCHAR(190) NOT NULL DEFAULT ''"))
