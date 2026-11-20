@@ -1436,7 +1436,7 @@ def create_app(test_config=None):
                               crm_page=1, crm_has_next=has_next, crm_upgrade_required=True,
                               crm_email_review_ids=crm_email_review_ids(contacts),
                               crm_stats={"total": total_contacts or 0, "users": 0,
-                                         "forms": 0, "csv": 0})
+                                         "forms": 0, "csv": 0, "companies": len(companies)})
         requested_org = (request.args.get("org") or "").strip()
         if requested_org and (not requested_org.isdigit() or int(requested_org) not in ids):
             abort(403)
@@ -1477,9 +1477,12 @@ def create_app(test_config=None):
             select(ContactOrigin.source_kind, func.count(func.distinct(ContactOrigin.contact_id)))
             .where(ContactOrigin.organization_id.in_(ids))
             .group_by(ContactOrigin.source_kind)).all()) if ids else {}
+        company_count = g.db.scalar(select(func.count(Company.id)).where(
+            Company.organization_id.in_(ids))) if ids else 0
         crm_stats = {"total": total_contacts or 0, "users": source_counts.get("users", 0),
                      "forms": source_counts.get("elementor_submissions", 0),
-                     "csv": source_counts.get("csv", 0)}
+                     "csv": source_counts.get("csv", 0),
+                     "companies": company_count or 0}
         companies = g.db.scalars(select(Company).where(Company.organization_id.in_(ids))
             .order_by(Company.name).limit(250)).all() if ids else []
         sources = g.db.scalars(select(FreshCoreSource).where(
