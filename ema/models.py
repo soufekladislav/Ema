@@ -107,6 +107,26 @@ class ContactOrigin(Base):
     )
 
 
+
+class CompanyOrigin(Base):
+    """One source assertion for a CRM company, not a duplicate company record."""
+    __tablename__ = "company_origins"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    source_site: Mapped[str] = mapped_column(String(250), nullable=False)
+    source_kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    external_id: Mapped[str] = mapped_column(String(190), nullable=False)
+    metadata_json: Mapped[str | None] = mapped_column(Text)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime, default=now, nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime, default=now, nullable=False)
+    __table_args__ = (
+        UniqueConstraint("organization_id", "source_site", "source_kind", "external_id"),
+        Index("ix_crm_company_origin", "organization_id", "company_id"),
+    )
+
+
+
 class FreshCoreSource(Base):
     """A web-to-company mapping. Credential encrypted; never expose it in UI/logs."""
     __tablename__ = "fresh_core_sources"
