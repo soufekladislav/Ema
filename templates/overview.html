@@ -9,6 +9,9 @@
     <span class="eyebrow">KOMUNIKACE</span><h1>E-maily</h1>
     <p>Souhrnný inbox všech schránek, ke kterým máš oprávnění. Zprávy zůstávají uložené u svých poštovních účtů a firem.</p>
   {% elif section == 'database' %}
+  {% if crm_upgrade_required|default(false) %}
+    <div class="notice">CRM je po aktualizaci kódu. Pro zdroje kontaktů ještě spusť databázovou migraci <code>upgrade-db</code>. Dosavadní kontakty zůstávají viditelné.</div>
+  {% endif %}
   <div class="ema-hub-inline-actions">
     {% for o in eligible_orgs %}<a class="btn" href="{{ url_for('clients', org_id=o.id) }}">Klienti · {{ o.name }}</a>{% endfor %}
   </div>
@@ -57,6 +60,7 @@
     </div>
     <p class="small muted">Načtení kontaktu neznamená souhlas s marketingovým oslovováním.</p>
   </div>
+  {% if not crm_upgrade_required|default(false) %}
   <details class="card panel ema-new-inline">
     <summary>Import kontaktů z CSV</summary>
     <p>Stávající import CSV (UTF-8/Windows-1250, 1 000 řádků). Nové kontakty a jejich zdroje se při opakovaném importu neduplikují.</p>
@@ -109,6 +113,7 @@
     </details>
     {% endif %}
   </div>
+  {% endif %}
 {% elif section == 'tasks' %}
 
     <span class="eyebrow">PLÁNOVÁNÍ</span><h1>Úkoly a termíny</h1>
