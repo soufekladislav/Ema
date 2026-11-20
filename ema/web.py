@@ -1521,11 +1521,25 @@ def create_app(test_config=None):
         except Forbidden:
             abort(403)
         try:
-            counts = {}
+            counters = {"new": 0, "existing": 0, "skipped": 0}
+            preview_emails = set()
             for kind in ("users", "elementor_submissions"):
                 result = fetch_page(source, app.config["MAIL_ENCRYPTION_KEY"], kind, limit=50)
-                counts[kind] = sum(not row.get("skip") for row in result["items"])
-            flash(f"Náhled (prvních 50 z každého zdroje): registrace {counts['users']}, formuláře {counts['elementor_submissions']}. Nic nebylo zapsáno.", "success")
+                for row in result["items"]:
+                    email = str(row.get("email") or "").strip().lower()
+                    if row.get("skip") or not email:
+                        counters["skipped"] += 1
+                    elif email in preview_emails or g.db.scalar(select(Contact.id).where(
+                            Contact.organization_id == source.organization_id,
+                            func.lower(Contact.email) == email).limit(1)):
+                        counters["existing"] += 1
+                    else:
+                        counters["new"] += 1
+                    if email:
+                        preview_emails.add(email)
+            flash(f"Náhled prvních 50 z každého zdroje: {counters['new']} nových, "
+                  f"{counters['existing']} známých/shodných, {counters['skipped']} bez kontaktu. "
+                  "Žádná data nebyla zapsána.", "success")
         except FreshCoreError as ex:
             flash(str(ex), "error")
         return redirect(url_for("database_hub", org=source.organization_id))
