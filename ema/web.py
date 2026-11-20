@@ -1733,15 +1733,11 @@ def create_app(test_config=None):
             if not company_name:
                 continue
             normalized = company_name.casefold()
-            company = mapped.get(normalized)
-            if not company:
-                company = Company(organization_id=org_id, name=company_name[:190])
-                g.db.add(company)
-                g.db.flush()
-                mapped[normalized] = company
-                company_added += 1
             external_id = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
             source_site = "CSV: " + source_label
+            # A source link is stronger than the editable display name.
+            # Check it FIRST so a user's corrected company name does not
+            # create a duplicate on the next import of the same CSV.
             origin = g.db.scalar(select(CompanyOrigin).where(
                 CompanyOrigin.organization_id == org_id,
                 CompanyOrigin.source_site == source_site,
@@ -1749,19 +1745,29 @@ def create_app(test_config=None):
                 CompanyOrigin.external_id == external_id,
             ))
             if origin:
-                origin.last_seen_at = now()
-                company_repeated += 1
-            else:
-                g.db.add(CompanyOrigin(
-                    organization_id=org_id, company_id=company.id,
-                    source_site=source_site, source_kind="csv",
-                    external_id=external_id,
-                    metadata_json=json.dumps({
-                        "fields": item["attributes"],
-                        "review_status": "unverified",
-                    }, ensure_ascii=False),
-                ))
-                company_linked += 1
+                linked_company = g.db.get(Company, origin.company_id)
+                if linked_company and linked_company.organization_id == org_id:
+                    origin.last_seen_at = now()
+                    company_repeated += 1
+                    continue
+                raise ImportErrorCSV("Nekonzistentní vazba firmy na zdroj; import přerušen bez přepsání.")
+            company = mapped.get(normalized)
+            if not company:
+                company = Company(organization_id=org_id, name=company_name[:190])
+                g.db.add(company)
+                g.db.flush()
+                mapped[normalized] = company
+                company_added += 1
+            g.db.add(CompanyOrigin(
+                organization_id=org_id, company_id=company.id,
+                source_site=source_site, source_kind="csv",
+                external_id=external_id,
+                metadata_json=json.dumps({
+                    "fields": item["attributes"],
+                    "review_status": "unverified",
+                }, ensure_ascii=False),
+            ))
+            company_linked += 1
         audit("contacts.csv_import",
               f"contacts_added={added}, contacts_matched={skipped}, "
               f"companies_added={company_added}, company_sources={company_linked}",
