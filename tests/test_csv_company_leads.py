@@ -189,10 +189,18 @@ def test_company_imports_are_isolated_by_owner_company(web_client):
         assert db.scalar(select(func.count(CompanyOrigin.id)).where(
             CompanyOrigin.source_kind == "csv")) == 2
     login(client, "guest")
-    assert client.get(f"/org/{org_a}/clients").status_code in (302, 403)
-    result = client.post(f"/org/{org_a}/clients/1/edit", data={
+    # A read-only organization member may inspect a client but never edit it.
+    assert client.get(f"/org/{org_a}/clients").status_code == 200
+    with Session(engine) as db:
+        owned = db.scalar(select(Company).where(
+            Company.organization_id == org_a,
+            Company.name == "Firma Kandidát 001 s.r.o."))
+        owned_id = owned.id
+    result = client.post(f"/org/{org_a}/clients/{owned_id}/edit", data={
         "csrf_token": csrf(client), "name": "Nesmí změnit"})
-    assert result.status_code in (302, 403, 404)
+    assert result.status_code == 403
+    with Session(engine) as db:
+        assert db.get(Company, owned_id).name == "Firma Kandidát 001 s.r.o."
 
 
 def test_mixed_contacts_and_companies_no_fake_people(web_client):
