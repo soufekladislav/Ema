@@ -1,0 +1,36 @@
+# EMA CRM – import osob a firem z CSV (20. 11. 2026)
+
+## Proč tento milník vznikl
+Na skutečném souboru `Fresh_Crackers_akvizice_100_firem_2026-11-16 (1).xlsx - Kandidáti.csv` (100 datových řádků, 21 sloupců) hlásila Ema na řádku 2 „nelze rozpoznat jméno, e-mail ani telefon“. Soubor ale **není seznam osob**: je to firemní akviziční rešerše s poli **Firma, Kraj, Město, Obor, Obrat, Rok obratu, Růst tržeb, Web, Hypotéza nabídky (neověřeno), Priorita, Zdroj, Stav ověření, E-commerce / online objednávky, Pozorování z webu (ověřeno vs hypotéza), Možná slabina – k prověření, Doporučená služba Fresh Crackers, Úhel prvního oslovení, Stav e-commerce ověření, Facebook profil – ověřený odkaz, LinkedIn profil – ověřený odkaz, Obchodní připravenost**.
+
+**Diagnóza:** selhával datový typ importu, nikoli oprávnění uživatele. Nevypínat CSRF, firmovou izolaci ani zabezpečení přístupu. Změnit parser a mapování podle typu záznamu.
+
+## 3 kontrolní brány standardu
+1. **Reuse:** Původní `Company` a `Contact`, jeden `analyze_contacts` parser, `/database/import`, `/org/<org_id>/clients` a CRM ACL. Žádná druhá databáze firem. Jedna malá `company_origins` tabulka navazuje na dosavadní `contact_origins`, protože firma musí mít vlastní historii zdrojů.
+2. **UX:** CSV bez kontaktní osoby vytvoří **firmu**, ne falešný kontakt. Soubor osob vytvoří kontakty, smíšený soubor oba typy. Statistiky oddělují osoby a klientské firmy. Preview uvádí oba typy a shody. Při zobrazení firem lze rozbalit zdrojová data a ručně upravit název, IČO, telefon, e-mail, poznámky; kontakty lze opravovat obdobně. Původní zdroj zůstává zachován.
+3. **Stabilita:** Původní 100 firem importovat do jedné vybrané vlastní firmy Emy, další import téhož souboru beze změny počtu firem; opakovaný import z jiného zdroje propojí nový původ. Metadata zachovávají původní české názvy sloupců a doslovné hodnoty včetně `neověřeno`. Oprávnění nelze obejít; marketingový souhlas se neodvozuje. Limity CSV 1 000 řádků a 950 kB zůstávají.
+
+## Schéma a nasazení
+Po záloze MariaDB a nasazení Emy z `main` spustit jednou ve skutečném venv a pracovním adresáři:
+
+```bash
+python -m flask --app 'ema.web:create_app' upgrade-db
+```
+
+Migrace pouze **přidá** `company_origins` s jedinečným zdrojem `(organization_id, source_site, source_kind, external_id)`. Stávající Companies, Contacts, e-maily, objednávky ani CustomerOrigins se neodstraňují. Poté restart Passenger.
+
+## Přijímací scénář (skutečný soubor)
+1. CRM → Importy a propojení → CSV; vybrat `Fresh Online s.r.o.` (nebo jinou skutečnou firmu, jejíž data to jsou), zdroj např. `Akvizice 100 firem 16.11.2026`.
+2. **Zkontrolovat:** očekávat 100 firem bez kontaktní osoby, 0 neplatných e-mailů; žádný zápis. Pokud firma v Ema už existuje, preview rozliší shody.
+3. **Importovat:** počet klientských firem v CRM vzroste podle nových firem, počet osobních kontaktů se nemusí změnit.
+4. Otevřít **Klientské firmy** v rozbalené sekci → u některé firmy rozbalit **obchodní podklady**: původní Web, Zdroj, Priorita, Hypotéza nabídky (neověřeno) a další pole.
+5. Upravit např. telefon nebo obchodní poznámku firmy; znovu importovat stejné CSV; ruční úprava nesmí zmizet a žádná firma ani zdroj nesmí vzniknout duplicitně.
+6. Stejnou firmu naimportovat z druhého označeného souboru; má mít jeden Company záznam a dvě CompanyOrigin vazby.
+7. Smíšené CSV `Firma,Jméno,E-mail,Telefon` → firma bez osoby se uloží do Companies, řádek s osobou do Contacts; soubor není celý odmítnut.
+8. Prohlédnout rozhraní na desktopu/tabletu/mobilu, ověřit že kontakt druhé vlastní organizace nelze upravit.
+
+## Důležité hranice
+- Firemní názvy z neověřené akviziční rešerše **nejsou automaticky potvrzené** a nemusí být kontaktním oprávněním. `review_status=unverified` zůstává v provenance, včetně výslovného původního `Zdroj`.
+- Data se nedoplňují domyšleným jménem, telefonem či e-mailem; zůstávají prázdná do ověření.
+- Automatické vyhledávání telefonů, enrichment, čištění spamu a hromadné oslovení jsou samostatné kroky. Tato verze není nástroj na hromadnou rozesílku.
+- Produkční test neprováděl GitHub CI nad skutečným zákaznickým CSV; testuje syntetické 21sloupcové ekvivalenty, reálnou přejímku je nutné doložit odděleně.
