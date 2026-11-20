@@ -1,7 +1,7 @@
 """Idempotent, additive schema upgrade for Ema pilot. Backup DB before running."""
 from sqlalchemy import inspect, text, select
 from sqlalchemy.orm import Session
-from .models import AssistantTurn, AssistantThread, AIEngineConnection, AssistantMessageAttempt, MailboxView, MailFolderView, MailUserState, MailboxConnectionCheck, OpsIncident, OpsJobRun, OpsDeployment, Base
+from .models import AssistantTurn, AssistantThread, AIEngineConnection, AssistantMessageAttempt, MailboxView, MailFolderView, MailUserState, MailboxConnectionCheck, OpsIncident, OpsJobRun, OpsDeployment, ContactOrigin, FreshCoreSource, Base
 
 
 def upgrade_schema(engine):
@@ -13,7 +13,7 @@ def upgrade_schema(engine):
     Base.metadata.create_all(engine, tables=[AssistantTurn.__table__, AssistantThread.__table__, AIEngineConnection.__table__, AssistantMessageAttempt.__table__, MailboxView.__table__, MailFolderView.__table__,
                                                      MailUserState.__table__, MailboxConnectionCheck.__table__,
                                                      OpsIncident.__table__, OpsJobRun.__table__,
-                                                     OpsDeployment.__table__], checkfirst=True)
+                                                     OpsDeployment.__table__, ContactOrigin.__table__, FreshCoreSource.__table__], checkfirst=True)
     # Older installations already contain assistant_turns but not thread_id.
     # Add only one nullable reference; no message is deleted or migrated blindly.
     if inspector.has_table("assistant_turns"):
