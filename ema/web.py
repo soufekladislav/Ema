@@ -29,7 +29,7 @@ from .mail_folders import (
 from .assistant_service import AssistantError, run_assistant
 from .ai_connection import seal_connector_key, reveal_connector_key, verify_connector_key
 from .contact_import import ImportErrorCSV, extract_contacts
-from .fresh_core_contacts import FreshCoreError, canonical_site, fetch_page, ingest_contacts, update_csv_origin
+from .fresh_core_contacts import FreshCoreError, canonical_site, fetch_page, synchronize_source, update_csv_origin
 from .schema_upgrade import upgrade_schema
 from .ops import code_identity, collect_ops, verify_bearer
 from .models import (
@@ -1542,27 +1542,8 @@ def create_app(test_config=None):
             organization_access(g.db, g.user.id, source.organization_id, write=True)
         except Forbidden:
             abort(403)
-        totals = {"created": 0, "linked": 0, "skipped": 0}
-        pending = False
         try:
-            # At most 3 pages per type per click; bounded requests and writes.
-            # Cursor is committed with contact rows, never ahead of them.
-            for kind, attr in (("users", "users_after_id"), ("elementor_submissions", "forms_after_id")):
-                for _ in range(3):
-                    cursor = getattr(source, attr)
-                    result = fetch_page(source, app.config["MAIL_ENCRYPTION_KEY"], kind,
-                                        after=cursor, limit=50)
-                    stats = ingest_contacts(g.db, source.organization_id, source.site_url, kind,
-                                            result["items"])
-                    for k in totals:
-                        totals[k] += stats[k]
-                    next_cursor = result["next_after_id"] if result["has_more"] else 0
-                    setattr(source, attr, next_cursor)
-                    if not result["has_more"] or not result["available"]:
-                        break
-                pending |= getattr(source, attr) > 0
-            source.last_synced_at = now()
-            source.last_error = ""
+            totals, pending = synchronize_source(g.db, source, app.config["MAIL_ENCRYPTION_KEY"])
             audit("crm.core.sync", f"source={source.id};new={totals['created']};linked={totals['linked']}", source.organization_id)
             g.db.commit()
             message = (f"Synchronizace: {totals['created']} nových, {totals['linked']} propojených, "
@@ -2575,6 +2556,40 @@ def create_app(test_config=None):
             db.add(row)
             db.commit()
             click.echo("Nasazení zaznamenáno (otisk " + identity["source_fingerprint"][:16] + "…).")
+        finally:
+            db.close()
+
+    @app.cli.command("sync-contacts")
+    @click.option("--pages", default=3, type=click.IntRange(1, 10))
+    def sync_contacts(pages):
+        """For Exon cron: bounded source synchronization, no secrets in logs."""
+        db = SessionLocal()
+        ok, fail = 0, 0
+        try:
+            if not (inspect(db.get_bind()).has_table("contact_origins") and
+                    inspect(db.get_bind()).has_table("fresh_core_sources")):
+                raise click.ClickException("Nejdříve spusťte upgrade-db.")
+            sources = db.scalars(select(FreshCoreSource).join(
+                Organization, FreshCoreSource.organization_id == Organization.id
+            ).where(Organization.active.is_(True)).order_by(FreshCoreSource.id).limit(100)).all()
+            for row in sources:
+                try:
+                    totals, pending = synchronize_source(db, row,
+                        app.config["MAIL_ENCRYPTION_KEY"], max_pages=pages)
+                    db.commit()
+                    ok += 1
+                    click.echo(f"CRM source {row.id}: OK; new={totals['created']}; more={int(pending)}")
+                except FreshCoreError as ex:
+                    db.rollback()
+                    src = db.get(FreshCoreSource, row.id)
+                    if src:
+                        src.last_error = str(ex)[:240]
+                        db.commit()
+                    fail += 1
+                    click.echo(f"CRM source {row.id}: ERROR (detail v aplikaci)")
+            click.echo(f"CRM sources: OK={ok}; errors={fail}")
+            if fail:
+                raise click.ClickException("Některé zdroje selhaly. Detaily jsou v CRM.")
         finally:
             db.close()
 
