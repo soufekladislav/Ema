@@ -71,7 +71,8 @@ def analyze_contacts(data):
 
     collected = []
     report = {"read_rows": 0, "invalid_email_rows": 0,
-              "needs_review": 0, "skipped_rows": 0, "problem_rows": []}
+              "needs_review": 0, "skipped_rows": 0, "problem_rows": [],
+              "company_rows": 0, "contact_rows": 0}
     for index, record in enumerate(reader, 2):
         if index > 1002:
             raise ImportErrorCSV("V jedné dávce lze importovat maximálně 1000 kontaktů.")
@@ -106,6 +107,22 @@ def analyze_contacts(data):
                 report["needs_review"] += 1
                 attrs["email_stav"] = "neovereny"
         if not (name or email or phone) and not invalid:
+            if company:
+                # A firm-only acquisition list is NOT a list of persons.
+                # Keep the source's ORIGINAL Czech column names and values
+                # (including "neověřeno"); never turn guesses into facts.
+                business_fields = {str(key)[:120]: str(value or "").strip()[:300]
+                                   for key, value in record.items() if key is not None and value}
+                if len(json.dumps(business_fields, ensure_ascii=False)) > 4000:
+                    report["skipped_rows"] += 1
+                    continue
+                collected.append({
+                    "name": "", "email": "", "phone": "",
+                    "company_name": company[:190], "attributes": business_fields,
+                    "entity_type": "company",
+                })
+                report["company_rows"] += 1
+                continue
             report["skipped_rows"] += 1
             if len(report["problem_rows"]) < 12:
                 report["problem_rows"].append(index)
@@ -121,8 +138,10 @@ def analyze_contacts(data):
             continue
         collected.append({
             "name": name[:190], "email": email[:190], "phone": phone[:60],
-            "company_name": company[:190], "attributes": attrs
+            "company_name": company[:190], "attributes": attrs,
+            "entity_type": "contact",
         })
+        report["contact_rows"] += 1
 
     if not collected:
         raise ImportErrorCSV(

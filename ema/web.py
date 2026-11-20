@@ -34,7 +34,7 @@ from .fresh_core_contacts import FreshCoreError, canonical_site, fetch_page, syn
 from .schema_upgrade import upgrade_schema
 from .ops import code_identity, collect_ops, verify_bearer
 from .models import (
-    Audit, AssistantTurn, AssistantThread, AssistantMessageAttempt, AIEngineConnection, Base, ChatMessage, Company, Contact, ContactOrigin, FreshCoreSource, MailFolder, Mailbox, MailboxGrant, MailboxView, MailFolderView, MailboxConnectionCheck, MailMessage, MailUserState,
+    Audit, AssistantTurn, AssistantThread, AssistantMessageAttempt, AIEngineConnection, Base, ChatMessage, Company, Contact, ContactOrigin, CompanyOrigin, FreshCoreSource, MailFolder, Mailbox, MailboxGrant, MailboxView, MailFolderView, MailboxConnectionCheck, MailMessage, MailUserState,
     Membership, Opportunity, Organization, Outbound, OpsIncident, OpsJobRun, OpsDeployment, Project, ProjectGrant,
     Task, User, make_session, now,
 )
@@ -1436,7 +1436,7 @@ def create_app(test_config=None):
                               crm_page=1, crm_has_next=has_next, crm_upgrade_required=True,
                               crm_email_review_ids=crm_email_review_ids(contacts),
                               crm_stats={"total": total_contacts or 0, "users": 0,
-                                         "forms": 0, "csv": 0})
+                                         "forms": 0, "csv": 0, "companies": len(companies)})
         requested_org = (request.args.get("org") or "").strip()
         if requested_org and (not requested_org.isdigit() or int(requested_org) not in ids):
             abort(403)
@@ -1477,9 +1477,12 @@ def create_app(test_config=None):
             select(ContactOrigin.source_kind, func.count(func.distinct(ContactOrigin.contact_id)))
             .where(ContactOrigin.organization_id.in_(ids))
             .group_by(ContactOrigin.source_kind)).all()) if ids else {}
+        company_count = g.db.scalar(select(func.count(Company.id)).where(
+            Company.organization_id.in_(ids))) if ids else 0
         crm_stats = {"total": total_contacts or 0, "users": source_counts.get("users", 0),
                      "forms": source_counts.get("elementor_submissions", 0),
-                     "csv": source_counts.get("csv", 0)}
+                     "csv": source_counts.get("csv", 0),
+                     "companies": company_count or 0}
         companies = g.db.scalars(select(Company).where(Company.organization_id.in_(ids))
             .order_by(Company.name).limit(250)).all() if ids else []
         sources = g.db.scalars(select(FreshCoreSource).where(
@@ -1647,30 +1650,39 @@ def create_app(test_config=None):
             )
         if csv_report["skipped_rows"]:
             csv_warning += f" {csv_report['skipped_rows']} záznamů bez kontaktních údajů vynecháno."
-        emails = {row["email"].lower() for row in entries if row["email"]}
+        contact_entries = [row for row in entries if row.get("entity_type") != "company"]
+        company_entries = [row for row in entries if row.get("entity_type") == "company"]
+        emails = {row["email"].lower() for row in contact_entries if row["email"]}
         seen = set(g.db.scalars(select(func.lower(Contact.email)).where(
             Contact.organization_id == org_id, func.lower(Contact.email).in_(emails)
         )).all()) if emails else set()
         source_label = field("source_name", 170) or uploaded.filename[:170]
-        duplicates = sum(1 for item in entries if item["email"] and item["email"] in seen)
+        duplicates = sum(1 for item in contact_entries if item["email"] and item["email"] in seen)
+        company_names = {row["company_name"].casefold() for row in entries if row["company_name"]}
+        existing_companies = g.db.scalars(select(Company).where(
+            Company.organization_id == org_id)).all() if company_names else []
+        mapped = {company.name.casefold(): company for company in existing_companies
+                  if company.name.casefold() in company_names}
+        matched_companies = sum(1 for row in company_entries
+                                if row["company_name"].casefold() in mapped)
         if field("mode", 16) == "preview":
             flash(
                 f"Kontrola CSV: {csv_report['read_rows']} datových řádků, "
-                f"{len(entries)} kontaktů k importu, {duplicates} shodných e-mailů."
+                f"{len(contact_entries)} osobních kontaktů a "
+                f"{len(company_entries)} firem bez kontaktní osoby; "
+                f"{duplicates} shodných e-mailů, "
+                f"{matched_companies} již známých firem."
                 + csv_warning + " Nic nebylo zapsáno. Import potvrď dalším nahráním souboru.",
                 "success")
             return redirect(url_for("database_hub"))
         if field("mode", 16) != "import":
             abort(400, description="Neplatný režim importu")
-        company_names = {row["company_name"].casefold() for row in entries if row["company_name"]}
-        existing_companies = g.db.scalars(select(Company).where(
-            Company.organization_id == org_id
-        )).all() if company_names else []
-        mapped = {company.name.casefold(): company.id for company in existing_companies
-                  if company.name.casefold() in company_names}
+        if company_entries and not inspect(g.db.get_bind()).has_table("company_origins"):
+            flash("Před importem firem spusťte jednou bezpečnou migraci: flask upgrade-db.", "error")
+            return redirect(url_for("database_hub"))
         added = 0
         skipped = 0
-        for item in entries:
+        for item in contact_entries:
             email = item["email"].lower()
             label = (str(item["attributes"].get("zdroj") or "").strip()[:170] or source_label)
             noemail_key = hashlib.sha256(json.dumps({
@@ -1705,7 +1717,8 @@ def create_app(test_config=None):
             if item["company_name"] and item["company_name"].casefold() not in mapped:
                 metadata["company_name_from_csv"] = item["company_name"]
             contact = Contact(organization_id=org_id,
-                              company_id=mapped.get(item["company_name"].casefold()),
+                              company_id=(mapped[item["company_name"].casefold()].id
+                                          if item["company_name"].casefold() in mapped else None),
                               name=item["name"], email=email, phone=item["phone"],
                               metadata_json=json.dumps(metadata, ensure_ascii=False))
             g.db.add(contact)
@@ -1714,10 +1727,58 @@ def create_app(test_config=None):
             if email:
                 seen.add(email)
             added += 1
-        audit("contacts.csv_import", f"added={added}, skipped={skipped}", org_id)
+        company_added = company_linked = company_repeated = 0
+        for item in company_entries:
+            company_name = item["company_name"].strip()
+            if not company_name:
+                continue
+            normalized = company_name.casefold()
+            external_id = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+            source_site = "CSV: " + source_label
+            # A source link is stronger than the editable display name.
+            # Check it FIRST so a user's corrected company name does not
+            # create a duplicate on the next import of the same CSV.
+            origin = g.db.scalar(select(CompanyOrigin).where(
+                CompanyOrigin.organization_id == org_id,
+                CompanyOrigin.source_site == source_site,
+                CompanyOrigin.source_kind == "csv",
+                CompanyOrigin.external_id == external_id,
+            ))
+            if origin:
+                linked_company = g.db.get(Company, origin.company_id)
+                if linked_company and linked_company.organization_id == org_id:
+                    origin.last_seen_at = now()
+                    company_repeated += 1
+                    continue
+                g.db.rollback()
+                flash("Zdroj firmy odkazuje na neexistující záznam. Import nebyl uložen; zkontrolujte CRM.", "error")
+                return redirect(url_for("database_hub"))
+            company = mapped.get(normalized)
+            if not company:
+                company = Company(organization_id=org_id, name=company_name[:190])
+                g.db.add(company)
+                g.db.flush()
+                mapped[normalized] = company
+                company_added += 1
+            g.db.add(CompanyOrigin(
+                organization_id=org_id, company_id=company.id,
+                source_site=source_site, source_kind="csv",
+                external_id=external_id,
+                metadata_json=json.dumps({
+                    "fields": item["attributes"],
+                    "review_status": "unverified",
+                }, ensure_ascii=False),
+            ))
+            company_linked += 1
+        audit("contacts.csv_import",
+              f"contacts_added={added}, contacts_matched={skipped}, "
+              f"companies_added={company_added}, company_sources={company_linked}",
+              org_id)
         g.db.commit()
         flash(
-            f"Import dokončen: {added} nových kontaktů, {skipped} shodných záznamů."
+            f"Import dokončen: {added} nových kontaktů, {skipped} shodných; "
+            f"{company_added} nových firem a {company_linked} firemních zdrojů "
+            f"({company_repeated} opakovaných)."
             + csv_warning
             + " Neplatné e-maily nejsou použitelné pro rozesílání. "
               "Marketingové souhlasy se automaticky nepřidělují.",
@@ -1976,9 +2037,35 @@ def create_app(test_config=None):
     @app.route("/org/<int:org_id>/clients")
     @org_required
     def clients(org_id):
-        companies = g.db.scalars(select(Company).where(Company.organization_id == org_id).order_by(Company.id.desc()).limit(100)).all()
-        contacts = g.db.scalars(select(Contact).where(Contact.organization_id == org_id).order_by(Contact.id.desc()).limit(100)).all()
-        return render("clients", companies=companies, contacts=contacts)
+        search = (request.args.get("q") or "").strip()[:100]
+        query = select(Company).where(Company.organization_id == org_id)
+        if search:
+            query = query.where(Company.name.ilike(
+                "%" + search.replace("%", r"\%").replace("_", r"\_") + "%", escape="\\"))
+        companies = g.db.scalars(query.order_by(Company.name).limit(150)).all()
+        contacts = g.db.scalars(select(Contact).where(
+            Contact.organization_id == org_id).order_by(Contact.id.desc()).limit(100)).all()
+        company_details = {}
+        if inspect(g.db.get_bind()).has_table("company_origins") and companies:
+            origins = g.db.scalars(select(CompanyOrigin).where(
+                CompanyOrigin.organization_id == org_id,
+                CompanyOrigin.company_id.in_([c.id for c in companies])).order_by(
+                CompanyOrigin.id.desc())).all()
+            for origin in origins:
+                try:
+                    payload = json.loads(origin.metadata_json or "{}")
+                except (ValueError, TypeError):
+                    payload = {}
+                fields = payload.get("fields", {}) if isinstance(payload, dict) else {}
+                if not isinstance(fields, dict):
+                    fields = {}
+                company_details.setdefault(origin.company_id, []).append({
+                    "source": origin.source_site,
+                    "fields": fields,
+                    "review": payload.get("review_status", "unverified"),
+                })
+        return render("clients", companies=companies, contacts=contacts,
+                      company_details=company_details, clients_query=search)
 
     @app.post("/org/<int:org_id>/clients")
     @org_required
@@ -1988,6 +2075,77 @@ def create_app(test_config=None):
         audit("client.create", obj.name, org_id)
         g.db.commit()
         flash("Klient uložen", "success")
+        return redirect(url_for("clients", org_id=org_id))
+
+    @app.post("/org/<int:org_id>/clients/<int:company_id>/edit")
+    @org_required
+    def edit_company(org_id, company_id):
+        try:
+            organization_access(g.db, g.user.id, org_id, write=True)
+        except Forbidden:
+            abort(403)
+        company = g.db.get(Company, company_id)
+        if not company or company.organization_id != org_id:
+            abort(404)
+        name = field("name", 190).strip()
+        if not name:
+            flash("Název firmy je nutné zachovat.", "error")
+            return redirect(url_for("clients", org_id=org_id))
+        company.name = name
+        company.ico = field("ico", 32)
+        company.email = field("email", 190)
+        company.phone = field("phone", 60)
+        company.notes = field("notes", 5000)
+        audit("crm.company.edit", company.id, org_id)
+        g.db.commit()
+        flash("Firma upravena, původní zdroje zůstaly zachované.", "success")
+        return redirect(url_for("clients", org_id=org_id))
+
+    @app.post("/org/<int:org_id>/contacts/<int:contact_id>/edit")
+    @org_required
+    def edit_contact(org_id, contact_id):
+        try:
+            organization_access(g.db, g.user.id, org_id, write=True)
+        except Forbidden:
+            abort(403)
+        contact = g.db.get(Contact, contact_id)
+        if not contact or contact.organization_id != org_id:
+            abort(404)
+        email = field("email", 190).strip().lower()
+        if email and not re.fullmatch(r"[^\s@,;:<>()\[\]]+@[^\s@,;:<>()\[\]]+\.[^\s@,;:<>()\[\]]+", email):
+            flash("Neplatný e-mail nebude uložen jako doručovací. Oprav ho nebo ponech prázdný.", "error")
+            return redirect(url_for("clients", org_id=org_id))
+        if email:
+            duplicate = g.db.scalar(select(Contact.id).where(
+                Contact.organization_id == org_id,
+                func.lower(Contact.email) == email,
+                Contact.id != contact_id).limit(1))
+            if duplicate:
+                flash("E-mail již patří jinému kontaktu; nevytvářím duplicitu.", "error")
+                return redirect(url_for("clients", org_id=org_id))
+        new_company_id = positive_id("company_id")
+        if new_company_id:
+            dest = g.db.get(Company, new_company_id)
+            if not dest or dest.organization_id != org_id:
+                abort(400, description="Firma kontaktu nepatří do tohoto pracovního prostoru.")
+        name = field("name", 190).strip()
+        contact.name = name or email or field("phone", 60) or contact.name
+        contact.email = email
+        contact.phone = field("phone", 60)
+        contact.company_id = new_company_id
+        if email:
+            try:
+                metadata = json.loads(contact.metadata_json or "{}")
+                if isinstance(metadata, dict):
+                    fields = metadata.get("fields")
+                    if isinstance(fields, dict) and fields.get("email_stav") == "neovereny":
+                        fields["email_stav"] = "opraveno_rucne"
+                        contact.metadata_json = json.dumps(metadata, ensure_ascii=False)
+            except (TypeError, ValueError):
+                pass
+        audit("crm.contact.edit", contact.id, org_id)
+        g.db.commit()
+        flash("Kontakt upraven, zdrojové vazby zachovány.", "success")
         return redirect(url_for("clients", org_id=org_id))
 
     @app.post("/org/<int:org_id>/contacts")

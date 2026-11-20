@@ -303,6 +303,7 @@
     <div class="ema-crm-metric"><span>Registrace WordPress</span><strong>{{ crm_stats.users }}</strong></div>
     <div class="ema-crm-metric"><span>Formuláře Elementor</span><strong>{{ crm_stats.forms }}</strong></div>
     <div class="ema-crm-metric"><span>Importy CSV</span><strong>{{ crm_stats.csv }}</strong></div>
+    <div class="ema-crm-metric"><span>Klientské firmy</span><strong>{{ crm_stats.companies }}</strong></div>
   </div>
   <details class="ema-crm-integrations card panel">
     <summary><strong>Importy a propojení</strong> <span class="muted">· {{ crm_sources|length }} webů · CSV · Správa klientů</span></summary>
@@ -310,8 +311,8 @@
       <div class="ema-crm-integrations-content">
         
   <details class="card panel ema-new-inline">
-    <summary>Import kontaktů z CSV</summary>
-    <p>Stávající import CSV (UTF-8/Windows-1250, 1 000 řádků). Nové kontakty a jejich zdroje se při opakovaném importu neduplikují.</p>
+    <summary>Import kontaktů i firem z CSV</summary>
+    <p>Jediný importér pro osobní kontakty, firemní databáze i smíšené CSV. Jméno, e-mail a telefon nejsou povinné u firemních záznamů. Uchovává původ i další obchodní sloupce; 1 000 řádků na dávku.</p>
     {% if eligible_orgs %}
     <form method="post" action="{{ url_for('import_contacts_csv') }}" enctype="multipart/form-data" class="formstack">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -396,7 +397,22 @@
       <th>Kontakt</th><th>E-mail</th><th>Telefon</th><th>Klientská firma</th><th>Vlastník dat</th><th>Zdroj</th>
     </tr></thead><tbody>
       {% for c in contacts %}<tr>
-        <td>{{ c.name }}</td><td>{% if c.id in crm_email_review_ids %}<span class="ema-crm-origin" title="Původní neplatná hodnota je uložená pouze k revizi; nelze na ni odesílat.">E-mail k ověření</span>{% else %}{{ c.email or '—' }}{% endif %}</td><td>{{ c.phone or '—' }}</td>
+        <td>{{ c.name }}
+          <details class="ema-crm-edit"><summary>Upravit</summary>
+            <form class="formstack" method="post" action="{{ url_for('edit_contact', org_id=c.organization_id, contact_id=c.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <label>Jméno<input name="name" value="{{ c.name }}" maxlength="190"></label>
+              <label>E-mail<input name="email" type="email" value="{{ c.email or '' }}" maxlength="190"></label>
+              <label>Telefon<input name="phone" value="{{ c.phone or '' }}" maxlength="60"></label>
+              <label>Klientská firma<select name="company_id"><option value="">Bez vazby</option>
+                {% for company in companies %}{% if company.organization_id == c.organization_id %}
+                  <option value="{{ company.id }}" {% if company.id == c.company_id %}selected{% endif %}>{{ company.name }}</option>
+                {% endif %}{% endfor %}
+              </select></label>
+              <button class="btn primary" type="submit">Uložit</button>
+            </form>
+          </details>
+        </td><td>{% if c.id in crm_email_review_ids %}<span class="ema-crm-origin" title="Původní neplatná hodnota je uložená pouze k revizi; nelze na ni odesílat.">E-mail k ověření</span>{% else %}{{ c.email or '—' }}{% endif %}</td><td>{{ c.phone or '—' }}</td>
         <td>{{ companies|selectattr('id','equalto',c.company_id)|map(attribute='name')|first|default('—') }}</td>
         <td>{{ orgs|selectattr('id','equalto',c.organization_id)|map(attribute='name')|first|default('—') }}</td>
         <td>
