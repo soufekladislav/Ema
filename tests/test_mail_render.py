@@ -161,5 +161,62 @@ def test_newsletter_keeps_safe_responsive_media_rules_and_poppins_fallback():
     """, subtype="html")
     preview = make_preview(msg.as_bytes())
     assert "@media screen and (max-width: 600px)" in preview.srcdoc
-    assert "Poppins" in preview.srcdoc
+    # The containing EMA UI uses Poppins; third-party messages retain their own typography.
+    assert "font-family:Poppins" not in preview.srcdoc
+    assert "font-family:Arial" in preview.srcdoc
     assert "Nabídka" in preview.srcdoc
+
+
+
+def test_table_navigation_bgcolor_css_and_original_font_are_preserved_without_remote_fetch():
+    """Real-world newsletter shape: colored table nav + 3 side-by-side links."""
+    msg = EmailMessage()
+    msg.set_content("Plain")
+    msg.add_alternative("""
+      <html><head><style>
+        .nav td{padding:9px 18px;background-color:#058523;color:#fff}
+        .nav a{color:#fff;text-decoration:none;font-family:Verdana,sans-serif}
+        .banner{background-image:url("https://images.example.test/bg.png");
+                padding:16px;background-color:#058523}
+      </style></head><body>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+        <tr class="nav" bgcolor="#058523"><td width="33%" align="center"><a href="https://example.test/a">BARVY</a></td>
+        <td width="33%" align="center"><a href="https://example.test/b">LAZURY</a></td>
+        <td width="34%" align="center"><a href="https://example.test/c">OLEJE</a></td></tr>
+        <tr><td colspan="3" class="banner" style="background-color:#008822;color:white">SLEVY</td></tr>
+      </table><img src="https://images.example.test/tracker.png" alt="tracker">
+      <script>bad()</script></body></html>
+    """, subtype="html")
+    safe = make_preview(msg.as_bytes())
+    assert safe.is_html
+    assert "bgcolor=\"#058523\"" in safe.srcdoc
+    assert "role=\"presentation\"" in safe.srcdoc
+    assert safe.srcdoc.count('width="33%"') == 2
+    assert "font-family:Verdana" in safe.srcdoc
+    assert ".nav td{" in safe.srcdoc and ".nav a{" in safe.srcdoc
+    assert "background-color:#058523" in safe.srcdoc
+    assert "https://images.example.test/" not in safe.srcdoc
+    assert "<script" not in safe.srcdoc
+    assert "font-family:Poppins" not in safe.srcdoc
+    allowed = make_preview(msg.as_bytes(), show_images=True)
+    assert "https://images.example.test/tracker.png" in allowed.srcdoc
+    assert "https://images.example.test/bg.png" in allowed.srcdoc
+    assert ".nav td{" in allowed.srcdoc
+
+
+def test_email_css_never_loads_external_font_or_stylesheet():
+    msg = EmailMessage()
+    msg.set_content("Plain")
+    msg.add_alternative("""
+      <html><head>
+      <link rel="stylesheet" href="https://tracker.example.test/theme.css">
+      <style>@import url("https://tracker.example.test/style.css");
+      @font-face{font-family:Spy;src:url("https://tracker.example.test/spy.woff")}
+      .safe{color:#145a23}</style></head>
+      <body><p class="safe">Dobry den</p></body></html>
+    """, subtype="html")
+    out = make_preview(msg.as_bytes(), show_images=True).srcdoc
+    assert "tracker.example.test" not in out
+    assert "font-src data:" in out
+    assert "fonts.googleapis.com" not in out
+    assert ".safe{" in out

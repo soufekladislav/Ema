@@ -97,7 +97,11 @@ def test_folder_display_order_is_scoped_to_owner_and_does_not_move_imap(web_clie
         db.commit()
         bid, fids = b.id, [f.id for f in fs]
     login(client, "owner")
-    assert "Nová složka na serveru" in client.get(f"/mail?box={bid}").get_data(as_text=True)
+    listing_html = client.get(f"/mail?box={bid}").get_data(as_text=True)
+    assert 'data-folder-create-dialog' in listing_html
+    assert 'data-folder-create-name' in listing_html
+    assert 'ema-mail-create-folder' not in listing_html
+    assert 'data-can-manage="1"' in listing_html
     post = client.post(f"/mail/{bid}/folders/order",
                        json={"ids":[fids[2], fids[0], fids[1]]},
                        headers={"X-CSRF-Token":csrf(client)})
