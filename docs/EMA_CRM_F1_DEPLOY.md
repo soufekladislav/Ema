@@ -44,5 +44,18 @@ Spouštět ze správného projektového adresáře a venv. Přesné cesty zjisti
 - Kontrola původní Eda fakturace, odesílání pošty a Superadmin.
 - Výsledek na serveru potvrdit odděleně: CI není potvrzení nasazení.
 
+
+## Oprava více webů: WordPress home_url / www (20. 11. 2026)
+
+**Pozorované:** Adrenaline Race načetl kontakty, Fresh Crackers při připojování vracel „neplatná nebo neočekávaná kontaktní data“. Ema má podle ops manifestu 85 kontaktů, schéma OK; screenshot zároveň ukazuje filtr `org=1`, nikoli nutně organizaci, do které byly AR kontakty importovány. Není potvrzeno, že by existující kontakty zmizely.
+
+**Identifikované slabé místo parseru:** Fresh Core odpovídá `site = home_url('/')` ze svého WordPress nastavení. Ema dříve vyžadovala doslovnou shodu `hostname` mezi URL použitou pro HTTPS API a deklarovanou URL webu. To odmítne běžné a bezpečné rozdíly `www.example.cz` ↔ `example.cz` a konfiguraci `http` za HTTPS reverzní proxy.
+
+**Úprava:** Pouze Ema načítací parser. HTTPS a validace veřejné adresy zůstávají povinné pro síťové požadavky, žádné HTTP připojení s klíčem ani automatické přesměrování. URL uvedená v JSON je výhradně identifikační metadata a akceptuje pouze stejnou doménu se/bez jediného prefixu `www.`, nezávisle na schématu uložené WordPress adresy. Cizí domény stále odmítá. Neotevírá žádná nová oprávnění a nezasahuje do Fresh Core, fakturací ani CRM databáze.
+
+**Diagnostika:** Chybný JSON, jiný typ dat, neoprávněný web, neplatné stránkování nebo jiné doménové jméno nyní vrací odlišné srozumitelné chyby bez výpisu obsahu kontaktů či klíče.
+
+**Přejímka:** Připojit Fresh Crackers znovu pod správnou firmou, provést `Náhled` a `Synchronizovat`. Ověřit kontakty ve filtrech, opakovaný sync bez duplicit a stále funkční AR. Pokud chyba přetrvá, nové hlášení určí její kategorii; v takovém případě přiložit pouze hlášení, nikoli READ klíč či odpověď API s osobními údaji.
+
 ## Mimo tento milník
 Hromadné e-maily, jejich oprávnění, opt-out a schvalování, obchodní pipeline a dvousměrná editace zdrojů. Nikdy není automatický marketingový souhlas jen díky WP registraci či odeslání formuláře.

@@ -202,3 +202,100 @@ def test_source_read_requires_database_migration(web_client):
     response = client.post("/database/import", data={
         "csrf_token": csrf(client), "organization_id": str(client.application.ids["org"])})
     assert response.status_code == 409
+
+
+
+def test_wordpress_home_url_www_alias_is_accepted_without_weakening_identity():
+    """Fresh Crackers may be contacted through www but WP home_url is without it."""
+    from ema.fresh_core_contacts import _check_advertised_site
+    for given, declared in (
+        ("https://www.example.cz", "https://example.cz/"),
+        ("https://example.cz", "https://www.example.cz/"),
+        ("https://www.example.cz", "http://example.cz/"),
+        ("https://www.example.cz", "https://www.example.cz/"),
+    ):
+        _check_advertised_site(given, declared)
+    for declared in (
+        "https://other-example.cz/", "https://evil.example.cz/",
+        "https://www.example.cz.evil.net/", "file:///etc/passwd",
+        "https://www.example.cz/?credential=secret",
+    ):
+        with pytest.raises(FreshCoreError):
+            _check_advertised_site("https://www.example.cz", declared)
+
+
+def test_fetch_page_accepts_real_fresh_core_json_with_www_alias(monkeypatch):
+    from types import SimpleNamespace
+    from ema import fresh_core_contacts as svc
+    from ema.mail_service import encrypt_password
+    fernet_key = Fernet.generate_key().decode()
+    response = {
+        "ok": True, "available": True, "site": "https://example.cz/",
+        "kind": "users", "items": [{"source_id": 1, "skip": True}],
+        "has_more": False, "next_after_id": 1,
+    }
+    class MockResponse:
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+        def read(self, size):
+            return json.dumps(response).encode("utf-8")
+    class MockOpener:
+        def open(self, req, timeout):
+            assert req.full_url.startswith("https://www.example.cz/")
+            assert req.get_header("X-fresh-core-accounting-key") == "some-private-key"
+            return MockResponse()
+    monkeypatch.setattr(svc, "canonical_site", lambda x: x)
+    monkeypatch.setattr(svc.urllib.request, "build_opener", lambda *args: MockOpener())
+    source = SimpleNamespace(site_url="https://www.example.cz",
+        credential=encrypt_password("some-private-key", fernet_key))
+    assert svc.fetch_page(source, fernet_key, "users")["next_after_id"] == 1
+    response["site"] = "https://unrelated.example.org/"
+    with pytest.raises(FreshCoreError, match="jinou doménu"):
+        svc.fetch_page(source, fernet_key, "users")
+    response["site"] = "https://example.cz/"
+    response["has_more"] = "false"
+    with pytest.raises(FreshCoreError, match="stránkování"):
+        svc.fetch_page(source, fernet_key, "users")
+    response["has_more"] = False
+
+
+def test_connected_wordpress_site_without_www_is_saved(web_client, monkeypatch):
+    """POST /database/sources exercises the non-www WP identity end to end."""
+    from types import SimpleNamespace
+    from ema import fresh_core_contacts as svc
+    from ema.mail_service import encrypt_password
+    client = web_client
+    login(client, "owner")
+    org = client.application.ids["org"]
+    client.application.config["MAIL_ENCRYPTION_KEY"] = Fernet.generate_key().decode()
+    import ema.web as web
+    monkeypatch.setattr(web, "canonical_site", lambda raw: "https://www.example.cz")
+    response = {
+        "ok": True, "available": True, "site": "https://example.cz/",
+        "kind": "users", "items": [{"source_id": 1, "skip": True}],
+        "has_more": False, "next_after_id": 1,
+    }
+    class Response:
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+        def read(self, size):
+            return json.dumps(response).encode()
+    class Opener:
+        def open(self, req, timeout):
+            return Response()
+    monkeypatch.setattr(svc, "canonical_site", lambda raw: "https://www.example.cz")
+    monkeypatch.setattr(svc.urllib.request, "build_opener", lambda *args: Opener())
+    result = client.post("/database/sources", data={
+        "csrf_token": csrf(client), "organization_id": str(org),
+        "site_url": "https://www.example.cz", "accounting_read_key": "a" * 64,
+    })
+    assert result.status_code == 302
+    with Session(client.application.extensions["ema_engine"]) as db:
+        row = db.scalar(select(FreshCoreSource).where(
+            FreshCoreSource.organization_id == org))
+        assert row is not None
+        assert row.site_url == "https://www.example.cz"
