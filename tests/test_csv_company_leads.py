@@ -70,11 +70,11 @@ def test_exact_21_company_csv_columns_are_accepted_without_persons():
     assert all(r["entity_type"] == "company" for r in entries)
     assert all(not r["name"] and not r["email"] and not r["phone"] for r in entries)
     attrs = entries[0]["attributes"]
-    assert attrs["web"] == "https://example001.test/"
-    assert attrs["hypoteza nabidky neovereno"] == "pravděpodobně potřebuje nový web"
-    assert attrs["priorita"] == "A"
-    assert attrs["zdroj"] == "vlastní akviziční rešerše"
-    assert attrs["obchodni pripravenost"] == "hypotéza"
+    assert attrs["Web"] == "https://example001.test/"
+    assert attrs["Hypotéza nabídky (neověřeno)"] == "pravděpodobně potřebuje nový web"
+    assert attrs["Priorita"] == "A"
+    assert attrs["Zdroj"] == "vlastní akviziční rešerše"
+    assert attrs["Obchodní připravenost"] == "hypotéza"
 
 
 def test_firm_only_csv_preview_then_import_and_replay(web_client):
@@ -109,9 +109,9 @@ def test_firm_only_csv_preview_then_import_and_replay(web_client):
         first_company = companies[0]
         first_origin = next(o for o in origins if o.company_id == first_company.id)
         fields = json.loads(first_origin.metadata_json)["fields"]
-        assert fields["web"] == "https://example001.test/"
-        assert fields["zdroj"] == "vlastní akviziční rešerše"
-        assert fields["stav overeni"] == "nutno ověřit"
+        assert fields["Web"] == "https://example001.test/"
+        assert fields["Zdroj"] == "vlastní akviziční rešerše"
+        assert fields["Stav ověření"] == "nutno ověřit"
         assert json.loads(first_origin.metadata_json)["review_status"] == "unverified"
 
     page = client.get("/database")
