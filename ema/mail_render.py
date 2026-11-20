@@ -307,7 +307,7 @@ def make_preview(data, *, show_images=False, truncated=False):
         def clean_inline_style(match):
             safe = _safe_declarations(html.unescape(match.group(3)))
             return match.group(1) + match.group(2) + html.escape(safe, quote=True) + match.group(2)
-        rich = re.sub(r'(\\sstyle\\s*=\\s*)(["\\\'])(.*?)\\2',
+        rich = re.sub(r'(\sstyle\s*=\s*)(["\x27])(.*?)\2',
                       clean_inline_style, rich, flags=re.I | re.S)
         sanitized = bleach.clean(
             rich, tags=ALLOWED_TAGS, attributes=allowed,
