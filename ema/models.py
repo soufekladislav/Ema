@@ -220,6 +220,20 @@ class MailboxView(Base):
     __table_args__ = (UniqueConstraint("mailbox_id", "user_id"), Index("ix_mailbox_view_user", "user_id"),)
 
 
+class MailFolderView(Base):
+    """Per-user display order, never an IMAP folder reorganization."""
+    __tablename__ = "mail_folder_views"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    mailbox_id: Mapped[int] = mapped_column(ForeignKey("mailboxes.id", ondelete="CASCADE"), nullable=False)
+    folder_id: Mapped[int] = mapped_column(ForeignKey("mail_folders.id", ondelete="CASCADE"), nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    __table_args__ = (
+        UniqueConstraint("user_id", "folder_id"),
+        Index("ix_folder_order_user_mailbox", "user_id", "mailbox_id", "position"),
+    )
+
+
 class MailboxGrant(Base):
     __tablename__ = "mailbox_grants"
     id: Mapped[int] = mapped_column(primary_key=True)
