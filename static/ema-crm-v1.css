@@ -1,0 +1,9 @@
+/* Reuse existing EMA cards; only tighten CRM search and source chips. */
+.ema-crm-filters{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:12px 0 15px}
+.ema-crm-filters input{flex:2 1 230px;min-width:170px}
+.ema-crm-filters select{flex:1 1 150px;min-width:125px}
+.ema-crm-filters input,.ema-crm-filters select{min-height:39px}
+.ema-crm-origin{display:inline-block;max-width:210px;overflow:hidden;text-overflow:ellipsis;vertical-align:middle;white-space:nowrap;border-radius:6px;background:#eff4e7;color:#293f20;font-size:11px;padding:3px 6px;margin:2px 2px 2px 0}
+.ema-inline-form{display:inline-block;margin:2px}
+.ema-inline-form button{white-space:nowrap}
+@media(max-width:760px){.ema-crm-filters input,.ema-crm-filters select,.ema-crm-filters button,.ema-crm-filters a{flex:1 1 100%;width:100%}.ema-crm-origin{max-width:160px}.ema-inline-form button{min-height:39px}}
