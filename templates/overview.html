@@ -362,7 +362,9 @@
     {% endif %}
   </div>
 
-        <div class="ema-crm-clientlinks"><h3>Správa klientských firem</h3>  <div class="ema-hub-inline-actions">
+        <div class="ema-crm-clientlinks"><h3>Klientské firmy ({{ companies|length }})</h3>
+          {% if companies %}<p class="small muted">Existující klienti: {% for company in companies[:30] %}{{ company.name }}{% if not loop.last %} · {% endif %}{% endfor %}{% if companies|length > 30 %} a další{% endif %}</p>{% endif %}
+          <div class="ema-hub-inline-actions">
     {% for o in eligible_orgs %}<a class="btn" href="{{ url_for('clients', org_id=o.id) }}">Klienti · {{ o.name }}</a>{% endfor %}
   </div>
 </div>
