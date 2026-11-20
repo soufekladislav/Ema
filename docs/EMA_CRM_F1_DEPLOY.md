@@ -57,5 +57,15 @@ Spouštět ze správného projektového adresáře a venv. Přesné cesty zjisti
 
 **Přejímka:** Připojit Fresh Crackers znovu pod správnou firmou, provést `Náhled` a `Synchronizovat`. Ověřit kontakty ve filtrech, opakovaný sync bez duplicit a stále funkční AR. Pokud chyba přetrvá, nové hlášení určí její kategorii; v takovém případě přiložit pouze hlášení, nikoli READ klíč či odpověď API s osobními údaji.
 
+## CRM UI po importech (20. 11. 2026)
+
+**Zjištěná chyba rozhraní:** CRM bylo ve stejné Jinja šabloně vykreslené dvakrát: nový filtr/seznam ve společné horní části a starý seznam klientských firem ve spodní části. Nešlo o dvě databáze, ale dvě neodstraněné prezentace stejných dat.
+
+**Oprava bez databázové migrace:** nahoře čtyři statistiky (kontakty celkem, WordPress, Elementor, CSV) v rámci aktuálně zvolené vlastní firmy / všech přístupných firem. Statistické skupiny se mohou překrývat, protože jeden kontakt smí mít více zdrojů. Následuje jedna sbalená nabídka „Importy a propojení“ (existující weby, jejich synchronizace, CSV, správa klientských firem), potom jediné vyhledávání a tabulka po **50 kontaktech**, skutečné stránkování a zdroje seskupené do jedné značky na web/typ. Originální ContactOrigin řádky se nemažou ani nepřepisují.
+
+**Přejímka:** desktop/tablet/mobil – statistiky se nelámou, ovládání sbalené nabídky funguje dotykem/klávesnicí, do tabulky se vejde max. 50 kontaktů včetně poslední krátké stránky, filtr funguje napříč stránkami, stejné formuláře jednoho webu jsou jako jeden čitelný štítek s počtem opakování, správa existujících klientských firem je zachována v rozbalovací nabídce. Celkem z ops manifestu 20. 11. 2026: 290 kontaktů pro čtyři organizace, ale produkční počty si musí uživatel po nasazení zkontrolovat (mohly se mezitím změnit).
+
+**Spam není součástí tohoto CSS/UX PR.** Pro AI návrh, kontrolu a schvalovaný Trash existuje samostatné [EMA #95](https://github.com/soufekladislav/Ema/issues/95) a [WP-Fresh-Core #3](https://github.com/soufekladislav/WP-Fresh-Core/issues/3), aby nebyla nevratně smazána legitimní WordPress registrace nebo jiný původ stejného kontaktu.
+
 ## Mimo tento milník
 Hromadné e-maily, jejich oprávnění, opt-out a schvalování, obchodní pipeline a dvousměrná editace zdrojů. Nikdy není automatický marketingový souhlas jen díky WP registraci či odeslání formuláře.
