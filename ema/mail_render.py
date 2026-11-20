@@ -38,7 +38,11 @@ EMAIL_CSS = CSSSanitizer(allowed_css_properties={
     "width", "max-width", "min-width", "height", "max-height", "vertical-align",
     "display", "white-space", "word-break", "overflow-wrap", "word-wrap",
     "border-spacing", "box-sizing", "direction", "background-position",
-    "background-repeat", "background-size",
+    "background-repeat", "background-size", "background-image",
+    "border-top", "border-right", "border-bottom", "border-left",
+    "border-top-color", "border-right-color", "border-bottom-color", "border-left-color",
+    "border-top-width", "border-right-width", "border-bottom-width", "border-left-width",
+    "text-transform", "text-indent", "word-spacing", "list-style-type", "float", "clear",
 }) if CSSSanitizer else None
 
 
@@ -118,7 +122,7 @@ def safe_image_url(value):
         return False
 
 
-def _safe_declarations(raw):
+def _safe_declarations(raw, *, show_images=False):
     """Preserve benign styling even when another property requests remote CSS."""
     if EMAIL_CSS is None or tinycss2 is None or len(raw) > 10000:
         return ""
@@ -131,8 +135,17 @@ def _safe_declarations(raw):
             continue
         value = tinycss2.serialize(item.value).strip()
         if not value or len(value) > 1200 or re.search(
-                r"(?i)url\s*\(|expression\s*\(|@import|@font-face|"
+                r"(?i)expression\s*\(|@import|@font-face|"
                 r"\\|[\x00-\x08\x0b-\x1f]", value):
+            continue
+        # A newsletter may use CSS background images, including Outlook
+        # banners. These are loaded only after the explicit Images click.
+        # Only a single HTTPS URL is permitted; no CSS functions/cascades.
+        if name == "background-image":
+            match = re.fullmatch(r"""url\(\s*(['"]?)(https://[^'")\s]+)\1\s*\)""", value, flags=re.I)
+            if not show_images or not match or not safe_image_url(match.group(2)):
+                continue
+        elif re.search(r"(?i)url\s*\(", value):
             continue
         cleaned = EMAIL_CSS.sanitize_css(name + ":" + value).strip().rstrip(";")
         if cleaned:
@@ -140,7 +153,7 @@ def _safe_declarations(raw):
     return ";".join(accepted)
 
 
-def _safe_newsletter_styles(html_body):
+def _safe_newsletter_styles(html_body, *, show_images=False):
     """Safely render a subset of stylesheet rules from HTML email templates.
 
     CSS remains inside a sandboxed srcdoc iframe. Never allow URLs, @import,
@@ -162,7 +175,7 @@ def _safe_newsletter_styles(html_body):
         declarations = tinycss2.serialize(rule.content)
         if len(declarations) > 4000:
             return ""
-        css = _safe_declarations(declarations)
+        css = _safe_declarations(declarations, show_images=show_images)
         return f"{selector}{{{css}}}" if css else ""
 
     for sheet in re.findall(r"<style\b[^>]*>([\s\S]*?)</style\s*>",
@@ -257,7 +270,7 @@ def make_preview(data, *, show_images=False, truncated=False):
 
     # Remove executable/style blocks WITH their content before bleach. Otherwise
     # email newsletter CSS is displayed as raw text at the top of the preview.
-    safe_style_rules = _safe_newsletter_styles(rich)
+    safe_style_rules = _safe_newsletter_styles(rich, show_images=show_images)
     original_body_style = _body_style(rich)
     rich = re.sub(r"<(script|style|head|iframe|object|svg)\b[^>]*>[\s\S]*?</\1\s*>",
                   "", rich, flags=re.I)
@@ -265,7 +278,7 @@ def make_preview(data, *, show_images=False, truncated=False):
     if rich:
         def allowed(tag, name, value):
             if name == "style":
-                return bool(_safe_declarations(value))
+                return bool(_safe_declarations(value, show_images=show_images))
             if name == "class":
                 return bool(re.fullmatch(r"[a-zA-Z0-9_\- ]{1,240}", value))
             if name == "id":
@@ -274,8 +287,16 @@ def make_preview(data, *, show_images=False, truncated=False):
                 return value.lower() in ("left", "right", "center", "justify", "top", "middle", "bottom")
             if tag == "table" and name in ("cellspacing", "cellpadding", "border"):
                 return bool(re.fullmatch(r"\d{1,2}", value))
-            if tag in ("table", "td", "th") and name == "bgcolor":
+            if tag in ("table", "tbody", "tr", "td", "th", "div") and name == "bgcolor":
                 return bool(re.fullmatch(r"#[a-fA-F0-9]{3,8}|[a-zA-Z]{1,20}", value))
+            if name == "dir" and tag in ("table", "tbody", "tr", "td", "th", "div", "p", "span"):
+                return value.lower() in ("ltr", "rtl", "auto")
+            if name == "role" and tag == "table":
+                return value.lower() == "presentation"
+            if tag in ("div", "p") and name == "align":
+                return value.lower() in ("left", "right", "center", "justify")
+            if tag in ("table", "tbody", "tr", "td", "th") and name == "background":
+                return show_images and safe_image_url(value)
             if tag == "font" and name in ("color", "size", "face"):
                 return bool(re.fullmatch(r"[a-zA-Z0-9_#., \-]{1,80}", value))
             if tag == "a" and name in ("href", "title"):
@@ -305,7 +326,7 @@ def make_preview(data, *, show_images=False, truncated=False):
         # Keep email-safe inline button/table CSS but never permit URLs from style.
         # Bleach performs a second sanitation pass after unsafe declarations leave.
         def clean_inline_style(match):
-            safe = _safe_declarations(html.unescape(match.group(3)))
+            safe = _safe_declarations(html.unescape(match.group(3)), show_images=show_images)
             return match.group(1) + match.group(2) + html.escape(safe, quote=True) + match.group(2)
         rich = re.sub(r'(\sstyle\s*=\s*)(["\x27])(.*?)\2',
                       clean_inline_style, rich, flags=re.I | re.S)
@@ -322,15 +343,14 @@ def make_preview(data, *, show_images=False, truncated=False):
             "<!doctype html><html><head><meta charset='utf-8'>"
             "<meta http-equiv='Content-Security-Policy' content=\""
             "default-src 'none'; script-src 'none'; connect-src 'none'; "
-            "style-src 'unsafe-inline' https://fonts.googleapis.com; img-src " + img_policy +
-            "; font-src https://fonts.gstatic.com; form-action 'none'; base-uri 'none'\">"
+            "style-src 'unsafe-inline'; img-src " + img_policy +
+            "; font-src data:; form-action 'none'; base-uri 'none'\">"
             "<base target='_blank'>"
-            "<link rel='stylesheet' href='https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap'>"
             "<style>"
-            "body{font-family:Poppins,Arial,sans-serif;font-size:14px;line-height:1.55;"
-            "color:#172019;margin:0;padding:12px;overflow-wrap:anywhere;}"
+            "html,body{margin:0;padding:0;min-width:0;}"
+            "body{font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:normal;"
+            "color:#172019;overflow-wrap:anywhere;}"
             "table{max-width:100%;}img{max-width:100%;height:auto}"
-            "blockquote{border-left:3px solid #b9d98e;padding-left:10px}"
             "</style><style>" + safe_style_rules + "</style></head><body style='" +
             html.escape(original_body_style, quote=True) + "'>" + sanitized + "</body></html>"
         )
