@@ -57,7 +57,7 @@ def test_modified_utf7_encode_and_remote_folder_create_is_server_first(monkeypat
             self.names = ["INBOX"]
             self.created = []
         def list(self):
-            return "OK", [b'(\HasNoChildren) "/" "' + name.encode() + b'"' for name in self.names]
+            return "OK", [rb'(\HasNoChildren) "/" "' + name.encode() + b'"' for name in self.names]
         def create(self, encoded):
             self.created.append(encoded)
             self.names.append(encoded.strip('"'))
@@ -97,7 +97,7 @@ def test_folder_display_order_is_scoped_to_owner_and_does_not_move_imap(web_clie
         db.commit()
         bid, fids = b.id, [f.id for f in fs]
     login(client, "owner")
-    assert b"Nová složka na serveru" in client.get(f"/mail?box={bid}").data
+    assert "Nová složka na serveru" in client.get(f"/mail?box={bid}").get_data(as_text=True)
     post = client.post(f"/mail/{bid}/folders/order",
                        json={"ids":[fids[2], fids[0], fids[1]]},
                        headers={"X-CSRF-Token":csrf(client)})
