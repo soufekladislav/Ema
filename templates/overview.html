@@ -135,11 +135,11 @@
               </form>
               {% if selected_box and selected_box.id == b.id %}
               <nav class="ema-mail-folder-tree" aria-label="Složky schránky {{ b.label }}">
-                <details class="ema-mail-folders-root" data-mail-folder-root="{{ me.id }}:{{ b.id }}" open>
+                <details class="ema-mail-folders-root" data-mail-folder-root="{{ me.id }}:{{ b.id }}" data-folder-order-url="{{ url_for('mail_folder_order', box_id=b.id) }}" data-csrf="{{ csrf_token() }}" open>
                   <summary>Složky schránky</summary>
                   <div class="ema-mail-folder-entries">
                 {% for f in imap_folders %}
-                  <a class="ema-mail-folder {{ 'active' if selected_folder and selected_folder.id == f.id else '' }}"
+                  <a draggable="true" class="ema-mail-folder {{ 'active' if selected_folder and selected_folder.id == f.id else '' }}"
                      data-folder-id="{{ f.id }}" data-folder-mailbox-id="{{ b.id }}"
                      data-folder-fullname="{{ folder_names[f.id] }}" data-folder-delimiter="{{ f.delimiter }}"
                      href="{{ url_for('mail_hub', box=b.id, folder=f.id) }}">
@@ -151,6 +151,28 @@
                   <button class="ema-mail-folders-refresh" type="submit">↻ Aktualizovat složky</button>
                 </form>
                   </div>
+                  {% if b.id in syncable_ids %}
+                  <details class="ema-mail-create-folder">
+                    <summary>＋ Nová složka na serveru</summary>
+                    <form method="post" action="{{ url_for('mail_create_folder', box_id=b.id) }}" class="ema-mail-create-folder-form">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                      <label>Název nové složky
+                        <input type="text" name="name" maxlength="80" required autocomplete="off" placeholder="Např. Obchod 2026">
+                      </label>
+                      <label>Umístění
+                        <select name="parent_folder_id">
+                          <option value="">Hlavní úroveň schránky</option>
+                          {% for parent in imap_folders %}
+                          <option value="{{ parent.id }}">{{ folder_names[parent.id] }}</option>
+                          {% endfor %}
+                        </select>
+                      </label>
+                      <button class="ema-mail-folders-create-button" type="submit">Vytvořit v IMAP</button>
+                    </form>
+                    <p class="small muted">Založí skutečnou složku na poštovním serveru. Nepřesouvá žádné e-maily.</p>
+                  </details>
+                  {% endif %}
+                  <p class="ema-folder-order-status small muted" data-folder-order-status role="status" aria-live="polite"></p>
                 </details>
               </nav>
               {% endif %}
