@@ -2,6 +2,7 @@
 import pytest
 
 from ema.contact_import import ImportErrorCSV, extract_contacts, normalize_header
+from tests.test_navigation import web_client, login, csrf
 
 
 def test_google_contacts_csv_without_name_and_phone():
@@ -60,7 +61,6 @@ def test_phone_only_google_csv_import_replays_as_same_contact(web_client):
     from sqlalchemy import select
     from sqlalchemy.orm import Session
     from ema.models import Contact, ContactOrigin
-    from tests.test_navigation import login, csrf
 
     client = web_client
     login(client, "owner")
