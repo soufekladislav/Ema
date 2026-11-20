@@ -3,7 +3,7 @@
 > **Projekt:** EMA — AI obchodní a projektová asistentka Fresh Crackers  
 > **Typ dokumentu:** Master specification / Product Requirements Document (PRD) / Project Map  
 > **Verze dokumentu:** 1.3 (doplněno: chat jako primární ovládání, Boban-style login, bezpečný pilot Fresh AI Engine)  
-> **Datum aktualizace:** 17. 11. 2026  
+> **Datum aktualizace:** 20. 11. 2026  
 > **Stav projektu:** Master zadání; Python V0.1 lokálně spuštěna, další funkcionality ve vývoji. Zde popsané plánované funkce nejsou automaticky implementované.  
 > **Cílová technologie:** Python + Flask + MariaDB, provoz typu Passenger/cPanel  
 > **AI:** Fresh AI Engine; **identita a tajné přístupy:** Fresh Key podle možností stávajícího rozhraní  
@@ -20,6 +20,7 @@
 | **1.1** | **16. 11. 2026** | **Hierarchie uživatel → více firem → projekty, firemní a projektový chat, práva k poště a dokumentům, superadmin konzole, provozní a datová metrika, účty a kvóty, testy izolace** |
 | **1.2** | **17. 11. 2026** | **Projekt hlavní uživatelský kontext, firma pouze datová/účetní hranice a volitelný filtr; přihlášení převzato z PHP, s aktualizovaným obsahem** |
 | **1.3** | **17. 11. 2026** | **Upřesnění: primární obrazovkou je chat s Emou, projekt je jeho kontext, nikoli katalog karet; přihlášení vizuálně podle Bobana; pilotní AI pouze nad schváleným datovým rozsahem** |
+| **1.4** | **20. 11. 2026** | **Potvrzení pořadí F1: CRM jako nejbližší realizační milník po mailu, WordPress uživatelé + Elementor Pro Submissions přes oddělený Fresh Core CRM export, idempotentní provenance, CSV a hledání dle zdroje před hromadnou komunikací** |
 
 **Terminologie:** „**Firma (pracovní prostor)**“ = zákaznická/uživatelská organizace provozující Emu (`organizations`); „**klientská firma**“ = kontakt či odběratel vedený v CRM (`companies`). Tyto dvě odlišné věci nesmějí mít společná oprávnění ani jeden identifikátor.
 
@@ -315,6 +316,20 @@ Priorita: **P0** = nutné pro první použitelnou verzi; **P1** = následné dok
 **Pravidlo úložiště:** viz detailní § 7 — Ema není kopie kompletní schránky.
 
 ### 4.3 **Databáze zákazníků / CRM**
+
+#### Aktuální implementační milník F1 / E-02 (20. 11. 2026)
+
+**Pořadí je potvrzené:** po poštovním klientu dokončit společnou databázi klientů a kontaktů. Teprve poté akviziční projekty a schvalované hromadné oslovení. Současný základ Company/Contact a CSV import se **rozšiřuje**, nevytváří se paralelní CRM.
+
+1. **CRM a seznamy:** serverové vyhledávání podle jména, firmy, e-mailu; filtr vlastníka dat, původu (web), typu zdroje (CSV / WP registrace / Elementor formulář). Jedna osoba může mít více zdrojů, které se u kontaktu zobrazí; vlastní firmu Emy (organization) nezaměňovat s klientskou firmou (company). Viz [#28](https://github.com/soufekladislav/Ema/issues/28).
+2. **CSV:** využít stávající `contact_import.py` a `/database/import`, doplnit jednu kontrolu mapování/dry-run, zdroj/dávku, idempotenci a potvrzení bez tichých přepisů. Viz [#29](https://github.com/soufekladislav/Ema/issues/29).
+3. **Fresh Core:** samostatný opt-in CRM-only export WP uživatelů a vybraných Elementor Pro Submissions pod **odděleným klíčem**, ne rozšíření generického Fresh Core čtecího přístupu. Fresh Core 0.7.8 chrání WP PII a formulářové odpovědi záměrně. Ema si u každého vlastního webu vybere cílovou vlastní firmu, prohlédne preview a provede potvrzený idempotentní sync. Viz [EMA #92](https://github.com/soufekladislav/Ema/issues/92) a [WP Fresh Core #1](https://github.com/soufekladislav/WP-Fresh-Core/issues/1).
+4. **Přejímka:** dva tenanti, opakovaný sync a CSV import bez duplicit, reálné testovací WP a Elementor kontakty, správné filtry, práva, mobil/tablet/desktop, audit posledního běhu. Dokud není doložen původ a právní titul, kontakt není automaticky odběratelem obchodních sdělení.
+
+**Datové rozhodnutí:** kanonické `contacts` a `companies` se zachovají; opakovatelná provenance (např. podřízené `contact_sources` s klíčem web+typ+externí ID) nepřepisuje jednotlivé existující zdroje. Kontakty nepatří do generického exportního ZIP Fresh Core. Marketingový status/souhlas je oddělený, s důkazem a opt-out, nepřebírá se z pouhé registrace.
+
+**Mimo tento milník:** hromadné odesílání, nové CRM aplikace, přístup do všech hodnot Elementor formulářů, automatické schvalování právního titulu, plné obchodní pipeline. #30/#31 jsou historicky odložené; minimum proti duplicitám a nevyžádanému marketingu musí platit již v tomto kroku.
+
 
 **P0**
 
