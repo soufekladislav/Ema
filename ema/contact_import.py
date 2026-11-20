@@ -10,6 +10,10 @@ import re
 import unicodedata
 
 
+MAX_CSV_ROWS = 5000
+MAX_CSV_BYTES = 5 * 1024 * 1024
+
+
 class ImportErrorCSV(Exception):
     pass
 
@@ -45,8 +49,8 @@ def analyze_contacts(data):
     canonical email stays empty until a person verifies it. A Google contact
     with a second valid address keeps that valid address instead.
     """
-    if not data or len(data) > 950_000:
-        raise ImportErrorCSV("CSV je prázdné nebo přesahuje limit 950 kB.")
+    if not data or len(data) > MAX_CSV_BYTES:
+        raise ImportErrorCSV("CSV je prázdné nebo přesahuje limit 5 MB.")
     try:
         decoded = data.decode("utf-8-sig")
     except UnicodeDecodeError:
@@ -74,8 +78,8 @@ def analyze_contacts(data):
               "needs_review": 0, "skipped_rows": 0, "problem_rows": [],
               "company_rows": 0, "contact_rows": 0}
     for index, record in enumerate(reader, 2):
-        if index > 1002:
-            raise ImportErrorCSV("V jedné dávce lze importovat maximálně 1000 kontaktů.")
+        if index > MAX_CSV_ROWS + 1:
+            raise ImportErrorCSV(f"V jednom CSV lze importovat maximálně {MAX_CSV_ROWS} řádků.")
         if None in record:
             raise ImportErrorCSV(f"Řádek {index} má jiný počet sloupců než hlavička.")
         fields = {normalize_header(k): str(v or "").strip() for k, v in record.items()}
