@@ -68,7 +68,7 @@ def extract_contacts(data):
         email = pick(*email_keys).lower()
         phone = pick(*phone_keys)
         company = pick(*company_keys)
-        if email and not re.fullmatch(r"[^\\s@]+@[^\\s@]+\\.[^\\s@]+", email):
+        if email and not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", email):
             raise ImportErrorCSV(f"Řádek {index}: neplatný formát e-mailu.")
         if not (name or email or phone):
             raise ImportErrorCSV(
