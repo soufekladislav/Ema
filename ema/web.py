@@ -1396,11 +1396,25 @@ def create_app(test_config=None):
             flash(f"Schránka {box.address}: {str(ex)}", "error")
         return redirect(url_for("mail_hub", box=box.id))
 
+    def crm_schema_ready():
+        inspector = inspect(g.db.get_bind())
+        return inspector.has_table("contact_origins") and inspector.has_table("fresh_core_sources")
+
     @app.get("/database")
     @login_required
     def database_hub():
         ctx, orgs, projects = current_scope()
         ids = [org.id for org in orgs]
+        if not crm_schema_ready():
+            companies = g.db.scalars(select(Company).where(
+                Company.organization_id.in_(ids)).limit(250)).all() if ids else []
+            contacts = g.db.scalars(select(Contact).where(
+                Contact.organization_id.in_(ids)).limit(100)).all() if ids else []
+            return render_hub("database", companies=companies, contacts=contacts,
+                              eligible_orgs=orgs, crm_sources=[], crm_admin_org_ids=set(),
+                              crm_contact_origins={}, crm_sites=[], crm_query="",
+                              crm_kind="", crm_site="", crm_selected_org="",
+                              crm_page=1, crm_has_next=False, crm_upgrade_required=True)
         requested_org = (request.args.get("org") or "").strip()
         if requested_org and (not requested_org.isdigit() or int(requested_org) not in ids):
             abort(403)
@@ -1461,6 +1475,8 @@ def create_app(test_config=None):
     @app.post("/database/sources")
     @login_required
     def crm_connect_source():
+        if not crm_schema_ready():
+            abort(409, description="Nejprve spusťte databázovou migraci upgrade-db.")
         org_id = positive_id("organization_id")
         if not org_id:
             abort(400)
@@ -1495,6 +1511,8 @@ def create_app(test_config=None):
     @app.post("/database/sources/<int:source_id>/preview")
     @login_required
     def crm_preview_source(source_id):
+        if not crm_schema_ready():
+            abort(409, description="Nejprve spusťte databázovou migraci upgrade-db.")
         source = g.db.get(FreshCoreSource, source_id)
         if not source:
             abort(404)
@@ -1515,6 +1533,8 @@ def create_app(test_config=None):
     @app.post("/database/sources/<int:source_id>/sync")
     @login_required
     def crm_sync_source(source_id):
+        if not crm_schema_ready():
+            abort(409, description="Nejprve spusťte databázovou migraci upgrade-db.")
         source = g.db.get(FreshCoreSource, source_id)
         if not source:
             abort(404)
@@ -1561,6 +1581,8 @@ def create_app(test_config=None):
     @app.post("/database/import")
     @login_required
     def import_contacts_csv():
+        if not crm_schema_ready():
+            abort(409, description="Nejprve spusťte databázovou migraci upgrade-db.")
         org_id = positive_id("organization_id")
         if not org_id:
             abort(400, description="Vyber firmu pro import")
