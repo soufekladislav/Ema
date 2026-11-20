@@ -52,3 +52,30 @@ def test_header_normalization_is_stable():
     assert normalize_header("E-mail 1 - Value") == "e mail 1 value"
     assert normalize_header("Organization 1 - Name") == "organization 1 name"
     assert normalize_header("E-mail Address") == "e mail address"
+
+
+
+def test_phone_only_google_csv_import_replays_as_same_contact(web_client):
+    import io
+    from sqlalchemy import select
+    from sqlalchemy.orm import Session
+    from ema.models import Contact, ContactOrigin
+    from tests.test_navigation import login, csrf
+
+    client = web_client
+    login(client, "owner")
+    org = client.application.ids["org"]
+    data = b"Phone 1 - Value\n+420777123321\n"
+    for _ in range(2):
+        result = client.post("/database/import", data={
+            "organization_id": str(org), "source_name": "Google Phone",
+            "mode": "import", "csrf_token": csrf(client),
+            "file": (io.BytesIO(data), "google_phone.csv")
+        }, content_type="multipart/form-data")
+        assert result.status_code == 302
+    with Session(client.application.extensions["ema_engine"]) as db:
+        rows = db.scalars(select(Contact).where(Contact.phone == "+420777123321")).all()
+        assert len(rows) == 1
+        assert rows[0].email == ""
+        assert rows[0].organization_id == org
+        assert len(db.scalars(select(ContactOrigin).where(ContactOrigin.contact_id == rows[0].id)).all()) == 1
