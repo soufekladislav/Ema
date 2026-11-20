@@ -50,12 +50,12 @@ def _check_advertised_site(configured_site, advertised_site):
     behind a TLS proxy or with/without www; it is only metadata, never a
     destination for a second credential-bearing request.
     """
-    remote = urllib.parse.urlsplit(str(advertised_site or ""))
-    local = urllib.parse.urlsplit(configured_site)
     try:
+        remote = urllib.parse.urlsplit(str(advertised_site or ""))
+        local = urllib.parse.urlsplit(configured_site)
         port = remote.port
     except ValueError:
-        port = -1
+        raise FreshCoreError("Fresh Core vrátil neplatnou adresu zdrojového webu.") from None
     if (remote.scheme not in ("https", "http") or not remote.hostname or
             remote.username or remote.password or remote.query or remote.fragment or
             port not in (None, 80, 443)):
