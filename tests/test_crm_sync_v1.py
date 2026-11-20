@@ -313,7 +313,7 @@ def test_crm_overview_has_single_list_metrics_and_compact_sources(web_client):
     assert html.count('class="ema-crm-integrations card panel"') == 1
     assert html.count('action="/database/import"') == 1
     assert html.count('Propojené weby Fresh Core') == 1
-    assert html.count('Klientské firmy (') == 0
+    assert html.count('Klientské firmy (') == 1  # folded management, no duplicate page
     assert 'Importy a propojení' in html
     assert 'Kontakty celkem' in html
     assert 'Registrace WordPress' in html
