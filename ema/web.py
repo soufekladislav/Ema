@@ -1401,6 +1401,19 @@ def create_app(test_config=None):
         inspector = inspect(g.db.get_bind())
         return inspector.has_table("contact_origins") and inspector.has_table("fresh_core_sources")
 
+    def crm_email_review_ids(contacts):
+        flagged = set()
+        for c in contacts:
+            try:
+                metadata = json.loads(c.metadata_json or "{}")
+                if isinstance(metadata, dict):
+                    fields = metadata.get("fields") or {}
+                    if isinstance(fields, dict) and fields.get("email_stav") == "neovereny":
+                        flagged.add(c.id)
+            except (TypeError, ValueError):
+                continue
+        return flagged
+
     @app.get("/database")
     @login_required
     def database_hub():
@@ -1421,6 +1434,7 @@ def create_app(test_config=None):
                               crm_contact_origins={}, crm_sites=[], crm_query="",
                               crm_kind="", crm_site="", crm_selected_org="",
                               crm_page=1, crm_has_next=has_next, crm_upgrade_required=True,
+                              crm_email_review_ids=crm_email_review_ids(contacts),
                               crm_stats={"total": total_contacts or 0, "users": 0,
                                          "forms": 0, "csv": 0})
         requested_org = (request.args.get("org") or "").strip()
@@ -1498,7 +1512,8 @@ def create_app(test_config=None):
                           crm_admin_org_ids=admin_ids, crm_contact_origins=by_contact,
                           crm_sites=sites, crm_query=q, crm_kind=kind, crm_site=site,
                           crm_selected_org=requested_org, crm_page=page,
-                          crm_has_next=has_next, crm_stats=crm_stats)
+                          crm_has_next=has_next, crm_stats=crm_stats,
+                          crm_email_review_ids=crm_email_review_ids(contacts))
 
     @app.post("/database/sources")
     @login_required
