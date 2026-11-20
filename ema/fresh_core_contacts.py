@@ -21,9 +21,13 @@ def canonical_site(value):
     """Only approved HTTPS WordPress origins, never private-network URLs."""
     raw = (value or "").strip()
     parts = urllib.parse.urlsplit(raw)
+    try:
+        port = parts.port
+    except ValueError:
+        raise FreshCoreError("Neplatný port HTTPS webu.") from None
     if (parts.scheme.lower() != "https" or not parts.hostname or
             parts.username or parts.password or parts.query or parts.fragment or
-            parts.port not in (None, 443)):
+            port not in (None, 443)):
         raise FreshCoreError("Zadejte HTTPS adresu webu bez parametrů a přihlašovacích údajů.")
     try:
         validate_mail_host(parts.hostname)
