@@ -1410,12 +1410,19 @@ def create_app(test_config=None):
             companies = g.db.scalars(select(Company).where(
                 Company.organization_id.in_(ids)).limit(250)).all() if ids else []
             contacts = g.db.scalars(select(Contact).where(
-                Contact.organization_id.in_(ids)).limit(100)).all() if ids else []
+                Contact.organization_id.in_(ids)).order_by(Contact.name, Contact.id)
+                .limit(51)).all() if ids else []
+            has_next = len(contacts) > 50
+            contacts = contacts[:50]
+            total_contacts = g.db.scalar(select(func.count(Contact.id)).where(
+                Contact.organization_id.in_(ids))) if ids else 0
             return render_hub("database", companies=companies, contacts=contacts,
                               eligible_orgs=orgs, crm_sources=[], crm_admin_org_ids=set(),
                               crm_contact_origins={}, crm_sites=[], crm_query="",
                               crm_kind="", crm_site="", crm_selected_org="",
-                              crm_page=1, crm_has_next=False, crm_upgrade_required=True)
+                              crm_page=1, crm_has_next=has_next, crm_upgrade_required=True,
+                              crm_stats={"total": total_contacts or 0, "users": 0,
+                                         "forms": 0, "csv": 0})
         requested_org = (request.args.get("org") or "").strip()
         if requested_org and (not requested_org.isdigit() or int(requested_org) not in ids):
             abort(403)
@@ -1445,8 +1452,20 @@ def create_app(test_config=None):
             if site:
                 exists_origin = exists_origin.where(ContactOrigin.source_site == site)
             stmt = stmt.where(Contact.id.in_(exists_origin))
+        page_size = 50
         contacts = g.db.scalars(stmt.order_by(Contact.name, Contact.id)
-                                 .limit(100).offset((page - 1) * 100)).all() if ids else []
+                                 .limit(page_size + 1).offset((page - 1) * page_size)).all() if ids else []
+        has_next = len(contacts) > page_size
+        contacts = contacts[:page_size]
+        total_contacts = g.db.scalar(select(func.count(Contact.id)).where(
+            Contact.organization_id.in_(ids))) if ids else 0
+        source_counts = dict(g.db.execute(
+            select(ContactOrigin.source_kind, func.count(func.distinct(ContactOrigin.contact_id)))
+            .where(ContactOrigin.organization_id.in_(ids))
+            .group_by(ContactOrigin.source_kind)).all()) if ids else {}
+        crm_stats = {"total": total_contacts or 0, "users": source_counts.get("users", 0),
+                     "forms": source_counts.get("elementor_submissions", 0),
+                     "csv": source_counts.get("csv", 0)}
         companies = g.db.scalars(select(Company).where(Company.organization_id.in_(ids))
             .order_by(Company.name).limit(250)).all() if ids else []
         sources = g.db.scalars(select(FreshCoreSource).where(
@@ -1459,9 +1478,17 @@ def create_app(test_config=None):
         sites = g.db.scalars(select(ContactOrigin.source_site).where(
             ContactOrigin.organization_id.in_(ids)).distinct()
             .order_by(ContactOrigin.source_site).limit(250)).all() if ids else []
+        # One chip per source and type (a form may be submitted repeatedly).
+        # Preserve all source IDs in ContactOrigin for audit; collapse only UI.
         by_contact = {}
+        grouped_origins = {}
         for origin in origins:
-            by_contact.setdefault(origin.contact_id, []).append(origin)
+            key = (origin.contact_id, origin.source_kind, origin.source_site)
+            if key not in grouped_origins:
+                grouped_origins[key] = {"source_kind": origin.source_kind,
+                                        "source_site": origin.source_site, "count": 0}
+                by_contact.setdefault(origin.contact_id, []).append(grouped_origins[key])
+            grouped_origins[key]["count"] += 1
         admin_ids = set(g.db.scalars(select(Membership.organization_id).where(
             Membership.user_id == g.user.id,
             Membership.role.in_(("owner", "admin"))
@@ -1471,7 +1498,7 @@ def create_app(test_config=None):
                           crm_admin_org_ids=admin_ids, crm_contact_origins=by_contact,
                           crm_sites=sites, crm_query=q, crm_kind=kind, crm_site=site,
                           crm_selected_org=requested_org, crm_page=page,
-                          crm_has_next=len(contacts) == 100)
+                          crm_has_next=has_next, crm_stats=crm_stats)
 
     @app.post("/database/sources")
     @login_required
