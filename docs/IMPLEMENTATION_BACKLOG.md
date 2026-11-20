@@ -45,12 +45,13 @@ Priority: **P0** = funkční bezpečné jádro, **P1** = důležité rozšířen
 - [ ] [#26](https://github.com/soufekladislav/Ema/issues/26) — AI náklady a kredity po firmách z Fresh AI Engine (F5, P1)
 - [ ] [#27](https://github.com/soufekladislav/Ema/issues/27) — Auditovaný a dočasný support access; export a řízená likvidace (F5, P1)
 
-### [E-02 — CRM a import firem](https://github.com/soufekladislav/Ema/issues/4) — 4 úkolů
+### [E-02 — CRM a import firem](https://github.com/soufekladislav/Ema/issues/4) — 5 evidovaných úkolů (aktuálně #28, #29, #92)
 
 - [ ] [#28](https://github.com/soufekladislav/Ema/issues/28) — CRM: firmy, osoby, vztahy a kontaktní historie (F1, P0)
 - [ ] [#29](https://github.com/soufekladislav/Ema/issues/29) — Import firem z CSV/XLSX s dry-run a reportem (F1, P0)
 - [ ] [#30](https://github.com/soufekladislav/Ema/issues/30) — Deduplikace firem a kontaktů se schváleným sloučením (F1, P0)
-- [ ] [#31](https://github.com/soufekladislav/Ema/issues/31) — Klientská časová osa, právní titul a blokace oslovení (F1, P0)
+- [ ] [#31](https://github.com/soufekladislav/Ema/issues/31) — Klientská časová osa, právní titul a blokace oslovení (F1, historicky odloženo)
+- [ ] [#92](https://github.com/soufekladislav/Ema/issues/92) — Fresh Core → CRM: WP uživatelé, Elementor Pro submissions, provenience/filtry/sync (F1, P0), závisí na [Fresh Core #1](https://github.com/soufekladislav/WP-Fresh-Core/issues/1)
 
 ### [E-03 — Mail IMAP/SMTP](https://github.com/soufekladislav/Ema/issues/5) — 6 úkolů
 
