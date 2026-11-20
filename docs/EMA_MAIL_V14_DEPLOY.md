@@ -51,5 +51,18 @@
 
 Nesmazávat ostré složky ani zprávy pro účely testování. Test vytváření provést na neprodukční schránce.
 
+## Oprava HTML newsletteru – 20. 11. 2026 (V1.5)
+
+**Reálný podklad:** uživatel poskytl soubor MIME `.eml` s newsletterem „Black Friday je tady: barvy na dřevo až −47 %“. Originál, adresy a sledovací odkazy se do GitHubu **neukládají**. Lokální analýza zdroje ukázala funkční třísloupcové MJML (`display:inline-block; width:33.333333%`), zelené pozadí `#008F22` a bílé odkazy. Tyto vlastnosti zůstaly zachované i po lokálním průchodu současným sanitizérem.
+
+**Příčina:** HTTP CSP hlavní stránky obsahovala `style-src 'self' https://fonts.googleapis.com` bez inline CSS. `iframe srcdoc` dědí CSP rodiče a vlastní bezpečnostní meta pravidlo nemůže zděděný zákaz uvolnit. Prohlížeč proto ignoroval přípustné newsletterové CSS. Dřívější rozšiřování CSS whitelistu nemohlo problém vyřešit.
+
+**Cílená oprava:** pouze pro stránky `mail_hub` a `mail_detail` se povolí `style-src ... 'unsafe-inline'` potřebné pro sanitizované e-mailové HTML v iframe. Script CSP se **nemění**, iframe zůstává sandboxovaný bez `allow-scripts` a `allow-same-origin`, v jeho vlastní CSP zůstává `script-src 'none'`, do souhlasu `img-src data:`, bez formulářů. Ostatní stránky Emy si zachovávají přísnější HTTP CSP. Žádné nové API endpointy, databázové tabulky ani další renderer.
+
+**Testy:** anonymní reprodukce původního MJML třísloupcového rozložení + test skutečných HTTP CSP hlaviček mailového a ostatních pohledů. Zelené CI samo o sobě není potvrzením vizuální shody.
+
+**Produkční přejímka:** po nasazení aktualizované hlavní větve v Emě otevřít stejnou zprávu jako v Roundcube a ověřit vodorovnou zelenou navigaci s bílými odkazy. Ověřit rychlý i detailní náhled na desktopu, mobilu a tabletu. Před výslovným povolením obrázků nesmějí odcházet externí obrazové požadavky. V Console nesmí být blokováno přípustné inline CSS v iframe. Případné rozdíly dokumentovat. Na IMAP/SMTP ani databázi se nic nemění; žádná migrace.
+
+---
 ## Další etapa (mimo tento PR)
 Po produkční přejímce V1.4 navázat projekty, úkoly, termíny, kalendář a první schvalovaný obchodní scénář Emy.
