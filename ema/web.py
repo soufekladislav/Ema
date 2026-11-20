@@ -2072,6 +2072,10 @@ def create_app(test_config=None):
     @app.post("/org/<int:org_id>/clients/<int:company_id>/edit")
     @org_required
     def edit_company(org_id, company_id):
+        try:
+            organization_access(g.db, g.user.id, org_id, write=True)
+        except Forbidden:
+            abort(403)
         company = g.db.get(Company, company_id)
         if not company or company.organization_id != org_id:
             abort(404)
@@ -2092,6 +2096,10 @@ def create_app(test_config=None):
     @app.post("/org/<int:org_id>/contacts/<int:contact_id>/edit")
     @org_required
     def edit_contact(org_id, contact_id):
+        try:
+            organization_access(g.db, g.user.id, org_id, write=True)
+        except Forbidden:
+            abort(403)
         contact = g.db.get(Contact, contact_id)
         if not contact or contact.organization_id != org_id:
             abort(404)
