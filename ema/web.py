@@ -2,6 +2,7 @@
 import os
 import re
 import json
+import hashlib
 import secrets
 from io import BytesIO
 from datetime import datetime, timedelta
@@ -1616,6 +1617,23 @@ def create_app(test_config=None):
         for item in entries:
             email = item["email"].lower()
             label = (str(item["attributes"].get("zdroj") or "").strip()[:170] or source_label)
+            noemail_key = hashlib.sha256(json.dumps({
+                "name": item["name"].strip().casefold(),
+                "phone": item["phone"].strip(),
+                "company": item["company_name"].strip().casefold(),
+            }, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+            identity = email or ("noemail:" + noemail_key)
+            if not email:
+                old_origin = g.db.scalar(select(ContactOrigin).where(
+                    ContactOrigin.organization_id == org_id,
+                    ContactOrigin.source_site == "CSV: " + label,
+                    ContactOrigin.source_kind == "csv",
+                    ContactOrigin.external_id == identity,
+                ))
+                if old_origin:
+                    old_origin.last_seen_at = now()
+                    skipped += 1
+                    continue
             if email and email in seen:
                 existing = g.db.scalar(select(Contact).where(
                     Contact.organization_id == org_id,
@@ -1636,8 +1654,8 @@ def create_app(test_config=None):
                               metadata_json=json.dumps(metadata, ensure_ascii=False))
             g.db.add(contact)
             g.db.flush()
+            update_csv_origin(g.db, contact, label, identity)
             if email:
-                update_csv_origin(g.db, contact, label)
                 seen.add(email)
             added += 1
         audit("contacts.csv_import", f"added={added}, skipped={skipped}", org_id)
