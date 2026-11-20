@@ -188,9 +188,10 @@ def test_company_imports_are_isolated_by_owner_company(web_client):
             Company.name == "Firma Kandidát 001 s.r.o.")) == 2
         assert db.scalar(select(func.count(CompanyOrigin.id)).where(
             CompanyOrigin.source_kind == "csv")) == 2
+    assert client.post("/logout", data={"csrf_token": csrf(client)}).status_code == 302
     login(client, "guest")
-    # A read-only organization member may inspect a client but never edit it.
-    assert client.get(f"/org/{org_a}/clients").status_code == 200
+    # Project-only user has NO organization membership and cannot read/edit CRM.
+    assert client.get(f"/org/{org_a}/clients").status_code == 403
     with Session(engine) as db:
         owned = db.scalar(select(Company).where(
             Company.organization_id == org_a,
