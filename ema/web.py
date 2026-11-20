@@ -34,7 +34,7 @@ from .fresh_core_contacts import FreshCoreError, canonical_site, fetch_page, syn
 from .schema_upgrade import upgrade_schema
 from .ops import code_identity, collect_ops, verify_bearer
 from .models import (
-    Audit, AssistantTurn, AssistantThread, AssistantMessageAttempt, AIEngineConnection, Base, ChatMessage, Company, Contact, ContactOrigin, FreshCoreSource, MailFolder, Mailbox, MailboxGrant, MailboxView, MailFolderView, MailboxConnectionCheck, MailMessage, MailUserState,
+    Audit, AssistantTurn, AssistantThread, AssistantMessageAttempt, AIEngineConnection, Base, ChatMessage, Company, Contact, ContactOrigin, CompanyOrigin, FreshCoreSource, MailFolder, Mailbox, MailboxGrant, MailboxView, MailFolderView, MailboxConnectionCheck, MailMessage, MailUserState,
     Membership, Opportunity, Organization, Outbound, OpsIncident, OpsJobRun, OpsDeployment, Project, ProjectGrant,
     Task, User, make_session, now,
 )
@@ -1647,30 +1647,39 @@ def create_app(test_config=None):
             )
         if csv_report["skipped_rows"]:
             csv_warning += f" {csv_report['skipped_rows']} záznamů bez kontaktních údajů vynecháno."
-        emails = {row["email"].lower() for row in entries if row["email"]}
+        contact_entries = [row for row in entries if row.get("entity_type") != "company"]
+        company_entries = [row for row in entries if row.get("entity_type") == "company"]
+        emails = {row["email"].lower() for row in contact_entries if row["email"]}
         seen = set(g.db.scalars(select(func.lower(Contact.email)).where(
             Contact.organization_id == org_id, func.lower(Contact.email).in_(emails)
         )).all()) if emails else set()
         source_label = field("source_name", 170) or uploaded.filename[:170]
-        duplicates = sum(1 for item in entries if item["email"] and item["email"] in seen)
+        duplicates = sum(1 for item in contact_entries if item["email"] and item["email"] in seen)
+        company_names = {row["company_name"].casefold() for row in entries if row["company_name"]}
+        existing_companies = g.db.scalars(select(Company).where(
+            Company.organization_id == org_id)).all() if company_names else []
+        mapped = {company.name.casefold(): company for company in existing_companies
+                  if company.name.casefold() in company_names}
+        matched_companies = sum(1 for row in company_entries
+                                if row["company_name"].casefold() in mapped)
         if field("mode", 16) == "preview":
             flash(
                 f"Kontrola CSV: {csv_report['read_rows']} datových řádků, "
-                f"{len(entries)} kontaktů k importu, {duplicates} shodných e-mailů."
+                f"{len(contact_entries)} osobních kontaktů a "
+                f"{len(company_entries)} firem bez kontaktní osoby; "
+                f"{duplicates} shodných e-mailů, "
+                f"{matched_companies} již známých firem."
                 + csv_warning + " Nic nebylo zapsáno. Import potvrď dalším nahráním souboru.",
                 "success")
             return redirect(url_for("database_hub"))
         if field("mode", 16) != "import":
             abort(400, description="Neplatný režim importu")
-        company_names = {row["company_name"].casefold() for row in entries if row["company_name"]}
-        existing_companies = g.db.scalars(select(Company).where(
-            Company.organization_id == org_id
-        )).all() if company_names else []
-        mapped = {company.name.casefold(): company.id for company in existing_companies
-                  if company.name.casefold() in company_names}
+        if company_entries and not inspect(g.db.get_bind()).has_table("company_origins"):
+            flash("Před importem firem spusťte jednou bezpečnou migraci: flask upgrade-db.", "error")
+            return redirect(url_for("database_hub"))
         added = 0
         skipped = 0
-        for item in entries:
+        for item in contact_entries:
             email = item["email"].lower()
             label = (str(item["attributes"].get("zdroj") or "").strip()[:170] or source_label)
             noemail_key = hashlib.sha256(json.dumps({
@@ -1705,7 +1714,8 @@ def create_app(test_config=None):
             if item["company_name"] and item["company_name"].casefold() not in mapped:
                 metadata["company_name_from_csv"] = item["company_name"]
             contact = Contact(organization_id=org_id,
-                              company_id=mapped.get(item["company_name"].casefold()),
+                              company_id=(mapped[item["company_name"].casefold()].id
+                                          if item["company_name"].casefold() in mapped else None),
                               name=item["name"], email=email, phone=item["phone"],
                               metadata_json=json.dumps(metadata, ensure_ascii=False))
             g.db.add(contact)
@@ -1714,10 +1724,50 @@ def create_app(test_config=None):
             if email:
                 seen.add(email)
             added += 1
-        audit("contacts.csv_import", f"added={added}, skipped={skipped}", org_id)
+        company_added = company_linked = company_repeated = 0
+        for item in company_entries:
+            company_name = item["company_name"].strip()
+            if not company_name:
+                continue
+            normalized = company_name.casefold()
+            company = mapped.get(normalized)
+            if not company:
+                company = Company(organization_id=org_id, name=company_name[:190])
+                g.db.add(company)
+                g.db.flush()
+                mapped[normalized] = company
+                company_added += 1
+            external_id = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+            source_site = "CSV: " + source_label
+            origin = g.db.scalar(select(CompanyOrigin).where(
+                CompanyOrigin.organization_id == org_id,
+                CompanyOrigin.source_site == source_site,
+                CompanyOrigin.source_kind == "csv",
+                CompanyOrigin.external_id == external_id,
+            ))
+            if origin:
+                origin.last_seen_at = now()
+                company_repeated += 1
+            else:
+                g.db.add(CompanyOrigin(
+                    organization_id=org_id, company_id=company.id,
+                    source_site=source_site, source_kind="csv",
+                    external_id=external_id,
+                    metadata_json=json.dumps({
+                        "fields": item["attributes"],
+                        "review_status": "unverified",
+                    }, ensure_ascii=False),
+                ))
+                company_linked += 1
+        audit("contacts.csv_import",
+              f"contacts_added={added}, contacts_matched={skipped}, "
+              f"companies_added={company_added}, company_sources={company_linked}",
+              org_id)
         g.db.commit()
         flash(
-            f"Import dokončen: {added} nových kontaktů, {skipped} shodných záznamů."
+            f"Import dokončen: {added} nových kontaktů, {skipped} shodných; "
+            f"{company_added} nových firem a {company_linked} firemních zdrojů "
+            f"({company_repeated} opakovaných)."
             + csv_warning
             + " Neplatné e-maily nejsou použitelné pro rozesílání. "
               "Marketingové souhlasy se automaticky nepřidělují.",
