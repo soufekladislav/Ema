@@ -28,3 +28,14 @@
 .ema-crm-list .ema-crm-origin{max-width:150px}
 @media(max-width:1050px){.ema-crm-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.ema-crm-integrations-content{grid-template-columns:1fr}}
 @media(max-width:760px){.ema-crm-metrics{gap:8px}.ema-crm-metric{padding:10px 12px}.ema-crm-metric strong{font-size:23px}.ema-crm-list-head{flex-wrap:wrap}.ema-crm-integrations>summary{flex-wrap:wrap;padding:14px}.ema-crm-integrations-content{padding:0 10px 12px}}
+
+/* Company-only lead imports and editable CRM records. */
+@media(min-width:1280px){.ema-crm-metrics{grid-template-columns:repeat(5,minmax(0,1fr))}}
+.ema-crm-edit{margin-top:4px;max-width:270px}
+.ema-crm-edit summary,.ema-crm-company-source summary{font-size:12px;cursor:pointer;color:#426824}
+.ema-crm-edit>form{min-width:220px;max-width:290px;padding:12px;margin-top:8px;background:#f9fbf7;border:1px solid #e4e9df;border-radius:8px}
+.ema-crm-edit input,.ema-crm-edit select{width:100%;max-width:100%;min-width:0}
+.ema-crm-company-source{max-width:280px;margin-bottom:5px}
+.ema-crm-company-source dl{display:grid;grid-template-columns:minmax(80px,1fr) minmax(110px,2fr);gap:4px 9px;max-height:220px;overflow:auto;margin:7px 0 12px;font-size:11px}
+.ema-crm-company-source dt{color:#647568;font-weight:600}
+.ema-crm-company-source dd{margin:0;overflow-wrap:anywhere}
