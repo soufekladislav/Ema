@@ -109,13 +109,16 @@ def analyze_contacts(data):
         if not (name or email or phone) and not invalid:
             if company:
                 # A firm-only acquisition list is NOT a list of persons.
-                # Preserve original business research fields as source metadata.
-                if len(json.dumps(attrs, ensure_ascii=False)) > 4000:
+                # Keep the source's ORIGINAL Czech column names and values
+                # (including "neověřeno"); never turn guesses into facts.
+                business_fields = {str(key)[:120]: str(value or "").strip()[:300]
+                                   for key, value in record.items() if key is not None and value}
+                if len(json.dumps(business_fields, ensure_ascii=False)) > 4000:
                     report["skipped_rows"] += 1
                     continue
                 collected.append({
                     "name": "", "email": "", "phone": "",
-                    "company_name": company[:190], "attributes": attrs,
+                    "company_name": company[:190], "attributes": business_fields,
                     "entity_type": "company",
                 })
                 report["company_rows"] += 1
