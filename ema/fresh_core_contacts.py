@@ -42,6 +42,34 @@ def canonical_site(value):
     return url
 
 
+def _check_advertised_site(configured_site, advertised_site):
+    """Check WP home_url identity, allowing only a same-site www alias.
+
+    The response has already arrived over verified HTTPS from configured_site,
+    with redirects disabled. WordPress home_url may be configured as http
+    behind a TLS proxy or with/without www; it is only metadata, never a
+    destination for a second credential-bearing request.
+    """
+    remote = urllib.parse.urlsplit(str(advertised_site or ""))
+    local = urllib.parse.urlsplit(configured_site)
+    try:
+        port = remote.port
+    except ValueError:
+        port = -1
+    if (remote.scheme not in ("https", "http") or not remote.hostname or
+            remote.username or remote.password or remote.query or remote.fragment or
+            port not in (None, 80, 443)):
+        raise FreshCoreError("Fresh Core vrátil neplatnou adresu zdrojového webu.")
+    def canonical_host(host):
+        name = host.lower().rstrip(".")
+        return name[4:] if name.startswith("www.") else name
+    if canonical_host(remote.hostname) != canonical_host(local.hostname):
+        raise FreshCoreError(
+            "Fresh Core hlásí jinou doménu než připojený web. "
+            "Ověřte doménu ve WordPress nastavení."
+        )
+
+
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
@@ -70,6 +98,11 @@ def fetch_page(source, key, kind, *, after=0, limit=50):
             if len(data) > 262144:
                 raise FreshCoreError("Odpověď Fresh Core přesahuje povolenou velikost.")
     except urllib.error.HTTPError as ex:
+        if ex.code in (301, 302, 303, 307, 308):
+            raise FreshCoreError(
+                "WordPress přesměroval požadavek. Připojte jeho výslednou HTTPS adresu "
+                "(např. správnou variantu www); klíč se nikam nepřeposílal."
+            ) from None
         if ex.code in (401, 403):
             raise FreshCoreError("Fresh Core odmítl účetní READ klíč nebo přístup.") from None
         if ex.code == 404:
@@ -79,25 +112,30 @@ def fetch_page(source, key, kind, *, after=0, limit=50):
         raise FreshCoreError("Nelze bezpečně načíst kontakty z webu. Ověřte HTTPS a připojení.") from None
     try:
         payload = json.loads(data)
-        if (not isinstance(payload, dict) or payload.get("ok") is not True or
-                payload.get("kind") != kind or not isinstance(payload.get("items"), list) or
-                len(payload["items"]) > limit or
-                not isinstance(payload.get("has_more"), bool)):
-            raise ValueError("Invalid API payload")
-        remote = urllib.parse.urlsplit(str(payload.get("site", "")))
-        local = urllib.parse.urlsplit(site)
-        if remote.hostname != local.hostname or remote.scheme != "https":
-            raise ValueError("Different source identity")
-        cursor = payload.get("next_after_id")
-        if type(cursor) is not int or cursor < after or (payload["has_more"] and cursor <= after):
-            raise ValueError("Invalid page cursor")
-        for item in payload["items"]:
-            if not isinstance(item, dict) or type(item.get("source_id")) is not int:
-                raise ValueError("Invalid contact row")
-        return payload
     except (ValueError, TypeError, UnicodeError):
-        raise FreshCoreError("Fresh Core vrátil neplatná nebo neočekávaná kontaktní data.") from None
-
+        raise FreshCoreError(
+            "Fresh Core nevrátil JSON. Ověřte, zda endpoint nepřepisuje "
+            "cache, firewall nebo přihlašovací stránka WordPressu."
+        ) from None
+    if not isinstance(payload, dict):
+        raise FreshCoreError("Fresh Core vrátil JSON v neočekávaném formátu.")
+    if payload.get("ok") is not True:
+        raise FreshCoreError("Fresh Core neohlásil úspěšné načtení kontaktů.")
+    if payload.get("kind") != kind:
+        raise FreshCoreError("Fresh Core vrátil jiný typ zdroje kontaktů.")
+    if type(payload.get("available")) is not bool:
+        raise FreshCoreError("Fresh Core neuvedl dostupnost zdroje kontaktů.")
+    if (not isinstance(payload.get("items"), list) or
+            len(payload["items"]) > limit or type(payload.get("has_more")) is not bool):
+        raise FreshCoreError("Fresh Core vrátil neplatné stránkování kontaktů.")
+    _check_advertised_site(site, payload.get("site"))
+    cursor = payload.get("next_after_id")
+    if type(cursor) is not int or cursor < after or (payload["has_more"] and cursor <= after):
+        raise FreshCoreError("Fresh Core vrátil neplatný kurzor kontaktů.")
+    if any(not isinstance(item, dict) or type(item.get("source_id")) is not int
+           for item in payload["items"]):
+        raise FreshCoreError("Fresh Core vrátil neplatný identifikátor kontaktu.")
+    return payload
 
 def ingest_contacts(db, organization_id, site, kind, rows):
     """Merge provenance, not whole customers. Caller owns transaction and cursor."""
