@@ -1,0 +1,17 @@
+/* Mail folder hierarchy is owned by IMAP. Only display order is changed here. */
+.ema-folder-sort-item{display:flex;align-items:center;gap:2px;min-width:0;border:1px solid transparent;border-radius:7px}
+.ema-folder-sort-item .ema-mail-folder{flex:1;min-width:0}
+.ema-folder-sort-item.is-dragging{opacity:.55;border-color:#a0bd6e;background:#f1f8e5}
+.ema-folder-sort-actions{display:flex;flex-shrink:0;gap:1px;opacity:.2}
+.ema-folder-sort-item:hover .ema-folder-sort-actions,
+.ema-folder-sort-item:focus-within .ema-folder-sort-actions{opacity:1}
+.ema-folder-sort-button{padding:1px 4px;border:0;background:transparent;border-radius:4px;font-size:13px;line-height:1.5;color:#4a652d;min-width:21px}
+.ema-folder-sort-button:hover,.ema-folder-sort-button:focus-visible{background:#e0ebcb}
+.ema-mail-create-folder{padding:6px 0;margin:8px 0;border-top:1px solid #e2ebda}
+.ema-mail-create-folder>summary{font-size:11px;font-weight:750;color:#466c2d;cursor:pointer}
+.ema-mail-create-folder-form{display:grid;gap:7px;padding:8px 0}
+.ema-mail-create-folder-form label{display:grid;gap:4px;color:#536a48;font-size:10px;font-weight:700}
+.ema-mail-create-folder-form input,.ema-mail-create-folder-form select{width:100%;min-width:0;padding:7px;font-size:11px}
+.ema-mail-folders-create-button{border:1px solid #cadeaf;border-radius:7px;background:#edf6e1;font-size:11px;font-weight:750;min-height:34px;color:#3b5d26}
+.ema-folder-order-status{font-size:10px;padding:3px 0}
+@media(max-width:760px){.ema-folder-sort-actions{opacity:1}.ema-folder-sort-button{min-width:37px;min-height:38px;font-size:17px}}

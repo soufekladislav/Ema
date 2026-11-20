@@ -22,7 +22,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from .mail_compose import clean_signature, original_reply_quote, outgoing_parts
 from .mail_service import MailError, encrypt_password, preview_message, download_message_attachment, send_plain, send_composed, validate_recipients, sync_inbox, validate_mail_host, verify_imap_connection, verify_smtp_connection
 from .mail_folders import (
-    PAGE_SIZE, discover_folders, available_folders, decode_modified_utf7,
+    PAGE_SIZE, discover_folders, available_folders, ordered_folders, create_server_folder, decode_modified_utf7,
     fetch_folder_page, special_folder, move_message, move_many_messages,
     append_sent_copy, empty_trash_batch, preview_trash_all, empty_trash_all, is_trash_folder, set_server_flags,
 )
@@ -32,7 +32,7 @@ from .contact_import import ImportErrorCSV, extract_contacts
 from .schema_upgrade import upgrade_schema
 from .ops import code_identity, collect_ops, verify_bearer
 from .models import (
-    Audit, AssistantTurn, AssistantThread, AssistantMessageAttempt, AIEngineConnection, Base, ChatMessage, Company, Contact, MailFolder, Mailbox, MailboxGrant, MailboxView, MailboxConnectionCheck, MailMessage, MailUserState,
+    Audit, AssistantTurn, AssistantThread, AssistantMessageAttempt, AIEngineConnection, Base, ChatMessage, Company, Contact, MailFolder, Mailbox, MailboxGrant, MailboxView, MailFolderView, MailboxConnectionCheck, MailMessage, MailUserState,
     Membership, Opportunity, Organization, Outbound, OpsIncident, OpsJobRun, OpsDeployment, Project, ProjectGrant,
     Task, User, make_session, now,
 )
@@ -522,11 +522,11 @@ def create_app(test_config=None):
         selected_folder = None
         folder_rows = []
         if selected:
-            folder_rows = available_folders(g.db, selected)
+            folder_rows = ordered_folders(g.db, selected, g.user.id)
             if not folder_rows:
                 g.db.add(MailFolder(mailbox_id=selected.id, name="INBOX"))
                 g.db.commit()
-                folder_rows = available_folders(g.db, selected)
+                folder_rows = ordered_folders(g.db, selected, g.user.id)
             raw_folder = request.args.get("folder")
             if raw_folder and (not raw_folder.isdigit() or int(raw_folder) not in {f.id for f in folder_rows}):
                 abort(403)
@@ -704,6 +704,65 @@ def create_app(test_config=None):
                                         mail_state=mail_rows_state(g.db, g.user.id, rows),
                                         selected_box=None, selected_folder=None, can_move_ids=permitted),
                 "has_more": has_more, "next_offset": offset + len(rows)}
+
+
+    @app.post("/mail/<int:box_id>/folders/create")
+    @login_required
+    def mail_create_folder(box_id):
+        box = mailbox_or_403(box_id, manage=True)
+        try:
+            organization_access(g.db, g.user.id, box.organization_id)
+        except Forbidden:
+            abort(403)
+        parent_id = positive_id("parent_folder_id")
+        if field("parent_folder_id") and not parent_id:
+            abort(400)
+        parent = g.db.get(MailFolder, parent_id) if parent_id else None
+        if parent_id and (not parent or parent.mailbox_id != box.id):
+            abort(403)
+        try:
+            folder = create_server_folder(g.db, box, app.config["MAIL_ENCRYPTION_KEY"],
+                                          field("name", 90), parent=parent)
+            if folder:
+                audit("mail.folder.create", f"box={box.id},folder={folder.id}", box.organization_id)
+                g.db.commit()
+                flash("Nová složka byla vytvořena na IMAP serveru.", "success")
+                return redirect(url_for("mail_hub", box=box.id, folder=folder.id))
+            flash("Server složku vytvořil, obnov prosím její seznam.", "error")
+        except MailError as ex:
+            flash(str(ex), "error")
+        return redirect(url_for("mail_hub", box=box.id))
+
+    @app.post("/mail/<int:box_id>/folders/order")
+    @login_required
+    def mail_folder_order(box_id):
+        box = mailbox_or_403(box_id)
+        try:
+            organization_access(g.db, g.user.id, box.organization_id)
+        except Forbidden:
+            abort(403)
+        if not inspect(g.db.get_bind()).has_table("mail_folder_views"):
+            return {"error": "Po aktualizaci aplikace je nutné spustit upgrade-db."}, 409
+        payload = request.get_json(silent=True)
+        ids = payload.get("ids") if isinstance(payload, dict) else None
+        folders = available_folders(g.db, box)
+        valid = {f.id for f in folders}
+        if (not isinstance(ids, list) or len(ids) != len(valid) or
+                any(type(i) is not int for i in ids) or len(set(ids)) != len(ids) or
+                set(ids) != valid):
+            abort(400, description="Pořadí musí obsahovat pouze všechny složky vybrané schránky.")
+        existing = {v.folder_id: v for v in g.db.scalars(
+            select(MailFolderView).where(MailFolderView.user_id == g.user.id,
+                                         MailFolderView.mailbox_id == box.id)).all()}
+        for position, fid in enumerate(ids, 1):
+            if fid in existing:
+                existing[fid].position = position
+            else:
+                g.db.add(MailFolderView(user_id=g.user.id, mailbox_id=box.id,
+                                        folder_id=fid, position=position))
+        audit("mail.folder.order", f"box={box.id},count={len(ids)}", box.organization_id)
+        g.db.commit()
+        return {"ok": True, "ids": ids}
 
     @app.post("/mail/<int:box_id>/folders/refresh")
     @login_required

@@ -30,4 +30,6 @@ jobs:
       - run: node --check static/mobile-shell-v2.js
       - run: node --check static/mail-layout-v13.js
       - run: node --check static/ema-chat-drawer-v1.js
+      - run: node --check static/mail-folder-order-v1.js
+      - run: node --check static/ema-mobile-bottom-v1.js
       - run: python -m pytest -q

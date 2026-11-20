@@ -6,9 +6,9 @@ import base64
 import re
 import hashlib
 
-from sqlalchemy import select, update
+from sqlalchemy import select, update, inspect
 from .mail_service import MailError, _connect, parse_metadata, quote_mailbox_name
-from .models import MailFolder, MailMessage, now
+from .models import MailFolder, MailFolderView, MailMessage, now
 
 PAGE_SIZE = 50
 HEADER_REQUEST = "(UID FLAGS RFC822.SIZE BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)])"
@@ -99,6 +99,104 @@ def discover_folders(db, box, key):
 def available_folders(db, box):
     rows = db.scalars(select(MailFolder).where(MailFolder.mailbox_id == box.id)).all()
     return sorted(rows, key=lambda x: (x.name.upper() != "INBOX", decode_modified_utf7(x.name).casefold()))
+
+
+
+def encode_modified_utf7(value):
+    """Encode a newly entered Unicode folder leaf for IMAP4rev1 CREATE."""
+    chunks, unicode_part = [], []
+
+    def flush():
+        if unicode_part:
+            raw = "".join(unicode_part).encode("utf-16-be")
+            chunks.append("&" + base64.b64encode(raw).decode("ascii").rstrip("=").replace("/", ",") + "-")
+            unicode_part.clear()
+
+    for char in value:
+        if char == "&":
+            flush()
+            chunks.append("&-")
+        elif 0x20 <= ord(char) <= 0x7e:
+            flush()
+            chunks.append(char)
+        else:
+            unicode_part.append(char)
+    flush()
+    return "".join(chunks)
+
+
+def create_server_folder(db, box, key, leaf, *, parent=None):
+    """Create a real remote IMAP folder; persist *only* its indexed name/flags."""
+    import unicodedata
+
+    leaf = unicodedata.normalize("NFC", str(leaf or "")).strip()
+    if (not 1 <= len(leaf) <= 80 or leaf in (".", "..") or
+            leaf.upper() == "INBOX" or leaf.startswith(".") or
+            any(ord(ch) < 32 or ord(ch) == 127 for ch in leaf) or
+            any(ch in leaf for ch in ('/', '\\', '*', '%', '"'))):
+        raise MailError("Název složky obsahuje nepovolené znaky nebo je neplatný.")
+    if parent is not None and parent.mailbox_id != box.id:
+        raise MailError("Nadřazená složka patří jiné schránce.")
+
+    client = _connect(box, key)
+    created = False
+    try:
+        typ, rows = client.list()
+        if typ != "OK":
+            raise MailError("IMAP server nevrátil seznam složek.")
+        found = [parse_list_line(r) for r in (rows or [])[:300]]
+        found = [item for item in found if item]
+        if not found:
+            raise MailError("Nelze ověřit složky na IMAP serveru.")
+        present = {item[0] for item in found}
+        if parent is not None and parent.name not in present:
+            raise MailError("Nadřazená složka už na serveru neexistuje.")
+        delimiter = parent.delimiter if parent else found[0][2]
+        if not delimiter or len(delimiter) != 1 or delimiter in leaf:
+            raise MailError("Název obsahuje oddělovač složek serveru.")
+        full_name = (parent.name + delimiter if parent else "") + encode_modified_utf7(leaf)
+        if len(full_name) > 190:
+            raise MailError("Výsledná cesta složky je příliš dlouhá.")
+        if full_name in present:
+            raise MailError("Tato složka již na IMAP serveru existuje.")
+        try:
+            result, _ = client.create(quote_mailbox_name(full_name))
+        except Exception:
+            raise MailError("IMAP server nepotvrdil vytvoření složky. Zkontroluj seznam, než požadavek zopakuješ.") from None
+        if result != "OK":
+            raise MailError("IMAP server odmítl vytvoření složky.")
+        created = True
+        try:
+            _discover_on_client(db, box, client)
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise MailError("Složka vznikla na serveru, ale index se neobnovil. Použij Aktualizovat složky.") from None
+        return db.scalar(select(MailFolder).where(
+            MailFolder.mailbox_id == box.id, MailFolder.name == full_name))
+    except MailError:
+        if not created:
+            db.rollback()
+        raise
+    finally:
+        try:
+            client.logout()
+        except Exception:
+            pass
+
+
+def ordered_folders(db, box, user_id):
+    """Per-user ordering is only a UI preference; IMAP hierarchy stays untouched."""
+    rows = available_folders(db, box)
+    if not inspect(db.get_bind()).has_table("mail_folder_views"):
+        return rows
+    view = {item.folder_id: item.position for item in db.scalars(
+        select(MailFolderView).where(MailFolderView.user_id == user_id,
+                                     MailFolderView.mailbox_id == box.id)).all()}
+    return sorted(rows, key=lambda f: (
+        0 if f.id in view else 1, view.get(f.id, 0),
+        decode_modified_utf7(f.name).casefold(), f.id
+    ))
 
 
 def _select(client, folder):

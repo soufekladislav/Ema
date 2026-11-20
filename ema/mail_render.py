@@ -118,6 +118,28 @@ def safe_image_url(value):
         return False
 
 
+def _safe_declarations(raw):
+    """Preserve benign styling even when another property requests remote CSS."""
+    if EMAIL_CSS is None or tinycss2 is None or len(raw) > 10000:
+        return ""
+    accepted = []
+    for item in tinycss2.parse_declaration_list(raw, skip_comments=True, skip_whitespace=True):
+        if item.type != "declaration" or item.name.startswith("--"):
+            continue
+        name = item.lower_name
+        if name not in EMAIL_CSS.allowed_css_properties:
+            continue
+        value = tinycss2.serialize(item.value).strip()
+        if not value or len(value) > 1200 or re.search(
+                r"(?i)url\s*\(|expression\s*\(|@import|@font-face|"
+                r"\\|[\x00-\x08\x0b-\x1f]", value):
+            continue
+        cleaned = EMAIL_CSS.sanitize_css(name + ":" + value).strip().rstrip(";")
+        if cleaned:
+            accepted.append(cleaned)
+    return ";".join(accepted)
+
+
 def _safe_newsletter_styles(html_body):
     """Safely render a subset of stylesheet rules from HTML email templates.
 
@@ -138,10 +160,9 @@ def _safe_newsletter_styles(html_body):
                 r"[A-Za-z0-9_\-.,#\s>*:+()\[\]=\"']+", selector):
             return ""
         declarations = tinycss2.serialize(rule.content)
-        if len(declarations) > 4000 or re.search(
-                r"(?i)url\s*\(|expression\s*\(|@import|@font-face|behaviou?r\s*:", declarations):
+        if len(declarations) > 4000:
             return ""
-        css = EMAIL_CSS.sanitize_css(declarations).strip()
+        css = _safe_declarations(declarations)
         return f"{selector}{{{css}}}" if css else ""
 
     for sheet in re.findall(r"<style\b[^>]*>([\s\S]*?)</style\s*>",
@@ -244,8 +265,7 @@ def make_preview(data, *, show_images=False, truncated=False):
     if rich:
         def allowed(tag, name, value):
             if name == "style":
-                return EMAIL_CSS is not None and len(value) <= 10000 and not re.search(
-                    r"(?i)url\s*\(|expression\s*\(|@|\\\\", value)
+                return bool(_safe_declarations(value))
             if name == "class":
                 return bool(re.fullmatch(r"[a-zA-Z0-9_\- ]{1,240}", value))
             if name == "id":
@@ -282,6 +302,13 @@ def make_preview(data, *, show_images=False, truncated=False):
             cid = match.group(1).strip("<> ").lower()
             return html.escape(cid_images.get(cid, ""), quote=True)
         rich = re.sub(r"cid:([^'\"\s>]+)", replace_cid, rich, flags=re.I)
+        # Keep email-safe inline button/table CSS but never permit URLs from style.
+        # Bleach performs a second sanitation pass after unsafe declarations leave.
+        def clean_inline_style(match):
+            safe = _safe_declarations(html.unescape(match.group(3)))
+            return match.group(1) + match.group(2) + html.escape(safe, quote=True) + match.group(2)
+        rich = re.sub(r'(\sstyle\s*=\s*)(["\x27])(.*?)\2',
+                      clean_inline_style, rich, flags=re.I | re.S)
         sanitized = bleach.clean(
             rich, tags=ALLOWED_TAGS, attributes=allowed,
             protocols={"http", "https", "mailto", "data"}, strip=True,

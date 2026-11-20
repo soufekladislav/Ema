@@ -1,0 +1,31 @@
+/* Mobile/PWA navigation: five large targets; never overlays scrolling mail. */
+.ema-mobile-bottom-nav{display:none}
+@media(max-width:760px){
+  .ema-mobile-bottom-nav{
+    position:fixed;inset:auto 0 0 0;z-index:95;display:grid;
+    grid-template-columns:repeat(5,minmax(0,1fr));gap:1px;
+    min-height:62px;padding:5px 5px calc(5px + env(safe-area-inset-bottom,0px));
+    background:#fff;border-top:1px solid #dce2d7;box-shadow:0 -5px 18px #0000000d;
+    font-family:Poppins,system-ui,sans-serif;
+  }
+  .ema-mobile-bottom-nav a,.ema-mobile-bottom-nav button{
+    color:#4d554d;text-decoration:none;background:transparent;border:0;
+    border-radius:9px;min-height:52px;display:flex;align-items:center;
+    justify-content:center;flex-direction:column;gap:0;padding:4px 2px;
+    font:600 10px/1.3 Poppins,system-ui,sans-serif;min-width:0;
+  }
+  .ema-mobile-bottom-nav span{font-size:21px;font-weight:500;line-height:1.25}
+  .ema-mobile-bottom-nav small{font-size:10px;font-weight:700;white-space:nowrap}
+  .ema-mobile-bottom-nav a.active{background:#eef6e3;color:#3e601b}
+  .ema-mobile-bottom-nav :is(a,button):focus-visible{outline:2px solid #678e24;outline-offset:-2px}
+  body.ema-screen-mail .layout{height:calc(100dvh - 62px - env(safe-area-inset-bottom,0px))!important}
+  body.ema-screen-mail .workspace{height:100%!important}
+  body:not(.ema-screen-mail) main.content{
+    padding-bottom:calc(96px + env(safe-area-inset-bottom,0px))!important;
+  }
+  .ema-chat-fab{bottom:calc(71px + env(safe-area-inset-bottom,0px))!important}
+  body.ema-appmenu-open .ema-mobile-bottom-nav,
+  body.ema-chat-drawer-open .ema-mobile-bottom-nav{display:none!important}
+}
+@media(min-width:761px){.ema-mobile-bottom-nav{display:none!important}}
+@media print{.ema-mobile-bottom-nav{display:none!important}}
