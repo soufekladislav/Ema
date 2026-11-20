@@ -30,6 +30,10 @@
   <script src="{{ url_for('static', filename='mail-pager-v11.js') }}" defer></script>
   <link rel="stylesheet" href="{{ url_for('static', filename='mail-actions-v12.css') }}">
   <script src="{{ url_for('static', filename='mail-actions-v12.js') }}" defer></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='ema-mobile-bottom-v1.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='ema-mail-folder-v1.css') }}">
+  <script src="{{ url_for('static', filename='ema-mobile-bottom-v1.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='mail-folder-order-v1.js') }}" defer></script>
 </head>
 <body class="ema-screen-{{ section|default('other') }}">
 {% if me is defined and me %}
@@ -96,6 +100,23 @@
     </main>
   </div>
 </div>
+  <nav class="ema-mobile-bottom-nav" aria-label="Rychlá navigace Emy">
+    <a href="{{ url_for('home') }}" class="{{ 'active' if request.endpoint in ['home', 'ask_assistant'] else '' }}" {{ 'aria-current="page"'|safe if request.endpoint in ['home', 'ask_assistant'] else '' }}>
+      <span aria-hidden="true">◉</span><small>Chat</small>
+    </a>
+    <a href="{{ url_for('mail_hub') }}" class="{{ 'active' if request.endpoint in ['mail_hub','mail_detail','compose_mail','mail_quick_preview'] else '' }}" {{ 'aria-current="page"'|safe if request.endpoint in ['mail_hub','mail_detail','compose_mail','mail_quick_preview'] else '' }}>
+      <span aria-hidden="true">✉</span><small>E-maily</small>
+    </a>
+    <a href="{{ url_for('project_hub') }}" class="{{ 'active' if request.endpoint in ['project_hub','project_detail','project_chat'] else '' }}" {{ 'aria-current="page"'|safe if request.endpoint in ['project_hub','project_detail','project_chat'] else '' }}>
+      <span aria-hidden="true">▥</span><small>Projekty</small>
+    </a>
+    <a href="{{ url_for('task_hub') }}" class="{{ 'active' if request.endpoint in ['task_hub','tasks'] else '' }}" {{ 'aria-current="page"'|safe if request.endpoint in ['task_hub','tasks'] else '' }}>
+      <span aria-hidden="true">✓</span><small>Úkoly</small>
+    </a>
+    <button type="button" class="ema-mobile-bottom-more" data-ema-mobile-more aria-label="Otevřít další nabídku Emy" aria-controls="ema-app-main-nav">
+      <span aria-hidden="true">☰</span><small>Více</small>
+    </button>
+  </nav>
   <button type="button" class="ema-chat-fab" data-ema-chat-open
           aria-controls="ema-global-chat" aria-expanded="false"
           aria-label="Otevřít chat s Emou">
