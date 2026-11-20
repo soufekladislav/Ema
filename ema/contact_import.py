@@ -12,7 +12,9 @@ class ImportErrorCSV(Exception):
 
 def normalize_header(value):
     plain = unicodedata.normalize("NFKD", (value or "").strip().lower())
-    return "".join(c for c in plain if not unicodedata.combining(c)).replace("_", " ").strip()
+    normalized = "".join(c for c in plain if not unicodedata.combining(c))
+    # Normalize Google Contacts "E-mail 1 - Value" and Outlook "E-mail Address".
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9]+", " ", normalized)).strip()
 
 
 def extract_contacts(data):
@@ -46,22 +48,38 @@ def extract_contacts(data):
             continue
         def pick(*names):
             return next((fields.get(k, "") for k in names if fields.get(k, "")), "")
-        first = pick("jmeno", "first name", "firstname")
-        last = pick("prijmeni", "last name", "lastname")
-        name = pick("name", "full name", "cele jmeno", "kontakt", "contact") or (first + " " + last).strip()
-        email = pick("email", "e mail", "e-mail", "mail", "e-mailova adresa").lower()
-        phone = pick("telefon", "phone", "mobile", "mobil", "tel")
-        company = pick("firma", "company", "organization", "spolecnost")
-        if not name:
-            name = email
-        if not name:
-            raise ImportErrorCSV(f"Řádek {index}: chybí jméno i e-mail.")
+        # Recognize native CSV field headers from Google Contacts and Outlook.
+        # Never infer personal identities from unrelated free-text columns.
+        name_keys = ("name", "full name", "cele jmeno", "kontakt", "contact", "display name")
+        first_keys = ("jmeno", "first name", "firstname", "given name")
+        last_keys = ("prijmeni", "last name", "lastname", "family name", "surname")
+        email_keys = ("email", "e mail", "mail", "e mailova adresa",
+                      "email address", "e mail address", "emailaddress",
+                      "email 1 value", "email 2 value", "email 3 value",
+                      "e mail 1 value", "e mail 2 value", "e mail 3 value",
+                      "primary email", "email address 1", "email address 2")
+        phone_keys = ("telefon", "phone", "mobile", "mobil", "tel", "mobile phone",
+                      "business phone", "home phone", "primary phone",
+                      "phone 1 value", "phone 2 value", "phone 3 value",
+                      "telephone", "phone number", "telefonni cislo")
+        company_keys = ("firma", "company", "organization", "spolecnost",
+                        "organization 1 name", "company name", "business name")
+        first = pick(*first_keys)
+        last = pick(*last_keys)
+        name = pick(*name_keys) or (first + " " + last).strip()
+        email = pick(*email_keys).lower()
+        phone = pick(*phone_keys)
+        company = pick(*company_keys)
         if email and not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", email):
             raise ImportErrorCSV(f"Řádek {index}: neplatný formát e-mailu.")
-        used = {"name", "full name", "cele jmeno", "kontakt", "contact",
-                "jmeno", "first name", "firstname", "prijmeni", "last name", "lastname",
-                "email", "e mail", "e-mail", "mail", "e-mailova adresa", "telefon", "phone",
-                "mobile", "mobil", "tel", "firma", "company", "organization", "spolecnost"}
+        if not (name or email or phone):
+            raise ImportErrorCSV(
+                f"Řádek {index}: nelze rozpoznat jméno, e-mail ani telefon. "
+                "Zkontrolujte hlavičky CSV (např. Email Address, E-mail 1 - Value, Phone 1 - Value)."
+            )
+        if not name:
+            name = email or phone
+        used = set(name_keys + first_keys + last_keys + email_keys + phone_keys + company_keys)
         custom = {key: value[:300] for key, value in fields.items() if key not in used and value}
         if len(json.dumps(custom, ensure_ascii=False)) > 4000:
             raise ImportErrorCSV(f"Řádek {index}: příliš rozsáhlá metadata.")
