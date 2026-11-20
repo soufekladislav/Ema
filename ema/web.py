@@ -1750,7 +1750,9 @@ def create_app(test_config=None):
                     origin.last_seen_at = now()
                     company_repeated += 1
                     continue
-                raise ImportErrorCSV("Nekonzistentní vazba firmy na zdroj; import přerušen bez přepsání.")
+                g.db.rollback()
+                flash("Zdroj firmy odkazuje na neexistující záznam. Import nebyl uložen; zkontrolujte CRM.", "error")
+                return redirect(url_for("database_hub"))
             company = mapped.get(normalized)
             if not company:
                 company = Company(organization_id=org_id, name=company_name[:190])
