@@ -396,13 +396,7 @@
       <th>Kontakt</th><th>E-mail</th><th>Telefon</th><th>Klientská firma</th><th>Vlastník dat</th><th>Zdroj</th>
     </tr></thead><tbody>
       {% for c in contacts %}<tr>
-        <td>{{ c.name }}</td>
-        <td>
-          {% if c.id in crm_email_review_ids %}
-            <span class="ema-crm-origin" title="Původní neplatná hodnota je uložená pouze k revizi; nelze na ni odesílat.">E-mail k ověření</span>
-          {% else %}{{ c.email or '—' }}{% endif %}
-        </td>
-        <td>{{ c.phone or '—' }}</td>
+        <td>{{ c.name }}</td><td>{% if c.id in crm_email_review_ids %}<span class="ema-crm-origin" title="Původní neplatná hodnota je uložená pouze k revizi; nelze na ni odesílat.">E-mail k ověření</span>{% else %}{{ c.email or '—' }}{% endif %}</td><td>{{ c.phone or '—' }}</td>
         <td>{{ companies|selectattr('id','equalto',c.company_id)|map(attribute='name')|first|default('—') }}</td>
         <td>{{ orgs|selectattr('id','equalto',c.organization_id)|map(attribute='name')|first|default('—') }}</td>
         <td>
