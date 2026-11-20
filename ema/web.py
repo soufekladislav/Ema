@@ -1573,10 +1573,11 @@ def create_app(test_config=None):
         except ImportErrorCSV as ex:
             flash(str(ex), "error")
             return redirect(url_for("database_hub"))
-        emails = {row["email"] for row in entries if row["email"]}
-        seen = set(g.db.scalars(select(Contact.email).where(
-            Contact.organization_id == org_id, Contact.email.in_(emails)
+        emails = {row["email"].lower() for row in entries if row["email"]}
+        seen = set(g.db.scalars(select(func.lower(Contact.email)).where(
+            Contact.organization_id == org_id, func.lower(Contact.email).in_(emails)
         )).all()) if emails else set()
+        source_label = field("source_name", 170) or uploaded.filename[:170]
         duplicates = sum(1 for item in entries if item["email"] and item["email"] in seen)
         if field("mode", 16) == "preview":
             flash(f"Kontrola CSV: {len(entries)} řádků, {duplicates} již existujících e-mailů. Nic nebylo zapsáno. Import potvrď dalším nahráním souboru.", "success")
@@ -1592,7 +1593,14 @@ def create_app(test_config=None):
         added = 0
         skipped = 0
         for item in entries:
-            if item["email"] and item["email"] in seen:
+            email = item["email"].lower()
+            label = (str(item["attributes"].get("zdroj") or "").strip()[:170] or source_label)
+            if email and email in seen:
+                existing = g.db.scalar(select(Contact).where(
+                    Contact.organization_id == org_id,
+                    func.lower(Contact.email) == email).order_by(Contact.id).limit(1))
+                if existing:
+                    update_csv_origin(g.db, existing, label)
                 skipped += 1
                 continue
             metadata = {
@@ -1601,11 +1609,15 @@ def create_app(test_config=None):
             }
             if item["company_name"] and item["company_name"].casefold() not in mapped:
                 metadata["company_name_from_csv"] = item["company_name"]
-            g.db.add(Contact(organization_id=org_id, company_id=mapped.get(item["company_name"].casefold()),
-                             name=item["name"], email=item["email"], phone=item["phone"],
-                             metadata_json=json.dumps(metadata, ensure_ascii=False)))
-            if item["email"]:
-                seen.add(item["email"])
+            contact = Contact(organization_id=org_id,
+                              company_id=mapped.get(item["company_name"].casefold()),
+                              name=item["name"], email=email, phone=item["phone"],
+                              metadata_json=json.dumps(metadata, ensure_ascii=False))
+            g.db.add(contact)
+            g.db.flush()
+            if email:
+                update_csv_origin(g.db, contact, label)
+                seen.add(email)
             added += 1
         audit("contacts.csv_import", f"added={added}, skipped={skipped}", org_id)
         g.db.commit()
