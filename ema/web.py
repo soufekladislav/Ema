@@ -29,7 +29,7 @@ from .mail_folders import (
 )
 from .assistant_service import AssistantError, run_assistant
 from .ai_connection import seal_connector_key, reveal_connector_key, verify_connector_key
-from .contact_import import ImportErrorCSV, extract_contacts
+from .contact_import import ImportErrorCSV, analyze_contacts
 from .fresh_core_contacts import FreshCoreError, canonical_site, fetch_page, synchronize_source, update_csv_origin
 from .schema_upgrade import upgrade_schema
 from .ops import code_identity, collect_ops, verify_bearer
@@ -1401,6 +1401,19 @@ def create_app(test_config=None):
         inspector = inspect(g.db.get_bind())
         return inspector.has_table("contact_origins") and inspector.has_table("fresh_core_sources")
 
+    def crm_email_review_ids(contacts):
+        flagged = set()
+        for c in contacts:
+            try:
+                metadata = json.loads(c.metadata_json or "{}")
+                if isinstance(metadata, dict):
+                    fields = metadata.get("fields") or {}
+                    if isinstance(fields, dict) and fields.get("email_stav") == "neovereny":
+                        flagged.add(c.id)
+            except (TypeError, ValueError):
+                continue
+        return flagged
+
     @app.get("/database")
     @login_required
     def database_hub():
@@ -1421,6 +1434,7 @@ def create_app(test_config=None):
                               crm_contact_origins={}, crm_sites=[], crm_query="",
                               crm_kind="", crm_site="", crm_selected_org="",
                               crm_page=1, crm_has_next=has_next, crm_upgrade_required=True,
+                              crm_email_review_ids=crm_email_review_ids(contacts),
                               crm_stats={"total": total_contacts or 0, "users": 0,
                                          "forms": 0, "csv": 0})
         requested_org = (request.args.get("org") or "").strip()
@@ -1498,7 +1512,8 @@ def create_app(test_config=None):
                           crm_admin_org_ids=admin_ids, crm_contact_origins=by_contact,
                           crm_sites=sites, crm_query=q, crm_kind=kind, crm_site=site,
                           crm_selected_org=requested_org, crm_page=page,
-                          crm_has_next=has_next, crm_stats=crm_stats)
+                          crm_has_next=has_next, crm_stats=crm_stats,
+                          crm_email_review_ids=crm_email_review_ids(contacts))
 
     @app.post("/database/sources")
     @login_required
@@ -1618,10 +1633,20 @@ def create_app(test_config=None):
             flash("Vyber soubor CSV.", "error")
             return redirect(url_for("database_hub"))
         try:
-            entries = extract_contacts(uploaded.stream.read(950001))
+            entries, csv_report = analyze_contacts(uploaded.stream.read(950001))
         except ImportErrorCSV as ex:
             flash(str(ex), "error")
             return redirect(url_for("database_hub"))
+        csv_warning = ""
+        if csv_report["invalid_email_rows"]:
+            rows = ", ".join(str(n) for n in csv_report["problem_rows"])
+            csv_warning = (
+                f" {csv_report['invalid_email_rows']} řádků s neplatnou adresou "
+                f"(např. {rows}); {csv_report['needs_review']} kontaktů má "
+                "e-mail uložený jen k pozdějšímu ověření, ne k odesílání."
+            )
+        if csv_report["skipped_rows"]:
+            csv_warning += f" {csv_report['skipped_rows']} záznamů bez kontaktních údajů vynecháno."
         emails = {row["email"].lower() for row in entries if row["email"]}
         seen = set(g.db.scalars(select(func.lower(Contact.email)).where(
             Contact.organization_id == org_id, func.lower(Contact.email).in_(emails)
@@ -1629,7 +1654,11 @@ def create_app(test_config=None):
         source_label = field("source_name", 170) or uploaded.filename[:170]
         duplicates = sum(1 for item in entries if item["email"] and item["email"] in seen)
         if field("mode", 16) == "preview":
-            flash(f"Kontrola CSV: {len(entries)} řádků, {duplicates} již existujících e-mailů. Nic nebylo zapsáno. Import potvrď dalším nahráním souboru.", "success")
+            flash(
+                f"Kontrola CSV: {csv_report['read_rows']} datových řádků, "
+                f"{len(entries)} kontaktů k importu, {duplicates} shodných e-mailů."
+                + csv_warning + " Nic nebylo zapsáno. Import potvrď dalším nahráním souboru.",
+                "success")
             return redirect(url_for("database_hub"))
         if field("mode", 16) != "import":
             abort(400, description="Neplatný režim importu")
@@ -1687,7 +1716,12 @@ def create_app(test_config=None):
             added += 1
         audit("contacts.csv_import", f"added={added}, skipped={skipped}", org_id)
         g.db.commit()
-        flash(f"Import dokončen: {added} kontaktů, {skipped} duplicit přeskočeno. Marketingové souhlasy se automaticky nepřidělují.", "success")
+        flash(
+            f"Import dokončen: {added} nových kontaktů, {skipped} shodných záznamů."
+            + csv_warning
+            + " Neplatné e-maily nejsou použitelné pro rozesílání. "
+              "Marketingové souhlasy se automaticky nepřidělují.",
+            "success")
         return redirect(url_for("database_hub"))
 
     @app.get("/tasks")
