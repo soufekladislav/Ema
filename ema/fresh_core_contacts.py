@@ -159,21 +159,22 @@ def ingest_contacts(db, organization_id, site, kind, rows):
     return {"created": created, "linked": linked, "skipped": skipped}
 
 
-def update_csv_origin(db, contact, label):
-    """Record each CSV source even when the contact already exists."""
+def update_csv_origin(db, contact, label, external_id=None):
+    """Record CSV provenance including rows which don't have an email."""
     source = "CSV: " + (label.strip()[:170] or "Import")
+    external_id = external_id or contact.email.lower()
     origin = db.scalar(select(ContactOrigin).where(
         ContactOrigin.organization_id == contact.organization_id,
         ContactOrigin.source_site == source,
         ContactOrigin.source_kind == "csv",
-        ContactOrigin.external_id == contact.email.lower(),
+        ContactOrigin.external_id == external_id,
     ))
     if origin:
         origin.last_seen_at = now()
     else:
         db.add(ContactOrigin(
             organization_id=contact.organization_id, contact_id=contact.id,
-            source_site=source, source_kind="csv", external_id=contact.email.lower()
+            source_site=source, source_kind="csv", external_id=external_id
         ))
 
 
