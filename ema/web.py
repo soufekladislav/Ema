@@ -2029,9 +2029,35 @@ def create_app(test_config=None):
     @app.route("/org/<int:org_id>/clients")
     @org_required
     def clients(org_id):
-        companies = g.db.scalars(select(Company).where(Company.organization_id == org_id).order_by(Company.id.desc()).limit(100)).all()
-        contacts = g.db.scalars(select(Contact).where(Contact.organization_id == org_id).order_by(Contact.id.desc()).limit(100)).all()
-        return render("clients", companies=companies, contacts=contacts)
+        search = (request.args.get("q") or "").strip()[:100]
+        query = select(Company).where(Company.organization_id == org_id)
+        if search:
+            query = query.where(Company.name.ilike(
+                "%" + search.replace("%", r"\%").replace("_", r"\_") + "%", escape="\\"))
+        companies = g.db.scalars(query.order_by(Company.name).limit(150)).all()
+        contacts = g.db.scalars(select(Contact).where(
+            Contact.organization_id == org_id).order_by(Contact.id.desc()).limit(100)).all()
+        company_details = {}
+        if inspect(g.db.get_bind()).has_table("company_origins") and companies:
+            origins = g.db.scalars(select(CompanyOrigin).where(
+                CompanyOrigin.organization_id == org_id,
+                CompanyOrigin.company_id.in_([c.id for c in companies])).order_by(
+                CompanyOrigin.id.desc())).all()
+            for origin in origins:
+                try:
+                    payload = json.loads(origin.metadata_json or "{}")
+                except (ValueError, TypeError):
+                    payload = {}
+                fields = payload.get("fields", {}) if isinstance(payload, dict) else {}
+                if not isinstance(fields, dict):
+                    fields = {}
+                company_details.setdefault(origin.company_id, []).append({
+                    "source": origin.source_site,
+                    "fields": fields,
+                    "review": payload.get("review_status", "unverified"),
+                })
+        return render("clients", companies=companies, contacts=contacts,
+                      company_details=company_details, clients_query=search)
 
     @app.post("/org/<int:org_id>/clients")
     @org_required
@@ -2041,6 +2067,69 @@ def create_app(test_config=None):
         audit("client.create", obj.name, org_id)
         g.db.commit()
         flash("Klient uložen", "success")
+        return redirect(url_for("clients", org_id=org_id))
+
+    @app.post("/org/<int:org_id>/clients/<int:company_id>/edit")
+    @org_required
+    def edit_company(org_id, company_id):
+        company = g.db.get(Company, company_id)
+        if not company or company.organization_id != org_id:
+            abort(404)
+        name = field("name", 190).strip()
+        if not name:
+            flash("Název firmy je nutné zachovat.", "error")
+            return redirect(url_for("clients", org_id=org_id))
+        company.name = name
+        company.ico = field("ico", 32)
+        company.email = field("email", 190)
+        company.phone = field("phone", 60)
+        company.notes = field("notes", 5000)
+        audit("crm.company.edit", company.id, org_id)
+        g.db.commit()
+        flash("Firma upravena, původní zdroje zůstaly zachované.", "success")
+        return redirect(url_for("clients", org_id=org_id))
+
+    @app.post("/org/<int:org_id>/contacts/<int:contact_id>/edit")
+    @org_required
+    def edit_contact(org_id, contact_id):
+        contact = g.db.get(Contact, contact_id)
+        if not contact or contact.organization_id != org_id:
+            abort(404)
+        email = field("email", 190).strip().lower()
+        if email and not re.fullmatch(r"[^\s@,;:<>()\[\]]+@[^\s@,;:<>()\[\]]+\.[^\s@,;:<>()\[\]]+", email):
+            flash("Neplatný e-mail nebude uložen jako doručovací. Oprav ho nebo ponech prázdný.", "error")
+            return redirect(url_for("clients", org_id=org_id))
+        if email:
+            duplicate = g.db.scalar(select(Contact.id).where(
+                Contact.organization_id == org_id,
+                func.lower(Contact.email) == email,
+                Contact.id != contact_id).limit(1))
+            if duplicate:
+                flash("E-mail již patří jinému kontaktu; nevytvářím duplicitu.", "error")
+                return redirect(url_for("clients", org_id=org_id))
+        new_company_id = positive_id("company_id")
+        if new_company_id:
+            dest = g.db.get(Company, new_company_id)
+            if not dest or dest.organization_id != org_id:
+                abort(400, description="Firma kontaktu nepatří do tohoto pracovního prostoru.")
+        name = field("name", 190).strip()
+        contact.name = name or email or field("phone", 60) or contact.name
+        contact.email = email
+        contact.phone = field("phone", 60)
+        contact.company_id = new_company_id
+        if email:
+            try:
+                metadata = json.loads(contact.metadata_json or "{}")
+                if isinstance(metadata, dict):
+                    fields = metadata.get("fields")
+                    if isinstance(fields, dict) and fields.get("email_stav") == "neovereny":
+                        fields["email_stav"] = "opraveno_rucne"
+                        contact.metadata_json = json.dumps(metadata, ensure_ascii=False)
+            except (TypeError, ValueError):
+                pass
+        audit("crm.contact.edit", contact.id, org_id)
+        g.db.commit()
+        flash("Kontakt upraven, zdrojové vazby zachovány.", "success")
         return redirect(url_for("clients", org_id=org_id))
 
     @app.post("/org/<int:org_id>/contacts")
