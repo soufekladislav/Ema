@@ -29,10 +29,11 @@ from .mail_folders import (
 from .assistant_service import AssistantError, run_assistant
 from .ai_connection import seal_connector_key, reveal_connector_key, verify_connector_key
 from .contact_import import ImportErrorCSV, extract_contacts
+from .fresh_core_contacts import FreshCoreError, canonical_site, fetch_page, ingest_contacts, update_csv_origin
 from .schema_upgrade import upgrade_schema
 from .ops import code_identity, collect_ops, verify_bearer
 from .models import (
-    Audit, AssistantTurn, AssistantThread, AssistantMessageAttempt, AIEngineConnection, Base, ChatMessage, Company, Contact, MailFolder, Mailbox, MailboxGrant, MailboxView, MailFolderView, MailboxConnectionCheck, MailMessage, MailUserState,
+    Audit, AssistantTurn, AssistantThread, AssistantMessageAttempt, AIEngineConnection, Base, ChatMessage, Company, Contact, ContactOrigin, FreshCoreSource, MailFolder, Mailbox, MailboxGrant, MailboxView, MailFolderView, MailboxConnectionCheck, MailMessage, MailUserState,
     Membership, Opportunity, Organization, Outbound, OpsIncident, OpsJobRun, OpsDeployment, Project, ProjectGrant,
     Task, User, make_session, now,
 )
@@ -1400,12 +1401,158 @@ def create_app(test_config=None):
     def database_hub():
         ctx, orgs, projects = current_scope()
         ids = [org.id for org in orgs]
+        requested_org = (request.args.get("org") or "").strip()
+        if requested_org and (not requested_org.isdigit() or int(requested_org) not in ids):
+            abort(403)
+        if requested_org:
+            ids = [int(requested_org)]
+        q = (request.args.get("q") or "").strip()[:120]
+        kind = (request.args.get("kind") or "").strip()[:40]
+        site = (request.args.get("site") or "").strip()[:190]
+        allowed_kinds = {"csv", "users", "elementor_submissions"}
+        if kind and kind not in allowed_kinds:
+            abort(400)
+        raw_page = (request.args.get("page") or "1")
+        page = min(1000, max(1, int(raw_page))) if raw_page.isdigit() else 1
+        stmt = select(Contact).outerjoin(Company, Contact.company_id == Company.id).where(
+            Contact.organization_id.in_(ids))
+        if q:
+            pattern = "%" + q.replace("%", r"\%").replace("_", r"\_") + "%"
+            stmt = stmt.where(or_(Contact.name.ilike(pattern, escape="\\"),
+                                  Contact.email.ilike(pattern, escape="\\"),
+                                  Contact.phone.ilike(pattern, escape="\\"),
+                                  Company.name.ilike(pattern, escape="\\")))
+        if kind or site:
+            exists_origin = select(ContactOrigin.contact_id).where(
+                ContactOrigin.organization_id.in_(ids))
+            if kind:
+                exists_origin = exists_origin.where(ContactOrigin.source_kind == kind)
+            if site:
+                exists_origin = exists_origin.where(ContactOrigin.source_site == site)
+            stmt = stmt.where(Contact.id.in_(exists_origin))
+        contacts = g.db.scalars(stmt.order_by(Contact.name, Contact.id)
+                                 .limit(100).offset((page - 1) * 100)).all() if ids else []
         companies = g.db.scalars(select(Company).where(Company.organization_id.in_(ids))
             .order_by(Company.name).limit(250)).all() if ids else []
-        contacts = g.db.scalars(select(Contact).where(Contact.organization_id.in_(ids))
-            .order_by(Contact.name).limit(250)).all() if ids else []
+        sources = g.db.scalars(select(FreshCoreSource).where(
+            FreshCoreSource.organization_id.in_(ids)).order_by(FreshCoreSource.site_url)).all() if ids else []
+        origins = g.db.scalars(select(ContactOrigin).where(
+            ContactOrigin.organization_id.in_(ids)).order_by(ContactOrigin.source_site)
+            .limit(10000)).all() if ids else []
+        sites = sorted({o.source_site for o in origins})
+        by_contact = {}
+        for origin in origins:
+            by_contact.setdefault(origin.contact_id, []).append(origin)
+        admin_ids = set(g.db.scalars(select(Membership.organization_id).where(
+            Membership.user_id == g.user.id,
+            Membership.role.in_(("owner", "admin"))
+        )).all())
         return render_hub("database", companies=companies, contacts=contacts,
-                          eligible_orgs=orgs)
+                          eligible_orgs=orgs, crm_sources=sources,
+                          crm_admin_org_ids=admin_ids, crm_contact_origins=by_contact,
+                          crm_sites=sites, crm_query=q, crm_kind=kind, crm_site=site,
+                          crm_selected_org=requested_org, crm_page=page,
+                          crm_has_next=len(contacts) == 100)
+
+    @app.post("/database/sources")
+    @login_required
+    def crm_connect_source():
+        org_id = positive_id("organization_id")
+        if not org_id:
+            abort(400)
+        try:
+            organization_access(g.db, g.user.id, org_id, admin=True)
+        except Forbidden:
+            abort(403)
+        try:
+            site = canonical_site(required("site_url", 250))
+            credential = request.form.get("accounting_read_key", "").strip()
+            if not 32 <= len(credential) <= 256:
+                raise FreshCoreError("Zadejte účetní READ klíč Fresh Core.")
+            source = g.db.scalar(select(FreshCoreSource).where(
+                FreshCoreSource.organization_id == org_id, FreshCoreSource.site_url == site))
+            cipher = encrypt_password(credential, app.config["MAIL_ENCRYPTION_KEY"])
+            # Verify actual scoped access before saving or replacing the key.
+            temporary = FreshCoreSource(organization_id=org_id, site_url=site, credential=cipher)
+            fetch_page(temporary, app.config["MAIL_ENCRYPTION_KEY"], "users", limit=1)
+            if source:
+                source.credential = cipher
+                source.last_error = ""
+            else:
+                source = temporary
+                g.db.add(source)
+            audit("crm.core.connect", site, org_id)
+            g.db.commit()
+            flash("Web byl připojen. Kontakty načtete tlačítkem Synchronizovat.", "success")
+        except (FreshCoreError, MailError, ValueError) as ex:
+            flash(str(ex), "error")
+        return redirect(url_for("database_hub", org=org_id))
+
+    @app.post("/database/sources/<int:source_id>/preview")
+    @login_required
+    def crm_preview_source(source_id):
+        source = g.db.get(FreshCoreSource, source_id)
+        if not source:
+            abort(404)
+        try:
+            organization_access(g.db, g.user.id, source.organization_id, write=True)
+        except Forbidden:
+            abort(403)
+        try:
+            counts = {}
+            for kind in ("users", "elementor_submissions"):
+                result = fetch_page(source, app.config["MAIL_ENCRYPTION_KEY"], kind, limit=50)
+                counts[kind] = sum(not row.get("skip") for row in result["items"])
+            flash(f"Náhled (prvních 50 z každého zdroje): registrace {counts['users']}, formuláře {counts['elementor_submissions']}. Nic nebylo zapsáno.", "success")
+        except FreshCoreError as ex:
+            flash(str(ex), "error")
+        return redirect(url_for("database_hub", org=source.organization_id))
+
+    @app.post("/database/sources/<int:source_id>/sync")
+    @login_required
+    def crm_sync_source(source_id):
+        source = g.db.get(FreshCoreSource, source_id)
+        if not source:
+            abort(404)
+        try:
+            organization_access(g.db, g.user.id, source.organization_id, write=True)
+        except Forbidden:
+            abort(403)
+        totals = {"created": 0, "linked": 0, "skipped": 0}
+        pending = False
+        try:
+            # At most 3 pages per type per click; bounded requests and writes.
+            # Cursor is committed with contact rows, never ahead of them.
+            for kind, attr in (("users", "users_after_id"), ("elementor_submissions", "forms_after_id")):
+                for _ in range(3):
+                    cursor = getattr(source, attr)
+                    result = fetch_page(source, app.config["MAIL_ENCRYPTION_KEY"], kind,
+                                        after=cursor, limit=50)
+                    stats = ingest_contacts(g.db, source.organization_id, source.site_url, kind,
+                                            result["items"])
+                    for k in totals:
+                        totals[k] += stats[k]
+                    next_cursor = result["next_after_id"] if result["has_more"] else 0
+                    setattr(source, attr, next_cursor)
+                    if not result["has_more"] or not result["available"]:
+                        break
+                pending |= getattr(source, attr) > 0
+            source.last_synced_at = now()
+            source.last_error = ""
+            audit("crm.core.sync", f"source={source.id};new={totals['created']};linked={totals['linked']}", source.organization_id)
+            g.db.commit()
+            message = (f"Synchronizace: {totals['created']} nových, {totals['linked']} propojených, "
+                       f"{totals['skipped']} přeskočených.")
+            if pending:
+                message += " Další dávku načtete opětovným kliknutím."
+            flash(message, "success")
+        except FreshCoreError as ex:
+            g.db.rollback()
+            source = g.db.get(FreshCoreSource, source_id)
+            source.last_error = str(ex)[:240]
+            g.db.commit()
+            flash(str(ex) + " Import této dávky nebyl uložen.", "error")
+        return redirect(url_for("database_hub", org=source.organization_id))
 
     @app.post("/database/import")
     @login_required
