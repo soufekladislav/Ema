@@ -326,9 +326,17 @@ def create_app(test_config=None):
         images = ("'self' data: https:" if request.endpoint in ("mail_hub", "mail_quick_preview")
                   or request.endpoint == "mail_detail" and request.args.get("images") == "1" else
                   "'self' data: https://www.freshcrackers.cz")
+        # A sandboxed iframe with srcdoc inherits the embedder's CSP.
+        # Mail HTML is already sanitized and separately sandboxed, but the
+        # mail page must allow inline CSS for the email's table/column styles
+        # to render. Keep the exception limited to read-only mail views:
+        # no script permission is added and all other EMA pages stay strict.
+        mail_inline_css = request.endpoint in ("mail_hub", "mail_detail")
+        style_sources = ("'self' https://fonts.googleapis.com" +
+                         (" 'unsafe-inline'" if mail_inline_css else ""))
         resp.headers["Content-Security-Policy"] = (
             "default-src 'self'; script-src 'self'; "
-            "style-src 'self' https://fonts.googleapis.com; "
+            "style-src " + style_sources + "; "
             "font-src 'self' https://fonts.gstatic.com; "
             "img-src " + images + "; frame-src 'self' about:; "
             "worker-src 'self'; manifest-src 'self'; "
