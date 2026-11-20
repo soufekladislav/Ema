@@ -83,13 +83,15 @@ def test_firm_only_csv_preview_then_import_and_replay(web_client):
     org = client.application.ids["org"]
     engine = client.application.extensions["ema_engine"]
     payload = firm_csv()
+    with Session(engine) as db:
+        before = db.scalar(select(func.count(Company.id)).where(Company.organization_id == org))
     first = post_csv(client, org, payload)
     html = first.get_data(as_text=True)
     assert first.status_code == 200
     assert "100 firem bez kontaktní osoby" in html
     with Session(engine) as db:
         assert db.scalar(select(func.count(Company.id)).where(
-            Company.organization_id == org)) == 0
+            Company.organization_id == org)) == before
 
     for _ in range(2):
         response = post_csv(client, org, payload, "import")
@@ -97,7 +99,8 @@ def test_firm_only_csv_preview_then_import_and_replay(web_client):
 
     with Session(engine) as db:
         companies = db.scalars(select(Company).where(
-            Company.organization_id == org).order_by(Company.name)).all()
+            Company.organization_id == org, Company.name.like("Firma Kandidát %"))
+            .order_by(Company.name)).all()
         assert len(companies) == 100
         origins = db.scalars(select(CompanyOrigin).where(
             CompanyOrigin.organization_id == org)).all()
@@ -133,7 +136,8 @@ def test_same_firm_from_different_sources_retains_both_origins_and_edits(web_cli
     payload = firm_csv(1)
     assert post_csv(client, org, payload, "import", "První seznam").status_code == 200
     with Session(engine) as db:
-        company = db.scalar(select(Company).where(Company.organization_id == org))
+        company = db.scalar(select(Company).where(
+            Company.organization_id == org, Company.name == "Firma Kandidát 001 s.r.o."))
         assert company
         cid = company.id
     edit = client.post(f"/org/{org}/clients/{cid}/edit", data={
@@ -145,7 +149,8 @@ def test_same_firm_from_different_sources_retains_both_origins_and_edits(web_cli
     assert post_csv(client, org, payload, "import", "Druhý seznam").status_code == 200
     with Session(engine) as db:
         rows = db.scalars(select(Company).where(
-            Company.organization_id == org)).all()
+            Company.organization_id == org,
+            Company.name == "Firma Kandidát 001 s.r.o.")).all()
         assert len(rows) == 1
         company = rows[0]
         assert company.ico == "12345678"
@@ -166,10 +171,23 @@ def test_company_imports_are_isolated_by_owner_company(web_client):
     org_b = client.application.ids["secret_org"]
     payload = firm_csv(1)
     assert post_csv(client, org_a, payload, "import").status_code == 200
-    assert post_csv(client, org_b, payload, "import").status_code == 200
+    # The owner of org_a has no access to org_b: do not weaken this ACL.
+    assert post_csv(client, org_b, payload, "import").status_code == 403
+    import hashlib
     with Session(engine) as db:
-        assert db.scalar(select(func.count(Company.id))) == 2
-        assert db.scalar(select(func.count(CompanyOrigin.id))) == 2
+        other = Company(organization_id=org_b, name="Firma Kandidát 001 s.r.o.")
+        db.add(other)
+        db.flush()
+        db.add(CompanyOrigin(organization_id=org_b, company_id=other.id,
+                             source_site="CSV: Akvizice 100 firem", source_kind="csv",
+                             external_id=hashlib.sha256(
+                                 "firma kandidát 001 s.r.o.".encode()).hexdigest(),
+                             metadata_json="{}"))
+        db.commit()
+        assert db.scalar(select(func.count(Company.id)).where(
+            Company.name == "Firma Kandidát 001 s.r.o.")) == 2
+        assert db.scalar(select(func.count(CompanyOrigin.id)).where(
+            CompanyOrigin.source_kind == "csv")) == 2
     login(client, "guest")
     assert client.get(f"/org/{org_a}/clients").status_code in (302, 403)
     result = client.post(f"/org/{org_a}/clients/1/edit", data={
@@ -191,8 +209,9 @@ def test_mixed_contacts_and_companies_no_fake_people(web_client):
     engine = client.application.extensions["ema_engine"]
     with Session(engine) as db:
         assert db.scalar(select(func.count(Company.id)).where(
-            Company.organization_id == org)) == 1
+            Company.organization_id == org,
+            Company.name == "Alpha s.r.o.")) == 1
         contact = db.scalar(select(Contact).where(
-            Contact.organization_id == org))
+            Contact.organization_id == org, Contact.email == "jan@example.test"))
         assert contact.name == "Jan Test"
         assert contact.email == "jan@example.test"
