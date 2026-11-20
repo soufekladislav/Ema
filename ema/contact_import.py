@@ -71,7 +71,8 @@ def analyze_contacts(data):
 
     collected = []
     report = {"read_rows": 0, "invalid_email_rows": 0,
-              "needs_review": 0, "skipped_rows": 0, "problem_rows": []}
+              "needs_review": 0, "skipped_rows": 0, "problem_rows": [],
+              "company_rows": 0, "contact_rows": 0}
     for index, record in enumerate(reader, 2):
         if index > 1002:
             raise ImportErrorCSV("V jedné dávce lze importovat maximálně 1000 kontaktů.")
@@ -106,6 +107,19 @@ def analyze_contacts(data):
                 report["needs_review"] += 1
                 attrs["email_stav"] = "neovereny"
         if not (name or email or phone) and not invalid:
+            if company:
+                # A firm-only acquisition list is NOT a list of persons.
+                # Preserve original business research fields as source metadata.
+                if len(json.dumps(attrs, ensure_ascii=False)) > 4000:
+                    report["skipped_rows"] += 1
+                    continue
+                collected.append({
+                    "name": "", "email": "", "phone": "",
+                    "company_name": company[:190], "attributes": attrs,
+                    "entity_type": "company",
+                })
+                report["company_rows"] += 1
+                continue
             report["skipped_rows"] += 1
             if len(report["problem_rows"]) < 12:
                 report["problem_rows"].append(index)
@@ -121,8 +135,10 @@ def analyze_contacts(data):
             continue
         collected.append({
             "name": name[:190], "email": email[:190], "phone": phone[:60],
-            "company_name": company[:190], "attributes": attrs
+            "company_name": company[:190], "attributes": attrs,
+            "entity_type": "contact",
         })
+        report["contact_rows"] += 1
 
     if not collected:
         raise ImportErrorCSV(
