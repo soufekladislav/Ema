@@ -33,6 +33,8 @@ def test_import_from_wordpress_elementor_and_csv_shares_one_crm(web_client, monk
                 "kind": kind, "items": rows, "next_after_id": rows[0]["source_id"],
                 "has_more": False}
     monkeypatch.setattr(web, "fetch_page", fake_page)
+    import ema.fresh_core_contacts as service
+    monkeypatch.setattr(service, "fetch_page", fake_page)
     post = client.post("/database/sources", data={
         "csrf_token": csrf(client), "organization_id": str(org),
         "site_url": "https://www.freshcrackers.cz",
@@ -114,6 +116,8 @@ def test_failed_sync_never_writes_partial_contacts(web_client, monkeypatch):
         return {"kind": "users", "items": [_contact(1, email="rollback@example.cz")],
                 "next_after_id": 1, "has_more": False, "available": True}
     monkeypatch.setattr(web, "fetch_page", broken)
+    import ema.fresh_core_contacts as service
+    monkeypatch.setattr(service, "fetch_page", broken)
     assert client.post(f"/database/sources/{sid}/sync",
                        data={"csrf_token": csrf(client)}).status_code == 302
     with Session(client.application.extensions["ema_engine"]) as db:
