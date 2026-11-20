@@ -53,9 +53,11 @@ def extract_contacts(data):
         name_keys = ("name", "full name", "cele jmeno", "kontakt", "contact", "display name")
         first_keys = ("jmeno", "first name", "firstname", "given name")
         last_keys = ("prijmeni", "last name", "lastname", "family name", "surname")
-        email_keys = ("email", "e mail", "mail", "e mailova adresa", "email address",
+        email_keys = ("email", "e mail", "mail", "e mailova adresa",
+                      "email address", "e mail address", "emailaddress",
                       "email 1 value", "email 2 value", "email 3 value",
-                      "emailaddress", "primary email", "email address 1", "email address 2")
+                      "e mail 1 value", "e mail 2 value", "e mail 3 value",
+                      "primary email", "email address 1", "email address 2")
         phone_keys = ("telefon", "phone", "mobile", "mobil", "tel", "mobile phone",
                       "business phone", "home phone", "primary phone",
                       "phone 1 value", "phone 2 value", "phone 3 value",
