@@ -175,3 +175,30 @@ def update_csv_origin(db, contact, label):
             organization_id=contact.organization_id, contact_id=contact.id,
             source_site=source, source_kind="csv", external_id=contact.email.lower()
         ))
+
+
+def synchronize_source(db, source, key, max_pages=3):
+    """One atomic, bounded batch. Shared by the UI action and Exon cron."""
+    totals = {"created": 0, "linked": 0, "skipped": 0}
+    pending = False
+    for kind, attr in (("users", "users_after_id"),
+                       ("elementor_submissions", "forms_after_id")):
+        for _ in range(max_pages):
+            cursor = getattr(source, attr)
+            result = fetch_page(source, key, kind, after=cursor, limit=50)
+            if not result["available"]:
+                setattr(source, attr, 0)
+                break
+            stats = ingest_contacts(db, source.organization_id, source.site_url,
+                                    kind, result["items"])
+            for k in totals:
+                totals[k] += stats[k]
+            # Cursor progresses only within the transaction. Any subsequent
+            # API error means the whole batch is rolled back by the caller.
+            setattr(source, attr, result["next_after_id"] if result["has_more"] else 0)
+            if not result["has_more"]:
+                break
+        pending |= getattr(source, attr) > 0
+    source.last_synced_at = now()
+    source.last_error = ""
+    return totals, pending
