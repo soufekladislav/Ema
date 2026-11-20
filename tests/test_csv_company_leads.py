@@ -224,3 +224,35 @@ def test_mixed_contacts_and_companies_no_fake_people(web_client):
             Contact.organization_id == org, Contact.email == "jan@example.test"))
         assert contact.name == "Jan Test"
         assert contact.email == "jan@example.test"
+
+
+
+def test_corrected_company_name_survives_replay_of_original_csv(web_client):
+    client = web_client
+    login(client, "owner")
+    org = client.application.ids["org"]
+    engine = client.application.extensions["ema_engine"]
+    payload = firm_csv(1)
+    assert post_csv(client, org, payload, "import", "Original lead list").status_code == 200
+    with Session(engine) as db:
+        original = db.scalar(select(Company).where(
+            Company.organization_id == org,
+            Company.name == "Firma Kandidát 001 s.r.o."))
+        cid = original.id
+    response = client.post(f"/org/{org}/clients/{cid}/edit", data={
+        "csrf_token": csrf(client),
+        "name": "Firma Kandidát 001 s.r.o. (ověřeno)",
+        "phone": "777111222", "notes": "Ověřeno po telefonu",
+    }, follow_redirects=True)
+    assert response.status_code == 200
+    assert post_csv(client, org, payload, "import", "Original lead list").status_code == 200
+    with Session(engine) as db:
+        company = db.get(Company, cid)
+        assert company.name == "Firma Kandidát 001 s.r.o. (ověřeno)"
+        assert company.phone == "777111222"
+        assert company.notes == "Ověřeno po telefonu"
+        assert db.scalar(select(func.count(Company.id)).where(
+            Company.organization_id == org,
+            Company.name.like("Firma Kandidát 001%"))) == 1
+        assert db.scalar(select(func.count(CompanyOrigin.id)).where(
+            CompanyOrigin.company_id == cid)) == 1
