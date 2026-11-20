@@ -1,7 +1,8 @@
 """Idempotent, additive schema upgrade for Ema pilot. Backup DB before running."""
+import json
 from sqlalchemy import inspect, text, select
 from sqlalchemy.orm import Session
-from .models import AssistantTurn, AssistantThread, AIEngineConnection, AssistantMessageAttempt, MailboxView, MailFolderView, MailUserState, MailboxConnectionCheck, OpsIncident, OpsJobRun, OpsDeployment, Base
+from .models import AssistantTurn, AssistantThread, AIEngineConnection, AssistantMessageAttempt, MailboxView, MailFolderView, MailUserState, MailboxConnectionCheck, OpsIncident, OpsJobRun, OpsDeployment, ContactOrigin, FreshCoreSource, Contact, now, Base
 
 
 def upgrade_schema(engine):
@@ -13,7 +14,7 @@ def upgrade_schema(engine):
     Base.metadata.create_all(engine, tables=[AssistantTurn.__table__, AssistantThread.__table__, AIEngineConnection.__table__, AssistantMessageAttempt.__table__, MailboxView.__table__, MailFolderView.__table__,
                                                      MailUserState.__table__, MailboxConnectionCheck.__table__,
                                                      OpsIncident.__table__, OpsJobRun.__table__,
-                                                     OpsDeployment.__table__], checkfirst=True)
+                                                     OpsDeployment.__table__, ContactOrigin.__table__, FreshCoreSource.__table__], checkfirst=True)
     # Older installations already contain assistant_turns but not thread_id.
     # Add only one nullable reference; no message is deleted or migrated blindly.
     if inspector.has_table("assistant_turns"):
@@ -92,4 +93,41 @@ def upgrade_schema(engine):
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE projects ADD COLUMN kind VARCHAR(20) NOT NULL DEFAULT 'other'"))
             applied.append("projects.kind")
+    # Backfill historical CSV metadata into the new provenance table.
+    # This is repeatable and does not modify any existing contact payload.
+    if inspect(engine).has_table("contacts"):
+        with Session(engine) as db:
+            backfilled = 0
+            for contact in db.scalars(select(Contact).where(
+                    Contact.metadata_json.is_not(None))).all():
+                try:
+                    meta = json.loads(contact.metadata_json or "{}")
+                except (ValueError, TypeError):
+                    continue
+                if not isinstance(meta, dict) or meta.get("import_source") != "csv":
+                    continue
+                fields = meta.get("fields", {})
+                label = fields.get("zdroj") if isinstance(fields, dict) else None
+                label = str(label or "Starší import").strip()[:170]
+                source = "CSV: " + label
+                identifier = (contact.email or "").strip().lower() or ("legacy-id:" + str(contact.id))
+                exists = db.scalar(select(ContactOrigin.id).where(
+                    ContactOrigin.organization_id == contact.organization_id,
+                    ContactOrigin.source_site == source,
+                    ContactOrigin.source_kind == "csv",
+                    ContactOrigin.external_id == identifier,
+                ).limit(1))
+                if exists:
+                    continue
+                db.add(ContactOrigin(
+                    organization_id=contact.organization_id,
+                    contact_id=contact.id,
+                    source_site=source, source_kind="csv",
+                    external_id=identifier,
+                ))
+                db.flush()
+                backfilled += 1
+            db.commit()
+            if backfilled:
+                applied.append(f"contact_origins backfilled={backfilled}")
     return applied

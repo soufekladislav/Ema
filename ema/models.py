@@ -90,6 +90,40 @@ class Contact(Base):
     __table_args__ = (Index("ix_contact_org", "organization_id"),)
 
 
+class ContactOrigin(Base):
+    """Provenance of a canonical CRM contact. Not a second contact database."""
+    __tablename__ = "contact_origins"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    contact_id: Mapped[int] = mapped_column(ForeignKey("contacts.id", ondelete="CASCADE"), nullable=False)
+    source_site: Mapped[str] = mapped_column(String(250), nullable=False)
+    source_kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    external_id: Mapped[str] = mapped_column(String(190), nullable=False)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime, default=now, nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime, default=now, nullable=False)
+    __table_args__ = (
+        UniqueConstraint("organization_id", "source_site", "source_kind", "external_id"),
+        Index("ix_crm_origin_contact", "organization_id", "contact_id"),
+    )
+
+
+class FreshCoreSource(Base):
+    """A web-to-company mapping. Credential encrypted; never expose it in UI/logs."""
+    __tablename__ = "fresh_core_sources"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    site_url: Mapped[str] = mapped_column(String(250), nullable=False)
+    credential: Mapped[str] = mapped_column(Text, nullable=False)
+    users_after_id: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    forms_after_id: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime)
+    last_error: Mapped[str] = mapped_column(String(240), default="", nullable=False)
+    __table_args__ = (
+        UniqueConstraint("organization_id", "site_url"),
+        Index("ix_core_source_org", "organization_id"),
+    )
+
+
 class Opportunity(Base):
     __tablename__ = "opportunities"
     id: Mapped[int] = mapped_column(primary_key=True)
