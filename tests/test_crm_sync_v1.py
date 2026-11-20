@@ -299,3 +299,67 @@ def test_connected_wordpress_site_without_www_is_saved(web_client, monkeypatch):
             FreshCoreSource.organization_id == org))
         assert row is not None
         assert row.site_url == "https://www.example.cz"
+
+
+
+def test_crm_overview_has_single_list_metrics_and_compact_sources(web_client):
+    """The earlier template accidentally rendered CRM twice, including legacy companies."""
+    client = web_client
+    login(client, "owner")
+    page = client.get("/database")
+    assert page.status_code == 200
+    html = page.get_data(as_text=True)
+    assert html.count('class="ema-crm-metrics"') == 1
+    assert html.count('class="ema-crm-integrations card panel"') == 1
+    assert html.count('action="/database/import"') == 1
+    assert html.count('Propojené weby Fresh Core') == 1
+    assert html.count('Klientské firmy (') == 0
+    assert 'Importy a propojení' in html
+    assert 'Kontakty celkem' in html
+    assert 'Registrace WordPress' in html
+
+
+def test_crm_filter_uses_50_rows_and_last_page_is_not_fake(web_client):
+    client = web_client
+    login(client, "owner")
+    org = client.application.ids["org"]
+    with Session(client.application.extensions["ema_engine"]) as db:
+        for n in range(1, 103):
+            db.add(Contact(organization_id=org, name=f"Testradky{n:03d}",
+                           email=f"pager{n:03d}@example.test"))
+        db.commit()
+    first = client.get("/database?q=Testradky").get_data(as_text=True)
+    second = client.get("/database?q=Testradky&page=2").get_data(as_text=True)
+    third = client.get("/database?q=Testradky&page=3").get_data(as_text=True)
+    assert first.count("pager") == 50
+    assert "Testradky050" in first
+    assert "Testradky051" not in first
+    assert "Další kontakty" in first
+    assert second.count("pager") == 50
+    assert "Testradky051" in second
+    assert "Testradky101" not in second
+    assert "Další kontakty" in second
+    assert third.count("pager") == 2
+    assert "Testradky101" in third
+    assert "Další kontakty" not in third
+
+
+def test_repeated_elementor_submissions_display_one_source_chip(web_client):
+    client = web_client
+    login(client, "owner")
+    org = client.application.ids["org"]
+    with Session(client.application.extensions["ema_engine"]) as db:
+        contact = Contact(organization_id=org, name="Dvojity formular",
+                          email="double@example.test")
+        db.add(contact)
+        db.flush()
+        for idx in (111, 112):
+            db.add(ContactOrigin(organization_id=org, contact_id=contact.id,
+                                 source_kind="elementor_submissions",
+                                 source_site="https://example.test",
+                                 external_id=str(idx)))
+        db.commit()
+    page = client.get("/database?q=double%40example.test").get_data(as_text=True)
+    assert page.count("Formulář · example.test") == 1
+    assert "×2" in page
+    assert 'Formuláře Elementor' in page
