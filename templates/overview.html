@@ -9,9 +9,108 @@
     <span class="eyebrow">KOMUNIKACE</span><h1>E-maily</h1>
     <p>Souhrnný inbox všech schránek, ke kterým máš oprávnění. Zprávy zůstávají uložené u svých poštovních účtů a firem.</p>
   {% elif section == 'database' %}
-    <span class="eyebrow">KLIENTSKÁ DATA</span><h1>Databáze / CRM</h1>
-    <p>Společné vyhledávání a přehled. Každý klient a kontakt zůstává ve své firmě a řídí se jejími oprávněními.</p>
-  {% elif section == 'tasks' %}
+  <div class="ema-hub-inline-actions">
+    {% for o in eligible_orgs %}<a class="btn" href="{{ url_for('clients', org_id=o.id) }}">Klienti · {{ o.name }}</a>{% endfor %}
+  </div>
+  <div class="card panel">
+    <h3>Kontakty ({{ contacts|length }} na stránce)</h3>
+    <form method="get" action="{{ url_for('database_hub') }}" class="ema-crm-filters">
+      <input name="q" value="{{ crm_query }}" placeholder="Hledat jméno, firmu, e-mail, telefon" aria-label="Hledat kontakt">
+      <select name="org" aria-label="Vlastnická firma">
+        <option value="">Všechny moje firmy</option>
+        {% for o in eligible_orgs %}<option value="{{ o.id }}" {% if crm_selected_org == o.id|string %}selected{% endif %}>{{ o.name }}</option>{% endfor %}
+      </select>
+      <select name="kind" aria-label="Typ zdroje">
+        <option value="">Všechny zdroje</option>
+        <option value="csv" {% if crm_kind == 'csv' %}selected{% endif %}>CSV</option>
+        <option value="users" {% if crm_kind == 'users' %}selected{% endif %}>WordPress uživatelé</option>
+        <option value="elementor_submissions" {% if crm_kind == 'elementor_submissions' %}selected{% endif %}>Elementor formuláře</option>
+      </select>
+      <select name="site" aria-label="Zdrojový web nebo soubor">
+        <option value="">Všechny weby/soubory</option>
+        {% for site in crm_sites %}<option value="{{ site }}" {% if crm_site == site %}selected{% endif %}>{{ site }}</option>{% endfor %}
+      </select>
+      <button class="btn primary" type="submit">Filtrovat</button>
+      <a href="{{ url_for('database_hub') }}" class="btn">Vymazat filtr</a>
+    </form>
+    <div class="table-wrap"><table><thead><tr>
+      <th>Kontakt</th><th>E-mail</th><th>Telefon</th><th>Klientská firma</th><th>Vlastník dat</th><th>Zdroj</th>
+    </tr></thead><tbody>
+      {% for c in contacts %}<tr>
+        <td>{{ c.name }}</td><td>{{ c.email or '—' }}</td><td>{{ c.phone or '—' }}</td>
+        <td>{{ companies|selectattr('id','equalto',c.company_id)|map(attribute='name')|first|default('—') }}</td>
+        <td>{{ orgs|selectattr('id','equalto',c.organization_id)|map(attribute='name')|first|default('—') }}</td>
+        <td>
+        {% for origin in crm_contact_origins.get(c.id, []) %}
+          <span class="ema-crm-origin" title="{{ origin.source_site }} · {{ origin.source_kind }}">
+            {{ 'CSV' if origin.source_kind == 'csv' else 'WP' if origin.source_kind == 'users' else 'Formulář' }} · {{ origin.source_site }}
+          </span>
+        {% else %}
+          <span class="muted">Původní záznam</span>
+        {% endfor %}
+        </td>
+      </tr>{% else %}<tr><td colspan="6" class="muted">Žádné kontakty neodpovídají výběru.</td></tr>{% endfor %}
+    </tbody></table></div>
+    <div class="ema-hub-inline-actions">
+      {% if crm_page > 1 %}<a class="btn" href="{{ url_for('database_hub', q=crm_query, kind=crm_kind, site=crm_site, org=crm_selected_org, page=crm_page-1) }}">Předchozí</a>{% endif %}
+      {% if crm_has_next %}<a class="btn" href="{{ url_for('database_hub', q=crm_query, kind=crm_kind, site=crm_site, org=crm_selected_org, page=crm_page+1) }}">Další kontakty</a>{% endif %}
+    </div>
+    <p class="small muted">Načtení kontaktu neznamená souhlas s marketingovým oslovováním.</p>
+  </div>
+  <details class="card panel ema-new-inline">
+    <summary>Import kontaktů z CSV</summary>
+    <p>Stávající import CSV (UTF-8/Windows-1250, 1 000 řádků). Nové kontakty a jejich zdroje se při opakovaném importu neduplikují.</p>
+    {% if eligible_orgs %}
+    <form method="post" action="{{ url_for('import_contacts_csv') }}" enctype="multipart/form-data" class="formstack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label>Firma – vlastník dat<select name="organization_id" required>{% for o in eligible_orgs %}<option value="{{ o.id }}">{{ o.name }}</option>{% endfor %}</select></label>
+      <label>Název zdroje / seznamu<input name="source_name" maxlength="170" placeholder="Např. Akvizice listopad"></label>
+      <label>Soubor CSV<input type="file" name="file" accept=".csv,text/csv" required></label>
+      <div class="ema-card-actions">
+        <button class="btn" type="submit" name="mode" value="preview">Zkontrolovat</button>
+        <button class="btn primary" type="submit" name="mode" value="import">Importovat</button>
+      </div>
+    </form>
+    {% else %}<p>Pro import potřebuješ přiřazenou firmu.</p>{% endif %}
+  </details>
+  <div class="card panel">
+    <h3>Propojené weby Fresh Core</h3>
+    {% if crm_sources %}
+      <div class="table-wrap"><table><thead><tr><th>Web</th><th>Vlastník</th><th>Poslední načtení</th><th>Akce</th></tr></thead><tbody>
+      {% for source in crm_sources %}
+      <tr><td>{{ source.site_url }}{% if source.last_error %}<p class="small muted">{{ source.last_error }}</p>{% endif %}</td>
+      <td>{{ orgs|selectattr('id','equalto',source.organization_id)|map(attribute='name')|first|default('—') }}</td>
+      <td>{{ source.last_synced_at.strftime('%d.%m.%Y %H:%M') if source.last_synced_at else 'Zatím ne' }}</td>
+      <td>
+        <form method="post" action="{{ url_for('crm_sync_source', source_id=source.id) }}" class="ema-inline-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="btn primary" type="submit">Synchronizovat</button>
+        </form>
+        <form method="post" action="{{ url_for('crm_preview_source', source_id=source.id) }}" class="ema-inline-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="btn" type="submit">Náhled</button>
+        </form>
+      </td></tr>{% endfor %}
+      </tbody></table></div>
+    {% else %}<p class="muted">Zatím není připojen žádný WordPress web.</p>{% endif %}
+    {% if crm_admin_org_ids %}
+    <details class="ema-new-inline">
+      <summary>+ Připojit WordPress web</summary>
+      <form method="post" action="{{ url_for('crm_connect_source') }}" class="formstack">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label>Firma – vlastník kontaktů<select name="organization_id" required>
+          {% for o in eligible_orgs %}{% if o.id in crm_admin_org_ids %}<option value="{{ o.id }}">{{ o.name }}</option>{% endif %}{% endfor %}
+        </select></label>
+        <label>Adresa WordPress webu<input name="site_url" type="url" placeholder="https://www.example.cz" required maxlength="250"></label>
+        <label>Fresh Core – existující Accounting READ klíč<input name="accounting_read_key" type="password" required autocomplete="new-password" minlength="32"></label>
+        <button type="submit" class="btn primary">Ověřit a připojit</button>
+      </form>
+      <p class="small muted">Použij účetní čtecí klíč ze správce Fresh Core. Ema ho ukládá šifrovaně; neodesílá žádné e-maily.</p>
+    </details>
+    {% endif %}
+  </div>
+{% elif section == 'tasks' %}
+
     <span class="eyebrow">PLÁNOVÁNÍ</span><h1>Úkoly a termíny</h1>
     <p>Otevřené závazky a termíny napříč přístupnými firmami a projekty. Nejdřív nejbližší termíny.</p>
   {% elif section == 'account' %}
