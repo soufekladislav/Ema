@@ -142,3 +142,63 @@ def test_contact_provenance_is_tenant_scoped_and_idempotent(web_client):
             db.commit()
         assert len(db.scalars(select(Contact).where(Contact.email == "klient@example.cz")).all()) == 2
         assert len(db.scalars(select(ContactOrigin)).all()) == 2
+
+
+
+def test_csv_without_email_is_idempotent_and_source_is_filterable(web_client):
+    client = web_client
+    login(client, "owner")
+    org = client.application.ids["org"]
+    rows = "Jméno;Telefon;Firma\nPan Novák;777444555;Client visible\n"
+    for _ in range(2):
+        response = client.post("/database/import", data={
+            "csrf_token": csrf(client), "organization_id": str(org),
+            "source_name": "Offline akvizice", "mode": "import",
+            "file": (io.BytesIO(rows.encode("utf-8")), "offline.csv")},
+            content_type="multipart/form-data")
+        assert response.status_code == 302
+    with Session(client.application.extensions["ema_engine"]) as db:
+        contacts = db.scalars(select(Contact).where(Contact.name == "Pan Novák")).all()
+        assert len(contacts) == 1
+        origins = db.scalars(select(ContactOrigin).where(
+            ContactOrigin.contact_id == contacts[0].id)).all()
+        assert len(origins) == 1
+        assert origins[0].source_site == "CSV: Offline akvizice"
+        assert origins[0].external_id.startswith("noemail:")
+    assert "Pan Novák" in client.get("/database?kind=csv").get_data(as_text=True)
+
+
+def test_upgrade_backfills_older_csv_metadata_once(web_client):
+    from ema.schema_upgrade import upgrade_schema
+    app = web_client.application
+    org = app.ids["org"]
+    with Session(app.extensions["ema_engine"]) as db:
+        row = Contact(organization_id=org, name="Historická osoba",
+                      email="historic@example.cz",
+                      metadata_json=json.dumps({
+                          "import_source": "csv", "fields": {"zdroj": "LinkedIn 2025"}
+                      }))
+        db.add(row)
+        db.commit()
+        cid = row.id
+    upgrade_schema(app.extensions["ema_engine"])
+    upgrade_schema(app.extensions["ema_engine"])
+    with Session(app.extensions["ema_engine"]) as db:
+        orig = db.scalars(select(ContactOrigin).where(ContactOrigin.contact_id == cid)).all()
+        assert len(orig) == 1
+        assert orig[0].source_site == "CSV: LinkedIn 2025"
+
+
+def test_source_read_requires_database_migration(web_client):
+    from sqlalchemy import text
+    client = web_client
+    login(client, "owner")
+    engine = client.application.extensions["ema_engine"]
+    with engine.begin() as connection:
+        connection.execute(text("DROP TABLE contact_origins"))
+    response = client.get("/database")
+    assert response.status_code == 200
+    assert "upgrade-db" in response.get_data(as_text=True)
+    response = client.post("/database/import", data={
+        "csrf_token": csrf(client), "organization_id": str(client.application.ids["org"])})
+    assert response.status_code == 409
