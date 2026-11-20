@@ -56,7 +56,9 @@ def test_exact_newsletter_dimensions_keep_sender_layout_and_block_scripts():
     assert 'width="620"' in preview.srcdoc
     assert 'width="80%"' in preview.srcdoc
     assert "font-family:Georgia" in preview.srcdoc
-    assert "Poppins" in preview.srcdoc
+    # EMA's interface uses Poppins; a received MIME body keeps its own font.
+    assert "font-family:Georgia" in preview.srcdoc
+    assert "font-family:Poppins" not in preview.srcdoc
     assert "alert(1)" not in preview.srcdoc
     assert "td,th{padding:4px}" not in preview.srcdoc
 
