@@ -331,15 +331,15 @@ def test_crm_filter_uses_50_rows_and_last_page_is_not_fake(web_client):
     first = client.get("/database?q=Testradky").get_data(as_text=True)
     second = client.get("/database?q=Testradky&page=2").get_data(as_text=True)
     third = client.get("/database?q=Testradky&page=3").get_data(as_text=True)
-    assert first.count("pager") == 50
+    assert first.count("@example.test</td>") == 50
     assert "Testradky050" in first
     assert "Testradky051" not in first
     assert "Další kontakty" in first
-    assert second.count("pager") == 50
+    assert second.count("@example.test</td>") == 50
     assert "Testradky051" in second
     assert "Testradky101" not in second
     assert "Další kontakty" in second
-    assert third.count("pager") == 2
+    assert third.count("@example.test</td>") == 2
     assert "Testradky101" in third
     assert "Další kontakty" not in third
 
