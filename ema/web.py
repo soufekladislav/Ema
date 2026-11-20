@@ -1408,7 +1408,7 @@ def create_app(test_config=None):
             ids = [int(requested_org)]
         q = (request.args.get("q") or "").strip()[:120]
         kind = (request.args.get("kind") or "").strip()[:40]
-        site = (request.args.get("site") or "").strip()[:190]
+        site = (request.args.get("site") or "").strip()[:250]
         allowed_kinds = {"csv", "users", "elementor_submissions"}
         if kind and kind not in allowed_kinds:
             abort(400)
@@ -1436,10 +1436,14 @@ def create_app(test_config=None):
             .order_by(Company.name).limit(250)).all() if ids else []
         sources = g.db.scalars(select(FreshCoreSource).where(
             FreshCoreSource.organization_id.in_(ids)).order_by(FreshCoreSource.site_url)).all() if ids else []
+        visible_contact_ids = [c.id for c in contacts]
         origins = g.db.scalars(select(ContactOrigin).where(
-            ContactOrigin.organization_id.in_(ids)).order_by(ContactOrigin.source_site)
-            .limit(10000)).all() if ids else []
-        sites = sorted({o.source_site for o in origins})
+            ContactOrigin.organization_id.in_(ids),
+            ContactOrigin.contact_id.in_(visible_contact_ids)).order_by(
+                ContactOrigin.source_site)).all() if visible_contact_ids else []
+        sites = g.db.scalars(select(ContactOrigin.source_site).where(
+            ContactOrigin.organization_id.in_(ids)).distinct()
+            .order_by(ContactOrigin.source_site).limit(250)).all() if ids else []
         by_contact = {}
         for origin in origins:
             by_contact.setdefault(origin.contact_id, []).append(origin)
