@@ -96,7 +96,7 @@ class ContactOrigin(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
     contact_id: Mapped[int] = mapped_column(ForeignKey("contacts.id", ondelete="CASCADE"), nullable=False)
-    source_site: Mapped[str] = mapped_column(String(190), nullable=False)
+    source_site: Mapped[str] = mapped_column(String(250), nullable=False)
     source_kind: Mapped[str] = mapped_column(String(40), nullable=False)
     external_id: Mapped[str] = mapped_column(String(190), nullable=False)
     first_seen_at: Mapped[datetime] = mapped_column(DateTime, default=now, nullable=False)
