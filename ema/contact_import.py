@@ -35,7 +35,7 @@ PHONE_KEYS = ("telefon", "phone", "mobile", "mobil", "tel", "mobile phone",
 COMPANY_KEYS = ("firma", "company", "organization", "spolecnost",
                 "organization 1 name", "company name", "business name")
 KNOWN_KEYS = set(NAME_KEYS + FIRST_KEYS + LAST_KEYS + EMAIL_KEYS + PHONE_KEYS + COMPANY_KEYS)
-EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+EMAIL_RE = re.compile(r"^[^\s@,;:<>()\[\]]+@[^\s@,;:<>()\[\]]+\.[^\s@,;:<>()\[\]]+$")
 
 
 def analyze_contacts(data):
